@@ -1,7 +1,7 @@
 import type { Branch, FileNode, FileTree, Theme } from '../types'
 import { stronger } from './icons'
 
-export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; isLink: boolean }
+export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; size: number; isLink: boolean }
 export type Row = { node: FileNode; depth: number; open: boolean }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -24,6 +24,8 @@ export function emptyTree(root: string): FileTree {
     selected: '',
     query: '',
     showHidden: true,
+    showSize: false,
+    dirSizes: {},
     git: {},
     diff: {},
     ignored: [],
@@ -101,6 +103,7 @@ export function toNodes(dir: string, list: Entry[]): FileNode[] {
       kind: e.isLink ? ('link' as const) : e.kind === 'dir' ? ('dir' as const) : ('file' as const),
       hidden: e.name.startsWith('.'),
       mtime: e.mtimeMs,
+      size: e.size,
       loaded: false,
     }))
     .sort((a, b) => (a.kind === 'dir' ? 0 : 1) - (b.kind === 'dir' ? 0 : 1) || collator.compare(a.name, b.name))
@@ -311,4 +314,17 @@ export function stamp(ms: number): string {
   const d = new Date(ms)
   const p = (v: number) => String(v).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+export function formatSize(bytes: number): string {
+  if (bytes < 0) return '?'
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['K', 'M', 'G', 'T']
+  let v = bytes / 1024
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v < 100 ? v.toFixed(1) : Math.round(v)} ${units[i]}`
 }

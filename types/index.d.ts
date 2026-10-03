@@ -5,6 +5,7 @@ export type FileNode = {
   kind: 'dir' | 'file' | 'link'
   hidden: boolean
   mtime: number
+  size: number
   loaded: boolean
 }
 
@@ -35,6 +36,8 @@ export type FileTree = {
   selected: string
   query: string
   showHidden: boolean
+  showSize: boolean
+  dirSizes: Record<string, number>
   git: Record<string, string>
   diff: Record<string, [number, number]>
   ignored: string[]
