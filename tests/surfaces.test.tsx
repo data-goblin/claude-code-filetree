@@ -16,6 +16,7 @@ type World = {
   heads?: string[]
   tool?: (e: any) => unknown
   find?: string
+  theme?: { toml: string; mtimeMs: number }
 }
 type Ran = string[][]
 const opens: unknown[] = []
@@ -37,7 +38,9 @@ function world(on: any, w: World, ran: Ran) {
     ran.push(['toast', String(e.text ?? e.message ?? JSON.stringify(e))])
     return { value: undefined }
   })
-  on('fs.read', () => {
+  const isTheme = (p: string) => p.endsWith('/.local/state/omarchy/current/theme/colors.toml')
+  on('fs.read', (_$: any, e: any) => {
+    if (w.theme && isTheme(e.path)) return { value: w.theme.toml }
     throw new Error('no theme file')
   })
   const norm = (p: string) => p.replace(/\\/g, '/').replace(/^.*?(?=[A-Za-z]:\/)/, '')
@@ -54,6 +57,11 @@ function world(on: any, w: World, ran: Ran) {
     return { value }
   })
   on('fs.stat', (_$: any, e: any) => {
+    if (isTheme(e.path)) {
+      ran.push(['theme-stat'])
+      if (!w.theme) throw new Error(`ENOENT ${e.path}`)
+      return { value: { kind: 'file', size: w.theme.toml.length, mtimeMs: w.theme.mtimeMs, isLink: false } }
+    }
     const p = norm(e.path)
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
@@ -663,5 +671,40 @@ test('a written file whose name holds a newline still shimmers', { timeoutMs: 20
   await clock.settle()
   expect(ran.find(a => a[0] === 'find')).toContain('-print0')
   expect(await texts(ui)).toContain(shimmer('a\nb.ts', 'orange'))
+  await ui.unmount()
+})
+
+test('the pane takes its background from the Omarchy theme and follows a theme switch', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', theme: { toml: 'background = "#1e1e2e"\ndark_background = "#161622"\n', mtimeMs: 1 } }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await texts(ui)).toContain('"backgroundColor":"#161622"')
+  w.theme = { toml: 'background = "#fafafa"\n', mtimeMs: 2 }
+  await clock.advance(2_000)
+  await clock.settle()
+  const shown = await texts(ui)
+  expect(shown).toContain('"backgroundColor":"#fafafa"')
+  expect(shown).not.toContain('#161622')
+  await ui.unmount()
+})
+
+test('without an Omarchy theme the pane keeps the terminal background and nothing polls', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const stats = ran.filter(a => a[0] === 'theme-stat').length
+  await clock.advance(10_000)
+  await clock.settle()
+  expect(ran.filter(a => a[0] === 'theme-stat').length).toBe(stats)
+  expect(await texts(ui)).not.toContain('"backgroundColor":"#')
   await ui.unmount()
 })

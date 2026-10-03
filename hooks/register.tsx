@@ -47,6 +47,7 @@ const ACTIVITY_TTL_MS = 45_000
 const ADD_COLOR = '#98c379'
 const DEL_COLOR = '#e06c75'
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
+const THEME_POLL_MS = 2000
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | head -n1 | cut -d: -f1); ' +
   'else f=$(ls "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd* 2>/dev/null | head -n1); fi; ' +
@@ -59,6 +60,8 @@ const PRUNE = ['.git', 'node_modules', 'target', '.venv', '__pycache__', 'dist',
 const HOME_PRUNE = ['Library', 'AppData', '.Trash']
 
 let blink: Timer | null = null
+let themePoll: Timer | null = null
+let themeMtime: number | null = null
 let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
@@ -820,11 +823,19 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
   } else await openFile($, n.id)
 }
 
+// Re-reads the theme only when colors.toml changed, so polling it stays cheap and an Omarchy theme switch shows up
 async function loadTheme($: EngineInterface): Promise<void> {
+  const path = `${(await $.env.get('HOME')) ?? ''}/${THEME_FILE}`
   try {
-    await $.state.set(THEME, parseTheme(String(await $.fs.read(`${(await $.env.get('HOME')) ?? ''}/${THEME_FILE}`))))
+    const stat = await $.fs.stat(path)
+    if (stat.kind !== 'file') throw new Error('no theme file')
+    if (stat.mtimeMs === themeMtime) return
+    await $.state.set(THEME, parseTheme(String(await $.fs.read(path))))
+    themeMtime = stat.mtimeMs
   } catch {
+    if (themeMtime === 0) return
     await $.state.set(THEME, DEFAULT_THEME)
+    themeMtime = 0
   }
 }
 
@@ -853,6 +864,9 @@ export const register: Register = (on, options) => {
         noNerd = true
       }
       await loadTheme($)
+      themePoll?.cancel()
+      // Only Omarchy users have a theme file to follow; everyone else keeps a single read
+      themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
@@ -1208,7 +1222,7 @@ export const register: Register = (on, options) => {
     }
 
     return (
-      <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
+      <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
         <Box flexDirection="row">
           <Text bold color={theme.accent} wrap="truncate-start">
             {header}

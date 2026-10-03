@@ -60,6 +60,7 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 - Click to select, arrow keys to move through the tree
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
+- On Omarchy, the pane takes its colors and background from the current theme and follows theme switches
 
 ### Resizing the pane
 

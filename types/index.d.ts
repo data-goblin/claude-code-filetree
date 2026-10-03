@@ -56,6 +56,7 @@ export type Theme = {
   muted: string
   urgent: string
   selection: string
+  bg: string
 }
 
 declare module 'claude-code' {
