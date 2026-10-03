@@ -56,6 +56,7 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 
   <img src="media/filetree-ask.gif" alt="Selecting config.yaml in the tree and asking Claude what it changed there" width="800">
 
+- File and folder sizes: the `Σ` header button swaps the date column for sizes; folders show their disk usage (`du`, or a summed listing on Windows), worked out in the background for the rows on screen and refreshed after Claude writes
 - Double-click a file to open it in its default app
 - Click to select, arrow keys to move through the tree
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
@@ -76,6 +77,7 @@ All settings are in `/config` under filetree.
 
 - **Claude activity:** what shimmers: `reads and writes` (default), `writes`, `reads` or `none`. Git status, line counts and the git status at the bottom always show.
 - **Follow Claude:** `on` (default) scrolls the tree to what Claude reads, writes or commits; `off` keeps the view where you put it, and highlights still show.
+- **Right column:** `date` (default) or `size`; what the right column shows when a session starts. The `Σ` button in the header toggles it.
 - **Glyphs:** `auto` (default) uses Nerd Font icons when a Nerd Font is installed and your terminal started after it was installed, plain Unicode in the desktop app, and Nerd Font over SSH. `nerd` or `plain` forces one.
 
 ## herdr

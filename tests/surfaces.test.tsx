@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { ancestorsOf, replaceChildren, toNodes } from '../hooks/tree'
+import { ancestorsOf, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
   os: 'darwin' | 'linux' | 'win32'
@@ -17,6 +17,7 @@ type World = {
   tool?: (e: any) => unknown
   find?: string
   theme?: { toml: string; mtimeMs: number }
+  du?: Record<string, string>
 }
 type Ran = string[][]
 const opens: unknown[] = []
@@ -77,6 +78,7 @@ function world(on: any, w: World, ran: Ran) {
     const exit = w.exits?.[argv[0] ?? '']
     if (exit) return { value: { exitCode: exit[0], stdout: '', stderr: exit[1], isStdoutTruncated: false, isStderrTruncated: false } }
     if (argv[0] === 'find' && w.find !== undefined) return ok(w.find)
+    if (argv[0] === 'du') return ok(w.du?.[argv.at(-1) ?? ''] ?? '')
     if (argv[0] === 'uname') return ok(w.os === 'darwin' ? 'Darwin\n' : 'Linux\n')
     if (argv[0] === 'sh') return ok('missing\n')
     if (argv[0] === 'git') {
@@ -106,6 +108,7 @@ async function texts(ui: any): Promise<string> {
   return JSON.stringify(await ui.drawn()) + rows
 }
 
+const STAMP = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/
 const NERD = /[\u{e000}-\u{f8ff}\u{f0000}-\u{fffff}]/u
 
 test('macOS Claude Code app: desktop pane draws, selects, opens with open', { timeoutMs: 20_000 }, async ($, on) => {
@@ -706,5 +709,65 @@ test('without an Omarchy theme the pane keeps the terminal background and nothin
   await clock.settle()
   expect(ran.filter(a => a[0] === 'theme-stat').length).toBe(stats)
   expect(await texts(ui)).not.toContain('"backgroundColor":"#')
+  await ui.unmount()
+})
+
+test('formatSize: bytes, binary units, one decimal under 100, ? for unknown', async () => {
+  expect(formatSize(0)).toBe('0 B')
+  expect(formatSize(1023)).toBe('1023 B')
+  expect(formatSize(1536)).toBe('1.5 K')
+  expect(formatSize(412 * 1024)).toBe('412 K')
+  expect(formatSize(6.2 * 1024 * 1024)).toBe('6.2 M')
+  expect(formatSize(-1)).toBe('?')
+})
+
+test('size column: the toggle swaps dates for sizes, folders are sized with du, an edit re-sizes its folders', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root,
+    dirs: { [root]: [['src', 'dir'], ['README.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    status: '## main\0', numstat: '',
+    du: { [`${root}/src`]: `2048\t${root}/src\n` },
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await texts(ui)).toMatch(STAMP)
+  expect(ran.some(a => a[0] === 'du')).toBe(false)
+  await ui.press({ key: 'size' })
+  await clock.settle()
+  const sized = await texts(ui)
+  expect(sized).not.toMatch(STAMP)
+  expect(sized).toContain(' 1 B')
+  expect(sized).toContain(' 2.0 M')
+  expect(ran).toContainEqual(['du', '-skxH', `${root}/src`])
+  const before = ran.filter(a => a[0] === 'du').length
+  await $.tool.call({ tool: 'Edit', file_path: `${root}/src/a.ts`, old_string: 'a', new_string: 'b' } as any)
+  await clock.settle()
+  await ui.press({ key: 'refresh' })
+  await clock.settle()
+  expect(ran.filter(a => a[0] === 'du').length).toBeGreaterThan(before)
+  await ui.press({ key: 'size' })
+  await clock.settle()
+  expect(await texts(ui)).toMatch(STAMP)
+  await ui.unmount()
+})
+
+test('size column on Windows sums file sizes with fs.list instead of du', { timeoutMs: 20_000, options: { column: 'size' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = 'C:/Users/k/proj'
+  const clock = world(on, {
+    os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k' }, cwd: root, top: '',
+    dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file'], ['b.ts', 'file'], ['lib', 'dir']], [`${root}/src/lib`]: [['c.ts', 'file']] },
+    status: '', numstat: '',
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await texts(ui)).toContain(' 3 B')
+  expect(ran.some(a => a[0] === 'du')).toBe(false)
   await ui.unmount()
 })
