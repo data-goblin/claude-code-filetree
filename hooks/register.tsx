@@ -10,6 +10,7 @@ import {
   DEFAULT_THEME,
   dirname,
   emptyTree,
+  formatSize,
   inside,
   isAbsolute,
   join,
@@ -58,6 +59,9 @@ const FONT_SCRIPT =
   'p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " "); done; echo ok'
 const PRUNE = ['.git', 'node_modules', 'target', '.venv', '__pycache__', 'dist', '.next']
 const HOME_PRUNE = ['Library', 'AppData', '.Trash']
+const SIZE_TIMEOUT_MS = 15_000
+const SIZE_JOBS = 2
+const SIZE_WALK_LIMIT = 50_000
 
 let blink: Timer | null = null
 let themePoll: Timer | null = null
@@ -87,6 +91,11 @@ let dirty: { root: string; files: Record<string, Change> } = { root: '', files: 
 let markId = 0
 let listSeq = 0
 let lastRoot = ''
+let sizeDefault = false
+let sizeEpoch = 0
+let sizeActive = 0
+let sizeQueue: string[] = []
+const sizing = new Set<string>()
 const listLatest = new Map<string, number>()
 const unreadable = new Set<string>()
 const background = new Map<string, Background>()
@@ -143,14 +152,14 @@ async function list($: EngineInterface, dir: string): Promise<FileNode[] | null>
     const entries = await $.fs.list(dir)
     const resolved = await Promise.all(
       entries.map(async e => {
-        if (!e.isLink) return { name: e.name, kind: e.kind, mtimeMs: e.mtimeMs, isLink: false }
+        if (!e.isLink) return { name: e.name, kind: e.kind, mtimeMs: e.mtimeMs, size: e.size, isLink: false }
         try {
           const target = await $.fs.stat(join(dir, e.name))
           return target.kind === 'dir'
-            ? { name: e.name, kind: 'dir' as const, mtimeMs: target.mtimeMs, isLink: false }
-            : { name: e.name, kind: 'file' as const, mtimeMs: target.mtimeMs, isLink: true }
+            ? { name: e.name, kind: 'dir' as const, mtimeMs: target.mtimeMs, size: 0, isLink: false }
+            : { name: e.name, kind: 'file' as const, mtimeMs: target.mtimeMs, size: target.size, isLink: true }
         } catch {
-          return { name: e.name, kind: 'other' as const, mtimeMs: 0, isLink: true }
+          return { name: e.name, kind: 'other' as const, mtimeMs: 0, size: 0, isLink: true }
         }
       }),
     )
@@ -252,13 +261,15 @@ function refreshGit($: EngineInterface): Promise<void> {
 }
 
 async function reset($: EngineInterface, root: string, focus = false): Promise<void> {
-  const keepHidden = (await get($)).showHidden
+  const prev = await get($)
   generation += 1
   blink?.cancel()
   blink = null
   lastRoot = root
   searchIndex = null
-  await put($, () => ({ ...emptyTree(root), showHidden: keepHidden }))
+  sizeEpoch += 1
+  sizeQueue = []
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, showSize: prev.root ? prev.showSize : sizeDefault }))
   const title = `Files: ${root.split('/').pop() || root}`
   if (focus) await $.ui.open({ id: PANE, title, focus: true })
   else if (!noDock) await $.ui.open({ id: PANE, title })
@@ -347,6 +358,75 @@ async function sinceNow($: EngineInterface, writes: boolean): Promise<Since> {
   } catch {
     return { ms, mark: '', os }
   }
+}
+
+async function walkSize($: EngineInterface, dir: string): Promise<number> {
+  let total = 0
+  let seen = 0
+  let level = [dir]
+  while (level.length) {
+    const next: string[] = []
+    for (const d of level) {
+      let entries
+      try {
+        entries = await $.fs.list(d)
+      } catch {
+        continue
+      }
+      for (const e of entries) {
+        if (++seen > SIZE_WALK_LIMIT) return -1
+        if (e.kind === 'dir') next.push(join(d, e.name))
+        else if (e.kind === 'file') total += e.size
+      }
+    }
+    level = next
+  }
+  return total
+}
+
+async function dirSize($: EngineInterface, dir: string): Promise<number> {
+  if (rootOfDisk(dir)) return -1
+  if ((await osName($)) === 'win32') return walkSize($, dir)
+  try {
+    const run = await $.process.run(['du', '-skxH', dir], { timeoutMs: SIZE_TIMEOUT_MS })
+    const kb = Number(run.stdout.trim().split(/\s/)[0] || NaN)
+    return Number.isFinite(kb) ? kb * 1024 : -1
+  } catch {
+    return -1
+  }
+}
+
+function pumpSizes($: EngineInterface): void {
+  while (sizeActive < SIZE_JOBS && sizeQueue.length) {
+    const dir = sizeQueue.shift() ?? ''
+    const epoch = sizeEpoch
+    sizing.add(dir)
+    sizeActive += 1
+    void dirSize($, dir)
+      .then(bytes => (epoch === sizeEpoch ? patch($, cur => (inside(cur.root, dir) ? { dirSizes: { ...cur.dirSizes, [dir]: bytes } } : {})) : undefined))
+      .catch(() => undefined)
+      .finally(() => {
+        sizing.delete(dir)
+        sizeActive -= 1
+        pumpSizes($)
+      })
+  }
+}
+
+function wantSizes($: EngineInterface, dirs: string[]): void {
+  for (const dir of dirs) if (!sizing.has(dir) && !sizeQueue.includes(dir)) sizeQueue.push(dir)
+  pumpSizes($)
+}
+
+async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
+  sizeEpoch += 1
+  sizeQueue = []
+  await patch($, cur => {
+    if (!paths) return { dirSizes: {} }
+    const keep: Record<string, number> = {}
+    for (const [dir, bytes] of Object.entries(cur.dirSizes)) if (!paths.some(p => inside(dir, p))) keep[dir] = bytes
+    return { dirSizes: keep }
+  })
 }
 
 function openDirs(t: FileTree): string[] {
@@ -590,7 +670,10 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
   else if (!t.top && (await exists($, join(t.root, '.git')))) await detectRepo($)
   const probed = await get($)
   if (probed.top && (writes || probed.top !== t.top)) await refreshGit($)
-  if (writes) searchIndex = null
+  if (writes) {
+    searchIndex = null
+    await staleSizes($)
+  }
   const fresh = await get($)
   const ignored = new Set(fresh.ignored)
   const tones: Record<string, string> = {}
@@ -668,6 +751,7 @@ async function touched($: EngineInterface, paths: string[], tone: string, show: 
   if (within.length === 0) return
   if (tone !== 'purple') {
     searchIndex = null
+    await staleSizes($, within)
     await revealPaths($, within.map(dirname))
     await loadDirs($, [...new Set(within.map(dirname))].filter(d => inside(t.root, d)))
     await refreshGit($)
@@ -848,6 +932,7 @@ export const register: Register = (on, options) => {
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
+  sizeDefault = options?.column === 'size'
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
     const windows = (await $.env.get('OS')) === 'Windows_NT'
@@ -1104,6 +1189,7 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
+    if (t.showSize) wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
     const countSegs = (c: [number, number, number] | undefined): Seg[] => {
       if (!c) return []
@@ -1128,7 +1214,19 @@ export const register: Register = (on, options) => {
       const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
       const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const loc = t.diff[n.id]
-      const meta = loc ? '' : n.kind === 'file' ? stamp(n.mtime) : ''
+      const meta = t.showSize
+        ? n.kind === 'dir'
+          ? n.id in t.dirSizes
+            ? formatSize(t.dirSizes[n.id] ?? -1)
+            : '…'
+          : n.kind === 'file' || (n.kind === 'link' && n.size > 0)
+            ? formatSize(n.size)
+            : ''
+        : loc
+          ? ''
+          : n.kind === 'file'
+            ? stamp(n.mtime)
+            : ''
       const locText = loc ? `${loc[0] ? ` +${loc[0]}` : ''}${loc[1] ? ` -${loc[1]}` : ''}` : ''
       const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
       const badge = dirCounts.length ? '' : status ? ` ${status}` : isIgnored ? (unicode ? ' ⊘' : ' \u{f05e}') : '  '
@@ -1260,6 +1358,7 @@ export const register: Register = (on, options) => {
                 void (async () => {
                   const cur = await get($)
                   searchIndex = null
+                  await staleSizes($)
                   await loadDirs($, [cur.root, ...cur.expanded])
                   await detectRepo($)
                   await refreshGit($)
@@ -1273,6 +1372,13 @@ export const register: Register = (on, options) => {
               dimColor={!t.showHidden}
               label={unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}'}
               onPress={() => void patch($, cur => ({ showHidden: !cur.showHidden }))}
+            />
+            <Button
+              key="size"
+              plain
+              dimColor={!t.showSize}
+              label={unicode ? 'Σ' : '\u{f02ca}'}
+              onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
             />
             <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))} />
             {t.selected && (

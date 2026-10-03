@@ -46,6 +46,16 @@
         "on",
         "off"
       ]
+    },
+    "column": {
+      "type": "string",
+      "title": "Right column",
+      "description": "What the right column shows by default: date (last modified) or size (files in bytes, folders as disk usage computed in the background). The header button toggles it.",
+      "default": "date",
+      "options": [
+        "date",
+        "size"
+      ]
     }
   },
   "license": "MIT"
