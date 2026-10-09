@@ -955,7 +955,8 @@ async function openFile($: EngineInterface, path: string, external = false): Pro
   const os = await osName($)
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
   const custom = external ? null : openWithCommand(openWithSetting, native(path), native(dirname(path)))
-  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
+  const editor = custom || !(await $.env.get('TMUX')) ? undefined : (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi'
+  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path, editor)
   try {
     const run = await $.process.run(argv, init)
     if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
