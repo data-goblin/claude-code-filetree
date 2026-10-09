@@ -56,6 +56,12 @@
         "date",
         "size"
       ]
+    },
+    "open": {
+      "type": "string",
+      "title": "Open with",
+      "description": "What a double-click or Enter does with a file. Empty: the default app. preview: show it in the pane (left goes back). Anything else is a command run instead: {path} is the file and {dir} its folder; without {path} the path goes last. Words split on spaces, quotes keep a word whole, and no shell runs it.",
+      "default": ""
     }
   },
   "license": "MIT"

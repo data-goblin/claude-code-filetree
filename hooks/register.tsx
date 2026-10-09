@@ -1,5 +1,5 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
-import { openCommand } from './open'
+import { openCommand, openWithCommand } from './open'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
@@ -71,6 +71,9 @@ let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
+let openWithSetting = ''
+let previewed: { path: string; text: string; note: string } | null = null
+let previewRows = 20
 let follow = true
 let followClaude = true
 let scanning: Promise<void> | null = null
@@ -870,8 +873,70 @@ async function finePointerOk($: EngineInterface): Promise<boolean> {
   }
 }
 
-async function openFile($: EngineInterface, path: string): Promise<void> {
-  const { argv, init } = openCommand(await osName($), path)
+const PREVIEW_CHARS = 90_000
+
+async function loadPreview($: EngineInterface, path: string): Promise<void> {
+  let text = ''
+  let note = ''
+  try {
+    const stat = await $.fs.stat(path)
+    if (stat.size > 4_000_000) note = `${formatSize(stat.size)}, too large to preview`
+    else {
+      text = await $.fs.read(path)
+      if (text.slice(0, 8000).includes('\0')) {
+        text = ''
+        note = `binary file, ${formatSize(stat.size)}`
+      }
+    }
+  } catch (err) {
+    note = `could not read: ${String((err as Error)?.message ?? err).split('\n')[0]}`
+  }
+  text = text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
+  if (text.length > PREVIEW_CHARS) {
+    note = `first ${PREVIEW_CHARS.toLocaleString('en')} of ${text.length.toLocaleString('en')} characters`
+    text = text.slice(0, text.lastIndexOf('\n', PREVIEW_CHARS) + 1 || PREVIEW_CHARS)
+  }
+  previewed = { path, text, note }
+}
+
+async function showPreview($: EngineInterface, path: string): Promise<void> {
+  await loadPreview($, path)
+  await patch($, () => ({ preview: path, previewTop: 0, selected: path }))
+}
+
+async function closePreview($: EngineInterface): Promise<void> {
+  await patch($, () => ({ preview: '', previewTop: 0 }))
+}
+
+async function scrollPreview($: EngineInterface, by: number): Promise<void> {
+  const t = await get($)
+  const last = (previewed?.text.split('\n').length ?? 1) - 1
+  const top = Math.max(0, Math.min(last, t.previewTop + by))
+  if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
+}
+
+function previewLines(text: string, top: number, rows: number, markdown: boolean): { text: string; top: number } {
+  const lines = text.split('\n')
+  const from = Math.max(0, Math.min(top, lines.length - 1))
+  let shown = lines.slice(from, from + rows)
+  if (markdown) {
+    // Reopen a code fence the window starts inside, so the rest is not read as prose.
+    let fence = ''
+    for (const line of lines.slice(0, from)) {
+      const m = /^\s*(```+|~~~+)/.exec(line)
+      if (m) fence = fence ? '' : (m[1] ?? '')
+    }
+    if (fence) shown = [fence, ...shown]
+  }
+  return { text: shown.join('\n'), top: from }
+}
+
+async function openFile($: EngineInterface, path: string, external = false): Promise<void> {
+  if (!external && openWithSetting.trim() === 'preview') return showPreview($, path)
+  const os = await osName($)
+  const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
+  const custom = external ? null : openWithCommand(openWithSetting, native(path), native(dirname(path)))
+  const { argv, init } = custom ? { argv: custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
   try {
     const run = await $.process.run(argv, init)
     if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
@@ -933,6 +998,7 @@ export const register: Register = (on, options) => {
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
   sizeDefault = options?.column === 'size'
+  openWithSetting = typeof options?.open === 'string' ? options.open : ''
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
     const windows = (await $.env.get('OS')) === 'Windows_NT'
@@ -1052,6 +1118,13 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (typeof data.key !== 'string') return {}
+    if (t.preview) {
+      const page = Math.max(1, previewRows - 2)
+      const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
+      if (data.key === 'left' || data.key === 'h') await closePreview($)
+      else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
+      return {}
+    }
     const rows = visibleRows(t)
     const at = rows.findIndex(r => r.node.id === t.cursor)
     const cur = rows[at]?.node
@@ -1109,6 +1182,10 @@ export const register: Register = (on, options) => {
 
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const t = await get($)
+    if (t.preview) {
+      await scrollPreview($, Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
+      return {}
+    }
     const to = Math.max(0, Math.min(view.max, (t.scroll ?? view.from) + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
     if (to !== t.scroll) await patch($, () => ({ scroll: to }))
     return {}
@@ -1159,6 +1236,32 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
     const theme: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    if (t.preview) {
+      if (previewed?.path !== t.preview) await loadPreview($, t.preview)
+      const p = previewed
+      const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
+      previewRows = Math.max(4, e.props.scroll.bodyRows - (p?.note ? 2 : 1))
+      const win = previewLines(p?.text ?? '', t.previewTop, previewRows, markdown)
+      const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row">
+            <Button key="back" plain label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
+            <Text> </Text>
+            <Box flexShrink={1} flexGrow={1}>
+              <Text bold wrap="truncate-start">{name}</Text>
+            </Box>
+            <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
+          </Box>
+          {p?.note ? <Text dimColor>{p.note}</Text> : null}
+          <Client
+            key="rows"
+            module="./rows.tsx"
+            props={{ rows: [], active: '', activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+          />
+        </Box>
+      )
+    }
     const now = await $.clock.now()
     const live = (await activities($)).filter(a => now - a.at < (a.state === 'running' ? RUNNING_MAX_MS : ACTIVITY_TTL_MS))
     const latest = [...live].reverse().find(a => a.state === 'running') ?? live[live.length - 1]

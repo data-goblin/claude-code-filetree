@@ -51,6 +51,8 @@ export type FileTree = {
   flashOn: boolean
   flashTones: Record<string, string>
   scroll: number | null
+  preview: string
+  previewTop: number
 }
 
 export type Theme = {
