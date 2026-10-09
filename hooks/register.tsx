@@ -84,6 +84,7 @@ let searchIndex: { root: string; paths: Promise<string[]> } | null = null
 let activityId = 0
 let pointer = true
 let view = { from: 0, max: 0 }
+let nativeScroll = false
 let lastSync = 0
 let noDock = false
 let home = ''
@@ -1107,7 +1108,8 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (nativeScroll) return next(e)
     const t = await get($)
     const to = Math.max(0, Math.min(view.max, (t.scroll ?? view.from) + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
     if (to !== t.scroll) await patch($, () => ({ scroll: to }))
@@ -1169,14 +1171,17 @@ export const register: Register = (on, options) => {
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
     const fixed = 2 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
-    const room = Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
+    // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
+    // there it draws every row and lets the engine scroll the body.
+    nativeScroll = e.surface === 'desktop'
+    const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
     const at = Math.max(0, rows.findIndex(r => r.node.id === focus))
     const lit = followClaude && t.flashOn ? rows.findIndex(r => isLit(r.node.id)) : -1
     const cap = Math.max(1, Math.floor(room / 3))
     let from = Math.max(0, Math.min(lit >= 0 && at - lit < room - 2 ? Math.max(0, lit - 1) : at - Math.floor(room / 2), rows.length - room))
-    let pinned = followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
+    let pinned = !nativeScroll && followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
     if (pinned.length) {
       const rest = Math.max(3, room - pinned.length)
       from = Math.max(0, Math.min(at - Math.floor(rest / 2), rows.length - rest))
@@ -1261,7 +1266,7 @@ export const register: Register = (on, options) => {
     ]
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
-      rows.length > shown.length + pinned.length
+      !nativeScroll && rows.length > shown.length + pinned.length
         ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
         : undefined
 
