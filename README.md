@@ -16,7 +16,7 @@
 </p>
 
 > [!NOTE]
-> filetree is a Claude Code **mod** and needs **Claude Code 2.1.287+**. It shows in the right sidebar, which needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
+> filetree is a Claude Code **mod** and needs **Claude Code 2.1.287+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own, and `/filetree` reopens it there after you close it. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
 
 ---
 
