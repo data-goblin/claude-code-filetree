@@ -86,7 +86,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   if (props.preview) {
     const { Markdown, Code } = surface.elements
     const p = props.preview
-    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} />
+    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} wrap="truncate-end" />
   }
   const frames = props.spinner?.length ? props.spinner : FRAMES
   const draw = (s: Seg) => {

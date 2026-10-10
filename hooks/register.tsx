@@ -1,5 +1,5 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
-import { openCommand, openWithCommand } from './open'
+import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
@@ -754,6 +754,7 @@ function scheduleScan($: EngineInterface, job: Job): void {
 }
 
 async function touched($: EngineInterface, paths: string[], tone: string, show: boolean): Promise<void> {
+  if (tone !== 'purple' && previewed && paths.map(posix).includes(previewed.path)) previewed = null
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
@@ -875,6 +876,16 @@ async function finePointerOk($: EngineInterface): Promise<boolean> {
 }
 
 const PREVIEW_CHARS = 90_000
+const PREVIEW_LINE = 2_000
+
+function fitSerialized(lines: string[], max: number): string[] {
+  let size = 0
+  for (let i = 0; i < lines.length; i++) {
+    size += JSON.stringify(lines[i]).length
+    if (size > max) return lines.slice(0, i)
+  }
+  return lines
+}
 
 async function loadPreview($: EngineInterface, path: string): Promise<void> {
   let text = ''
@@ -892,12 +903,13 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   } catch (err) {
     note = `could not read: ${String((err as Error)?.message ?? err).split('\n')[0]}`
   }
-  text = text.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '')
-  if (text.length > PREVIEW_CHARS) {
-    note = `first ${PREVIEW_CHARS.toLocaleString('en')} of ${text.length.toLocaleString('en')} characters`
-    text = text.slice(0, text.lastIndexOf('\n', PREVIEW_CHARS) + 1 || PREVIEW_CHARS)
-  }
-  previewed = { path, text, note }
+  const total = text.length
+  let lines = text.slice(0, PREVIEW_CHARS).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').split('\n')
+  if (total > PREVIEW_CHARS && lines.length > 1) lines.pop()
+  lines = lines.map(l => (l.length > PREVIEW_LINE ? `${l.slice(0, PREVIEW_LINE)}…` : l))
+  const fit = fitSerialized(lines, PREVIEW_CHARS)
+  if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
+  previewed = { path, text: fit.join('\n'), note }
 }
 
 async function showPreview($: EngineInterface, path: string): Promise<void> {
@@ -911,7 +923,7 @@ async function closePreview($: EngineInterface): Promise<void> {
 
 async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   const t = await get($)
-  const last = (previewed?.text.split('\n').length ?? 1) - 1
+  const last = Math.max(0, (previewed?.text.split('\n').length ?? 1) - previewRows)
   const top = Math.max(0, Math.min(last, t.previewTop + by))
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
@@ -923,11 +935,17 @@ function previewLines(text: string, top: number, rows: number, markdown: boolean
   if (markdown) {
     // Reopen a code fence the window starts inside, so the rest is not read as prose.
     let fence = ''
+    let opener = ''
     for (const line of lines.slice(0, from)) {
-      const m = /^\s*(```+|~~~+)/.exec(line)
-      if (m) fence = fence ? '' : (m[1] ?? '')
+      const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+      if (!m) continue
+      const mark = m[1] ?? ''
+      if (!fence) {
+        fence = mark
+        opener = line.trimStart()
+      } else if (mark[0] === fence[0] && mark.length >= fence.length && !(m[2] ?? '').trim()) fence = ''
     }
-    if (fence) shown = [fence, ...shown]
+    if (fence) shown = [opener, ...shown]
   }
   return { text: shown.join('\n'), top: from }
 }
@@ -937,12 +955,12 @@ async function openFile($: EngineInterface, path: string, external = false): Pro
   const os = await osName($)
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
   const custom = external ? null : openWithCommand(openWithSetting, native(path), native(dirname(path)))
-  const { argv, init } = custom ? { argv: custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
+  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
   try {
     const run = await $.process.run(argv, init)
-    if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
+    if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
   } catch {
-    $.ui.toast(`could not open ${path} with ${argv[0]}`)
+    $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}`)
   }
 }
 
@@ -1019,6 +1037,7 @@ export const register: Register = (on, options) => {
       themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
+      if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
       if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
@@ -1241,15 +1260,19 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
     const theme: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
+    // there it draws every row and lets the engine scroll the body.
+    nativeScroll = e.surface === 'desktop'
     if (t.preview) {
       if (previewed?.path !== t.preview) await loadPreview($, t.preview)
       const p = previewed
       const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
-      previewRows = Math.max(4, e.props.scroll.bodyRows - (p?.note ? 2 : 1))
-      const win = previewLines(p?.text ?? '', t.previewTop, previewRows, markdown)
+      const all = (p?.text ?? '').split('\n').length
+      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
+      const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
             <Button key="back" plain label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
             <Text> </Text>
@@ -1277,9 +1300,6 @@ export const register: Register = (on, options) => {
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
     const fixed = 2 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
-    // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
-    // there it draws every row and lets the engine scroll the body.
-    nativeScroll = e.surface === 'desktop'
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor

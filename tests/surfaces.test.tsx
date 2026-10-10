@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
+import { LINUX_LAUNCH } from '../hooks/open'
 import { ancestorsOf, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -535,7 +536,7 @@ test('open with preview: a double-click shows the file in the pane, left goes ba
   const clock = world(on, {
     os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
     dirs: { [root]: [['notes.md', 'file'], ['a.ts', 'file'], ['blob.bin', 'file']] },
-    files: { [`${root}/notes.md`]: '# Title\r\n\nSome *notes*\u0007', [`${root}/a.ts`]: 'const a = 1\n', [`${root}/blob.bin`]: 'PK\u0000\u0003' },
+    files: { [`${root}/notes.md`]: '# Title\r\n\nSome *notes*\u0007', [`${root}/a.ts`]: `const a = 1\n${'a++\n'.repeat(60)}`, [`${root}/blob.bin`]: 'PK\u0000\u0003' },
   }, ran)
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -583,6 +584,84 @@ test('open with preview: a double-click shows the file in the pane, left goes ba
   await ui.post({ key: 'left' }, { in: 'rows' })
   await clock.settle()
   expect(await texts(ui)).toContain('notes.md')
+  await ui.unmount()
+})
+
+test('open with on linux: the command runs detached, like the default opener', { timeoutMs: 20_000, options: { open: 'evince {path}' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.pdf', 'file']] }, status: '', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.post({ press: `${root}/a.pdf` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a.pdf` }, { in: 'rows' })
+  await clock.settle()
+  expect(ran).toContainEqual(['sh', '-c', LINUX_LAUNCH, 'sh', 'evince', `${root}/a.pdf`])
+  await ui.unmount()
+})
+
+test('open with preview: End shows the last screen, an edit reloads the file, a fence the window starts in is reopened, and a new session starts on the tree', { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const body = Array.from({ length: 60 }, (_, i) => `line ${i}`)
+  const doc = ['# Doc', '~~~sh', '```', ...body, '~~~', 'after'].join('\n')
+  const w: World = { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file'], ['doc.md', 'file']] }, files: { [`${root}/a.ts`]: body.join('\n'), [`${root}/doc.md`]: doc } }
+  const clock = world(on, w, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await clock.settle()
+  let shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('"startLine":42')
+  expect(shown).toContain('line 59')
+  w.files![`${root}/a.ts`] = 'changed\n'
+  await $.tool.call({ tool: 'Edit', file_path: `${root}/a.ts`, old_string: 'a', new_string: 'b' } as any)
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('changed')
+  await ui.post({ key: 'left' }, { in: 'rows' })
+  await ui.post({ press: `${root}/doc.md` }, { in: 'rows' })
+  await ui.post({ press: `${root}/doc.md` }, { in: 'rows' })
+  await clock.settle()
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('"text":"~~~sh\\nline 1')
+  await ui.unmount()
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const again = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props })
+  await clock.settle()
+  expect(await texts(again)).toContain('doc.md')
+  await again.unmount()
+})
+
+test('open with preview on desktop: the whole file is drawn and the wheel goes to the app', { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const body = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n')
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: body } }, [])
+  const appScrolls: number[] = []
+  on('ui.scroll', (_$: any, e: any) => (appScrolls.push(e.by), {}))
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('line 0')
+  expect(shown).toContain('line 199')
+  const wheel = { component: 'Pane', requestId: 'filetree', by: 5, offset: 5, bodyRows: 20, contentRows: 202, origin: { kind: 'person' } }
+  expect(await $.ui.scroll(wheel as any)).toEqual({})
+  expect(appScrolls).toEqual([5])
   await ui.unmount()
 })
 
