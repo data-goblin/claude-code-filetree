@@ -2,9 +2,9 @@ import { type BuiltinToolResults, type EngineInterface, type Register, type Time
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
-import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
+import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
+import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, LIGHT_GIT_COLOR } from './icons'
 import {
   ancestorsOf,
   type Change,
@@ -15,6 +15,7 @@ import {
   inside,
   isAbsolute,
   join,
+  LIGHT_THEME,
   mapper,
   parseGit,
   parseNumstat,
@@ -37,6 +38,7 @@ const THEME = { plugin: 'filetree', key: 'theme' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
+const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const BRANCH_ROW = '#branch'
 const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
@@ -48,6 +50,9 @@ const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
 const ADD_COLOR = '#98c379'
 const DEL_COLOR = '#e06c75'
+const LIGHT_ADD_COLOR = '#14532d'
+const LIGHT_DEL_COLOR = '#7f1d1d'
+const LIGHT_HOVER = '#f0f2f5'
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
 const THEME_POLL_MS = 2000
 const FONT_SCRIPT =
@@ -67,6 +72,10 @@ const SIZE_WALK_LIMIT = 50_000
 let blink: Timer | null = null
 let themePoll: Timer | null = null
 let themeMtime: number | null = null
+let lightTerminal = false
+let lightDesktop = false
+let appearancePoll: Timer | null = null
+const appearance = { mtime: -1, mode: 'system', tick: 0 }
 let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
@@ -130,6 +139,45 @@ function faint(hex: string): string {
   const v = parseInt(hex.slice(1), 16)
   const ch = (shift: number) => Math.round(0x26 + (((v >> shift) & 255) - 0x26) * 0.3)
   return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
+}
+
+async function readThemeSetting($: EngineInterface): Promise<void> {
+  const row = (await $.config.list()).find(r => r.key === 'theme')
+  const light = typeof row?.value === 'string' && row.value.startsWith('light')
+  if (light === lightTerminal) return
+  lightTerminal = light
+  void $.ui.invalidate('ui.render')
+}
+
+// The desktop app keeps its appearance (light, dark or system) in its own config, not in the theme
+// setting, and system follows the OS.
+async function readAppearance($: EngineInterface): Promise<void> {
+  const os = await osName($)
+  const base = os === 'win32' ? posix((await $.env.get('APPDATA')) ?? '') : `${home}/${os === 'darwin' ? 'Library/Application Support' : '.config'}`
+  const path = `${base}/Claude/config.json`
+  const mtime = await $.fs.stat(path).then(s => s.mtimeMs, () => 0)
+  const changed = mtime !== appearance.mtime
+  if (changed) {
+    const mode = mtime ? await $.fs.read(path).then(raw => (JSON.parse(String(raw)) as { userThemeMode?: unknown }).userThemeMode, () => undefined) : undefined
+    appearance.mtime = mtime
+    appearance.mode = mode === 'light' || mode === 'dark' ? mode : 'system'
+  }
+  if (!changed && (appearance.mode !== 'system' || ++appearance.tick % 15)) return
+  const light = appearance.mode === 'system' ? await systemLight($, os) : appearance.mode === 'light'
+  if (light === lightDesktop) return
+  lightDesktop = light
+  void $.ui.invalidate('ui.render')
+}
+
+async function systemLight($: EngineInterface, os: string): Promise<boolean> {
+  try {
+    if (os === 'win32') {
+      const run = await $.process.run(['reg', 'query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize', '/v', 'AppsUseLightTheme'], { timeoutMs: 3_000 })
+      return /0x1\b/.test(run.stdout)
+    }
+    if (os === 'darwin') return (await $.process.run(['defaults', 'read', '-g', 'AppleInterfaceStyle'], { timeoutMs: 3_000 })).exitCode !== 0
+  } catch {}
+  return false
 }
 
 async function get($: EngineInterface): Promise<FileTree> {
@@ -1033,6 +1081,7 @@ export const register: Register = (on, options) => {
         noNerd = true
       }
       await loadTheme($)
+      await readThemeSetting($).catch(() => undefined)
       themePoll?.cancel()
       themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
       const t = await get($)
@@ -1044,6 +1093,12 @@ export const register: Register = (on, options) => {
       else if (!noDock) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
     })()
     return next(e)
+  })
+
+  on('config.set', { key: 'theme' }, async ($, e, next) => {
+    const result = await next(e)
+    await readThemeSetting($).catch(() => undefined)
+    return result
   })
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
@@ -1259,7 +1314,18 @@ export const register: Register = (on, options) => {
     const unicode = glyphSetting === 'plain' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
-    const theme: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    if (e.surface === 'desktop' && !appearancePoll) {
+      appearancePoll = $.clock.every(THEME_POLL_MS, () => void readAppearance($).catch(() => undefined))
+      await readAppearance($).catch(() => undefined)
+    }
+    const stored: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    const light = !themeMtime && (e.surface === 'desktop' ? lightDesktop : lightTerminal)
+    const theme = light ? LIGHT_THEME : stored
+    const tones = light ? LIGHT_TONES : TONES
+    const gitColors = light ? LIGHT_GIT_COLOR : GIT_COLOR
+    const addColor = light ? LIGHT_ADD_COLOR : ADD_COLOR
+    const delColor = light ? LIGHT_DEL_COLOR : DEL_COLOR
+    const rowColors = { activeBg: theme.selection, hoverBg: light ? LIGHT_HOVER : faint(theme.selection), tones: light ? LIGHT_SHIMMER : SHIMMER }
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
@@ -1281,11 +1347,11 @@ export const register: Register = (on, options) => {
             </Box>
             <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
           </Box>
-          {p?.note ? <Text dimColor>{p.note}</Text> : null}
+          {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: [], active: '', activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
           />
         </Box>
       )
@@ -1325,8 +1391,8 @@ export const register: Register = (on, options) => {
     const countSegs = (c: [number, number, number] | undefined): Seg[] => {
       if (!c) return []
       const out: Seg[] = []
-      if (c[0] > 0) out.push({ t: ` ?:${c[0]}`, c: GIT_COLOR['?'] ?? ADD_COLOR })
-      if (c[1] > 0) out.push({ t: ` M:${c[1]}`, c: GIT_COLOR.M ?? '#e5c07b' })
+      if (c[0] > 0) out.push({ t: ` ?:${c[0]}`, c: gitColors['?'] ?? addColor })
+      if (c[1] > 0) out.push({ t: ` M:${c[1]}`, c: gitColors.M ?? '#e5c07b' })
       if (c[2] > 0) out.push({ t: ` D:${c[2]}`, c: theme.urgent })
       return out
     }
@@ -1338,7 +1404,7 @@ export const register: Register = (on, options) => {
       const own = t.git[n.id]
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
-      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (GIT_COLOR[status] ?? theme.muted) : undefined
+      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (gitColors[status] ?? theme.muted) : undefined
       const isBright = bright.has(n.id)
       const isDim = !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
@@ -1376,8 +1442,8 @@ export const register: Register = (on, options) => {
       ]
       const right: Seg[] = []
       if (meta) right.push({ t: ` ${meta}`, c: theme.muted })
-      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, c: ADD_COLOR })
-      if (loc && loc[1] > 0) right.push({ t: ` -${loc[1]}`, c: DEL_COLOR })
+      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, c: addColor })
+      if (loc && loc[1] > 0) right.push({ t: ` -${loc[1]}`, c: delColor })
       right.push(...dirCounts)
       if (badge) right.push({ t: badge, c: status ? gitColor : theme.muted, b: true })
       return { id: n.id, left: clean(left), right: clean(right) }
@@ -1405,12 +1471,12 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="row" height={1} overflow="hidden">
           <Box flexDirection="row" flexShrink={0}>
-            <Text color={isFlash ? (TONES[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
-            <Text bold color={isFlash ? (TONES[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
+            <Text color={isFlash ? (tones[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
+            <Text bold color={isFlash ? (tones[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
               {label}
             </Text>
-            {b.ahead > 0 && <Text color={TONES.teal?.solid}>{` ↑${b.ahead}`}</Text>}
-            {b.behind > 0 && <Text color={TONES.blue?.solid}>{` ↓${b.behind}`}</Text>}
+            {b.ahead > 0 && <Text color={tones.teal?.solid}>{` ↑${b.ahead}`}</Text>}
+            {b.behind > 0 && <Text color={tones.blue?.solid}>{` ↓${b.behind}`}</Text>}
           </Box>
           {b.upstream && (
             <Box flexShrink={1} overflow="hidden">
@@ -1421,8 +1487,8 @@ export const register: Register = (on, options) => {
           )}
           <Box flexGrow={1} />
           <Box flexDirection="row" flexShrink={0}>
-            {totals[0] > 0 && <Text color={ADD_COLOR}>{` +${totals[0]}`}</Text>}
-            {totals[1] > 0 && <Text color={DEL_COLOR}>{` -${totals[1]}`}</Text>}
+            {totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
+            {totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
             {rootCounts.map(c => (
               <Text color={c.c}>{c.t}</Text>
             ))}
@@ -1434,7 +1500,7 @@ export const register: Register = (on, options) => {
 
     const chip = (a: Activity) => {
       const tone = a.state === 'failed' ? 'red' : a.tone
-      const color = TONES[tone]?.solid ?? theme.accent
+      const color = tones[tone]?.solid ?? theme.accent
       const icon = unicode ? a.plain : a.nerd
       const hash = a.state === 'done' && a.kind === 'git commit' ? a.detail.split(' ')[0] ?? '' : ''
       return (
@@ -1538,14 +1604,14 @@ export const register: Register = (on, options) => {
         <Client
           key="rows"
           module="./rows.tsx"
-          props={{ rows: specs, active: t.cursor, activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+          props={{ rows: specs, active: t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
         />
         <Box flexGrow={1} />
         {(t.selected || latest) && (
           <Box flexDirection="row">
             {t.selected ? (
               <Box flexShrink={1}>
-                <Text dimColor wrap="truncate-start">
+                <Text dimColor={!light} color={light ? theme.muted : undefined} wrap="truncate-start">
                   selected: {t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)}
                 </Text>
               </Box>
