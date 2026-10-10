@@ -955,7 +955,8 @@ async function openFile($: EngineInterface, path: string, external = false): Pro
   const os = await osName($)
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
   const custom = external ? null : openWithCommand(openWithSetting, native(path), native(dirname(path)))
-  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
+  const editor = custom || !(await $.env.get('TMUX')) ? undefined : (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi'
+  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path, editor)
   try {
     const run = await $.process.run(argv, init)
     if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
@@ -989,6 +990,30 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
     follow = false
     await reset($, n.id)
   } else await openFile($, n.id)
+}
+
+async function navigate($: EngineInterface, key: string, shift = false, surface?: string): Promise<void> {
+  const t = await get($)
+  const rows = visibleRows(t)
+  const at = rows.findIndex(r => r.node.id === t.cursor)
+  const cur = rows[at]?.node
+  const move = (d: number) => {
+    const target = rows[Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))]
+    return target ? patch($, () => ({ cursor: target.node.id, scroll: null })) : Promise.resolve()
+  }
+  if (key === 'up' || key === 'k') await move(-1)
+  else if (key === 'down' || key === 'j') await move(1)
+  else if (key === 'pageup') await move(-10)
+  else if (key === 'pagedown') await move(10)
+  else if (key === 'home') await move(-rows.length)
+  else if (key === 'end') await move(rows.length)
+  else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
+  else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
+  else if (cur && (key === 'left' || key === 'h')) {
+    if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
+    else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent }))
+  } else if (cur && key === 'return') await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
+  else if (cur && key === ' ') await toggle($, cur)
 }
 
 async function loadTheme($: EngineInterface): Promise<void> {
@@ -1148,26 +1173,7 @@ export const register: Register = (on, options) => {
       else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
       return {}
     }
-    const rows = visibleRows(t)
-    const at = rows.findIndex(r => r.node.id === t.cursor)
-    const cur = rows[at]?.node
-    const move = (d: number) => {
-      const target = rows[Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))]
-      return target ? patch($, () => ({ cursor: target.node.id, scroll: null })) : Promise.resolve()
-    }
-    if (data.key === 'up' || data.key === 'k') await move(-1)
-    else if (data.key === 'down' || data.key === 'j') await move(1)
-    else if (data.key === 'pageup') await move(-10)
-    else if (data.key === 'pagedown') await move(10)
-    else if (data.key === 'home') await move(-rows.length)
-    else if (data.key === 'end') await move(rows.length)
-    else if (cur && (data.key === 'y' || data.key === 'Y')) await copyPath($, cur.id, data.key === 'Y' || Boolean(data.shift), e.surface)
-    else if (cur && (data.key === 'right' || data.key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
-    else if (cur && (data.key === 'left' || data.key === 'h')) {
-      if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
-      else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent }))
-    } else if (cur && data.key === 'return') await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
-    else if (cur && data.key === ' ') await toggle($, cur)
+    await navigate($, data.key, Boolean(data.shift), e.surface)
     return {}
   })
 
@@ -1299,7 +1305,7 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
-    const fixed = 2 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
+    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1448,6 +1454,10 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // The rows Client only takes keys after a click, so keyboard focus rests on the open
+    // button: Enter opens the row under the cursor, and the letter hotkeys keep working.
+    const park = () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {})
+
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
         <Box flexDirection="row">
@@ -1527,13 +1537,21 @@ export const register: Register = (on, options) => {
               label="/ "
               placeholder="search"
               submitLabel="jump"
-              autoFocus
               value={t.query}
               onInput={(v: string) => void search($, v)}
-              onSubmit={(v: string) => void jump($, v)}
+              // leaving the field hands the focus back to the button that entered it, after
+              // this handler; park once that has happened
+              onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
             />
           </Box>
           {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
+        </Box>
+        <Box flexDirection="row" gap={2}>
+          {([['j', '↓'], ['k', '↑'], ['h', '←'], ['l', '→']] as const).map(([k, label]) => (
+            <Button key={`nav-${k}`} plain dimColor hotkey={k} label={label} onPress={() => void navigate($, k).then(park)} />
+          ))}
+          <Button key="nav-o" plain dimColor autoFocus hotkey="o" label="open" onPress={() => void navigate($, 'return')} />
+          <Button key="nav-s" plain dimColor hotkey="s" label="search" onPress={() => void $.ui.focus({ requestId: PANE, key: 'q' })} />
         </Box>
         <Client
           key="rows"

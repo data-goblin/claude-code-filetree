@@ -1,5 +1,11 @@
 import { expect, test } from 'claude-code/testing'
-import { openCommand, openWithCommand } from '../hooks/open'
+import { openCommand, openWithCommand, TMUX_OPEN } from '../hooks/open'
+
+test('inside tmux, open hands the file to the tmux opener with the editor and its folder', () => {
+  const { argv } = openCommand('linux', '/work/A & B/dax.ts', 'nvim')
+  expect(argv).toEqual(['sh', '-c', TMUX_OPEN, 'sh', 'nvim', '/work/A & B/dax.ts', '/work/A & B'])
+  expect(openCommand('win32', 'C:/x.ts', 'nvim').argv[0]).toBe('powershell')
+})
 
 test('open keeps file and URL targets literal on every platform', () => {
   for (const os of ['linux', 'darwin', 'win32'] as const) {
