@@ -520,10 +520,10 @@ test('opener failures show a toast instead of failing silently', { timeoutMs: 20
   await ui.unmount()
 })
 
-test('open with: a double-click and Enter run the configured command instead of the default app', { timeoutMs: 20_000, options: { open: 'glow -p {path} --dir "{dir}"' } }, async ($, on) => {
+test('open with: a double-click and Enter run the configured command instead of the default app, inside tmux too', { timeoutMs: 20_000, options: { open: 'glow -p {path} --dir "{dir}"' } }, async ($, on) => {
   const ran: Ran = []
   const root = '/Users/k/my proj'
-  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs: { [root]: [['a b.md', 'file'], ['c.md', 'file']] }, status: '', numstat: '', exits: { glow: [1, 'glow: no such file\n'] } }, ran)
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMUX: '/tmp/tmux-501/default,1,0', EDITOR: 'nvim' }, cwd: root, top: '', dirs: { [root]: [['a b.md', 'file'], ['c.md', 'file']] }, status: '', numstat: '', exits: { glow: [1, 'glow: no such file\n'] } }, ran)
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
@@ -531,7 +531,7 @@ test('open with: a double-click and Enter run the configured command instead of 
   await ui.post({ press: `${root}/a b.md` }, { in: 'rows' })
   await clock.settle()
   expect(ran).toContainEqual(['glow', '-p', `${root}/a b.md`, '--dir', root])
-  expect(ran.some(a => a[0] === 'open')).toBe(false)
+  expect(ran.some(a => a[0] === 'open' || a.includes('nvim'))).toBe(false)
   expect(ran.some(a => a[0] === 'toast' && (a[1] ?? '').includes('glow: no such file'))).toBe(true)
   await ui.post({ key: 'down' }, { in: 'rows' })
   await ui.post({ key: 'return' }, { in: 'rows' })
