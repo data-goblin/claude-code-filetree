@@ -17,6 +17,7 @@ pull request credits them even when the code that shipped was rewritten.
 - Space opens macOS Quick Look: [@ohlava](https://github.com/ohlava) ([#16](https://github.com/data-goblin/claude-code-filetree/pull/16))
 - Age column format and the Hints setting: [@stefmf](https://github.com/stefmf) ([#17](https://github.com/data-goblin/claude-code-filetree/pull/17))
 - Open with editor in a herdr pane: [@sxhmilyoyo](https://github.com/sxhmilyoyo) ([#26](https://github.com/data-goblin/claude-code-filetree/pull/26))
+- `/filetree` shows or hides the tree, and `/filetree open` opens it without hiding it: [@Br4inergy](https://github.com/Br4inergy) ([#11](https://github.com/data-goblin/claude-code-filetree/pull/11))
 
 ## Ideas
 

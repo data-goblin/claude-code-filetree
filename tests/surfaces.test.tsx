@@ -1746,3 +1746,50 @@ test('the ignore setting applies before the reveal cap on a commit and on a Grep
   expect(await texts(ui)).toContain(shimmer('g.ts', 'purple'))
   await ui.unmount()
 })
+
+test('a second /filetree closes the tree', async ($, on) => {
+  const closed: string[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: true, isFocused: false, isPlaced: true }] }) as never)
+  on('ui.close', ($, e) => {
+    closed.push((e as { id: string }).id)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: true } as never)
+  const out = await $.command.run({ command: 'filetree', args: '' } as never)
+  expect(closed).toEqual(['filetree'])
+  expect(JSON.stringify(out)).toContain('closed')
+})
+
+test('/filetree open keeps an open tree open', async ($, on) => {
+  const closed: string[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: false, isFocused: false, isPlaced: true }] }) as never)
+  on('ui.close', ($, e) => {
+    closed.push((e as { id: string }).id)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: true } as never)
+  await $.command.run({ command: 'filetree', args: 'open', presentation: { isFullscreen: true, columns: 200 } } as never).catch(() => undefined)
+  expect(closed).toEqual([])
+})
+
+test('/filetree on a tree hidden behind another tab brings it forward instead of closing it', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  const closed: unknown[] = []
+  on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: false, isFocused: false, isPlaced: true }] }))
+  on('ui.close', (_$: any, e: any) => {
+    closed.push(e)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const before = opens.length
+  const r = await $.command.run(fullscreen(''))
+  await clock.settle()
+  expect(closed).toEqual([])
+  expect(JSON.stringify(r)).toContain('File tree on')
+  expect(opens.slice(before).some((o: any) => o.id === 'filetree' && o.focus === true)).toBe(true)
+})
