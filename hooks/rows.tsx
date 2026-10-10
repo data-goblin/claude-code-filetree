@@ -11,7 +11,7 @@ export type RowsProps = {
   spinner?: string[]
   pointer?: boolean
   bar?: { pos: number; size: number; thumb: string; track: string }
-  preview?: { text: string; path: string; startLine: number; markdown: boolean }
+  preview?: { text: string; path: string; startLine: number; markdown: boolean; format?: 'source' | 'diff' }
 }
 type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
@@ -86,7 +86,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   if (props.preview) {
     const { Markdown, Code } = surface.elements
     const p = props.preview
-    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} wrap="truncate-end" />
+    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} format={p.format} wrap="truncate-end" />
   }
   const frames = props.spinner?.length ? props.spinner : FRAMES
   const draw = (s: Seg) => {
