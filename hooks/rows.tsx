@@ -11,6 +11,7 @@ export type RowsProps = {
   spinner?: string[]
   pointer?: boolean
   bar?: { pos: number; size: number; thumb: string; track: string }
+  preview?: { text: string; path: string; startLine: number; markdown: boolean }
 }
 type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
@@ -81,6 +82,12 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     if (row.id) surface.post({ press: row.id, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })
   })
   surface.onKey(e => surface.post({ key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }))
+  // The preview draws in this same element, so the focus a click gave the tree stays put.
+  if (props.preview) {
+    const { Markdown, Code } = surface.elements
+    const p = props.preview
+    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} />
+  }
   const frames = props.spinner?.length ? props.spinner : FRAMES
   const draw = (s: Seg) => {
     if (s.spin) {

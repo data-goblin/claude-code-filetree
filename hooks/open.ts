@@ -38,3 +38,30 @@ export function openCommand(os: 'linux' | 'darwin' | 'win32', target: string) {
     },
   }
 }
+
+function words(command: string): string[] {
+  const out: string[] = []
+  let word: string | null = null
+  let quote = ''
+  for (const ch of command) {
+    if (quote) {
+      if (ch === quote) quote = ''
+      else word = (word ?? '') + ch
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+      word ??= ''
+    } else if (/\s/.test(ch)) {
+      if (word !== null) out.push(word)
+      word = null
+    } else word = (word ?? '') + ch
+  }
+  if (word !== null) out.push(word)
+  return out
+}
+
+export function openWithCommand(command: string, path: string, dir: string): string[] | null {
+  const argv = words(command)
+  if (!argv.length) return null
+  const filled = argv.map(w => w.replace(/\{(path|dir)\}/g, (_, key) => (key === 'path' ? path : dir)))
+  return argv.some(w => w.includes('{path}')) ? filled : [...filled, path]
+}

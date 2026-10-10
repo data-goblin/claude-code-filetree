@@ -20,6 +20,7 @@ type World = {
   du?: Record<string, string>
   duDelays?: number[]
   links?: string[]
+  files?: Record<string, string>
 }
 type Ran = string[][]
 const opens: unknown[] = []
@@ -44,6 +45,7 @@ function world(on: any, w: World, ran: Ran) {
   const isTheme = (p: string) => p.replace(/\\/g, '/').endsWith('/.local/state/omarchy/current/theme/colors.toml')
   on('fs.read', (_$: any, e: any) => {
     if (w.theme && isTheme(e.path)) return { value: w.theme.toml }
+    if (w.files && e.path in w.files) return { value: w.files[e.path] }
     throw new Error('no theme file')
   })
   const norm = (p: string) => p.replace(/\\/g, '/').replace(/^.*?(?=[A-Za-z]:\/)/, '')
@@ -504,6 +506,83 @@ test('opener failures show a toast instead of failing silently', { timeoutMs: 20
   await clock.settle()
   expect(ran).toContainEqual(['open', '--', `${root}/a.xyz`])
   expect(ran.some(a => a[0] === 'toast' && (a[1] ?? '').includes('No application knows how to open a.xyz'))).toBe(true)
+  await ui.unmount()
+})
+
+test('open with: a double-click and Enter run the configured command instead of the default app', { timeoutMs: 20_000, options: { open: 'glow -p {path} --dir "{dir}"' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/my proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs: { [root]: [['a b.md', 'file'], ['c.md', 'file']] }, status: '', numstat: '', exits: { glow: [1, 'glow: no such file\n'] } }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.post({ press: `${root}/a b.md` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a b.md` }, { in: 'rows' })
+  await clock.settle()
+  expect(ran).toContainEqual(['glow', '-p', `${root}/a b.md`, '--dir', root])
+  expect(ran.some(a => a[0] === 'open')).toBe(false)
+  expect(ran.some(a => a[0] === 'toast' && (a[1] ?? '').includes('glow: no such file'))).toBe(true)
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'return' }, { in: 'rows' })
+  await clock.settle()
+  expect(ran).toContainEqual(['glow', '-p', `${root}/c.md`, '--dir', root])
+  await ui.unmount()
+})
+
+test('open with preview: a double-click shows the file in the pane, left goes back to the tree, arrows scroll, ↗ opens the default app, a binary file shows a note', { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['notes.md', 'file'], ['a.ts', 'file'], ['blob.bin', 'file']] },
+    files: { [`${root}/notes.md`]: '# Title\r\n\nSome *notes*\u0007', [`${root}/a.ts`]: 'const a = 1\n', [`${root}/blob.bin`]: 'PK\u0000\u0003' },
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.post({ press: `${root}/notes.md` }, { in: 'rows' })
+  await ui.post({ press: `${root}/notes.md` }, { in: 'rows' })
+  await clock.settle()
+  let shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('# Title\\n\\nSome *notes*"')
+  expect(shown).not.toContain('a.ts')
+  expect(ran.some(a => a[0] === 'open')).toBe(false)
+  const sent = await $.prompt.submit({ text: 'what is this?', wait: false } as any)
+  expect(JSON.stringify(sent)).toContain(`${root}/notes.md`)
+  await ui.press({ key: 'back' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('a.ts')
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('const a = 1')
+  expect(shown).toContain('"startLine":1')
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('"startLine":2')
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('"startLine":2')
+  await ui.post({ key: 'left' }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('notes.md')
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  await ui.press({ key: 'external' })
+  await clock.settle()
+  expect(ran).toContainEqual(['open', '--', `${root}/a.ts`])
+  await ui.press({ key: 'back' })
+  await ui.post({ press: `${root}/blob.bin` }, { in: 'rows' })
+  await ui.post({ press: `${root}/blob.bin` }, { in: 'rows' })
+  await clock.settle()
+  shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('binary file')
+  expect(shown).not.toContain('PK')
+  await ui.post({ key: 'left' }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('notes.md')
   await ui.unmount()
 })
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { openCommand } from '../hooks/open'
+import { openCommand, openWithCommand } from '../hooks/open'
 
 test('open keeps file and URL targets literal on every platform', () => {
   for (const os of ['linux', 'darwin', 'win32'] as const) {
@@ -16,4 +16,13 @@ test('open keeps file and URL targets literal on every platform', () => {
       if (os === 'linux') expect(argv[2]).toContain('setsid -f -w')
     }
   }
+})
+
+test('open with: words keep quotes whole, placeholders fill in, and the path goes last without {path}', () => {
+  expect(openWithCommand('', '/a/b.md', '/a')).toBe(null)
+  expect(openWithCommand('   ', '/a/b.md', '/a')).toBe(null)
+  expect(openWithCommand('zed', '/w/A & B/b.md', '/w/A & B')).toEqual(['zed', '/w/A & B/b.md'])
+  expect(openWithCommand('code -g {path}:1', '/a/b.md', '/a')).toEqual(['code', '-g', '/a/b.md:1'])
+  expect(openWithCommand(`herdr plugin pane open --cwd {dir} --env "VIEW={path}" ''`, '/a/{dir}.md', '/a')).toEqual(['herdr', 'plugin', 'pane', 'open', '--cwd', '/a', '--env', 'VIEW=/a/{dir}.md', ''])
+  expect(openWithCommand('open -a "Sublime Text" --cwd {dir}', '/a/b.md', '/a')).toEqual(['open', '-a', 'Sublime Text', '--cwd', '/a', '/a/b.md'])
 })
