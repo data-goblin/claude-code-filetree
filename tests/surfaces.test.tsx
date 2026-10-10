@@ -44,12 +44,13 @@ function world(on: any, w: World, ran: Ran) {
     return { value: undefined }
   })
   const isTheme = (p: string) => p.replace(/\\/g, '/').endsWith('/.local/state/omarchy/current/theme/colors.toml')
+  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^.*?(?=[A-Za-z]:\/)/, '')
   on('fs.read', (_$: any, e: any) => {
     if (w.theme && isTheme(e.path)) return { value: w.theme.toml }
-    if (w.files && e.path in w.files) return { value: w.files[e.path] }
+    const file = norm(e.path).replace(/^[A-Za-z]:/, '')
+    if (w.files && file in w.files) return { value: w.files[file] }
     throw new Error('no theme file')
   })
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/^.*?(?=[A-Za-z]:\/)/, '')
   const dirOf = (p: string) => w.dirs[p] ?? w.dirs[p.replace(/^[A-Za-z]:/, '')]
   on('fs.list', async (_$: any, e: any) => {
     const path = norm(e.path)
