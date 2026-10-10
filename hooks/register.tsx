@@ -72,7 +72,7 @@ let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
 let openWithSetting = ''
-let previewed: { path: string; text: string; note: string } | null = null
+let previewed: { path: string; mode: 'text' | 'diff'; text: string; note: string } | null = null
 let previewRows = 20
 let follow = true
 let followClaude = true
@@ -89,7 +89,9 @@ let pointer = true
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
-let noDock = false
+let lastPlacement: 'dock' | 'inline' | '' = ''
+// Counts the times the pane was seated above the prompt; `inlineOpen` names the one it was shown in.
+let narrowEpoch = 0
 let home = ''
 let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
 let dirty: { root: string; files: Record<string, Change> } = { root: '', files: {} }
@@ -274,10 +276,10 @@ async function reset($: EngineInterface, root: string, focus = false): Promise<v
   searchIndex = null
   sizeEpoch += 1
   sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, showSize: prev.root ? prev.showSize : sizeDefault }))
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, showSize: prev.root ? prev.showSize : sizeDefault, collapsed: prev.collapsed, inlineOpen: prev.inlineOpen }))
   const title = `Files: ${root.split('/').pop() || root}`
   if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!noDock) await $.ui.open({ id: PANE, title })
+  else await $.ui.open({ id: PANE, title })
   await loadDirs($, [root])
   await detectRepo($)
   await refreshGit($)
@@ -909,16 +911,105 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   lines = lines.map(l => (l.length > PREVIEW_LINE ? `${l.slice(0, PREVIEW_LINE)}…` : l))
   const fit = fitSerialized(lines, PREVIEW_CHARS)
   if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
-  previewed = { path, text: fit.join('\n'), note }
+  previewed = { path, mode: 'text', text: fit.join('\n'), note }
+}
+
+type Hunk = { a: number; c: number; lines: string[] }
+
+// Reads unified-diff hunks; the `diff --git`, `index`, `---` and `+++` lines before them are dropped.
+function parseHunks(text: string): Hunk[] {
+  const hunks: Hunk[] = []
+  for (const line of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (m) hunks.push({ a: Number(m[1]), c: Number(m[2]), lines: [] })
+    else if (/^[ +\-\\]/.test(line)) hunks[hunks.length - 1]?.lines.push(line)
+  }
+  return hunks
+}
+
+// Lines `from` to `to` of a hunk under a header recounted for them, so a cut hunk still parses.
+function hunkText(h: Hunk, from: number, to: number): string {
+  let a = h.a
+  let c = h.c
+  for (const l of h.lines.slice(0, from)) {
+    if (l[0] === ' ' || l[0] === '-') a++
+    if (l[0] === ' ' || l[0] === '+') c++
+  }
+  const body = h.lines.slice(from, to)
+  const b = body.filter(l => l[0] === ' ' || l[0] === '-').length
+  const d = body.filter(l => l[0] === ' ' || l[0] === '+').length
+  return [`@@ -${a},${b} +${c},${d} @@`, ...body].join('\n')
+}
+
+// The rows `top` to `top + rows` of a diff, a hunk's header counting as a row.
+function diffWindow(text: string, top: number, rows: number): { text: string; top: number } {
+  const out: string[] = []
+  let start = 0
+  for (const h of parseHunks(text)) {
+    const end = start + 1 + h.lines.length
+    if (end > top && start < top + rows) out.push(hunkText(h, Math.max(0, top - start - 1), Math.min(h.lines.length, top + rows - start - 1)))
+    start = end
+  }
+  return { text: out.join('\n'), top }
+}
+
+async function loadDiff($: EngineInterface, path: string): Promise<void> {
+  const t = await get($)
+  let hunks: Hunk[] = []
+  let note = ''
+  try {
+    if (t.git[path] === '?') {
+      // Untracked: git has no old side, so the whole file is one hunk of additions.
+      const text = await $.fs.read(path)
+      if (text.slice(0, 8000).includes('\0')) note = 'binary file'
+      else {
+        const lines = text.replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n')
+        hunks = [{ a: 0, c: 1, lines: lines.map(l => `+${l}`) }]
+      }
+    } else {
+      const run = await git($, t.root, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '-U3', '--', path])
+      if (run.exitCode !== 0) note = `git diff failed: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`
+      else {
+        hunks = parseHunks(run.stdout)
+        if (!hunks.length) note = /^Binary files /m.test(run.stdout) ? 'binary file' : 'no changes against HEAD'
+      }
+    }
+  } catch (err) {
+    note = `could not read: ${String((err as Error)?.message ?? err).split('\n')[0]}`
+  }
+  const rows: string[] = []
+  let size = 0
+  let cut = false
+  for (const h of hunks) {
+    const lines = h.lines.map(l => (l.length > PREVIEW_LINE ? `${l.slice(0, PREVIEW_LINE)}…` : l).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, ''))
+    let n = 0
+    for (const l of lines) {
+      size += JSON.stringify(l).length
+      if (size > PREVIEW_CHARS) break
+      n++
+    }
+    rows.push(hunkText({ ...h, lines }, 0, n))
+    if (n < lines.length) {
+      cut = true
+      break
+    }
+  }
+  if (cut) note = 'diff too long, shown in part'
+  previewed = { path, mode: 'diff', text: rows.join('\n'), note }
 }
 
 async function showPreview($: EngineInterface, path: string): Promise<void> {
   await loadPreview($, path)
-  await patch($, () => ({ preview: path, previewTop: 0, selected: path }))
+  await patch($, () => ({ preview: path, previewTop: 0, previewMode: 'text', selected: path }))
+}
+
+async function showDiff($: EngineInterface, path: string): Promise<void> {
+  await loadDiff($, path)
+  await patch($, () => ({ preview: path, previewTop: 0, previewMode: 'diff', selected: path }))
 }
 
 async function closePreview($: EngineInterface): Promise<void> {
-  await patch($, () => ({ preview: '', previewTop: 0 }))
+  await patch($, () => ({ preview: '', previewTop: 0, previewMode: 'text' }))
 }
 
 async function scrollPreview($: EngineInterface, by: number): Promise<void> {
@@ -988,7 +1079,27 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
   if (n.kind === 'dir') {
     follow = false
     await reset($, n.id)
-  } else await openFile($, n.id)
+  } else {
+    const status = (await get($)).git[n.id]
+    if (status) void chooseOpen($, n, status)
+    else await openFile($, n.id)
+  }
+}
+
+const DIFF_VIEW = 'Diff view'
+const OPEN_APP = 'Open in app'
+
+// A changed file asks how to open it: its diff in the pane, or what opening it does otherwise.
+async function chooseOpen($: EngineInterface, n: FileNode, status: string): Promise<void> {
+  if (status === 'D') return showDiff($, n.id)
+  let pick: string
+  try {
+    pick = await $.ui.ask(`${n.name} has changes. How do you want to open it?`, { options: [DIFF_VIEW, OPEN_APP], header: 'Open' })
+  } catch {
+    return
+  }
+  if (pick === DIFF_VIEW) await showDiff($, n.id)
+  else if (pick === OPEN_APP) await openFile($, n.id, openWithSetting.trim() === 'preview')
 }
 
 async function loadTheme($: EngineInterface): Promise<void> {
@@ -1041,23 +1152,22 @@ export const register: Register = (on, options) => {
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
       if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
-      else if (!noDock) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+      else await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
     })()
     return next(e)
   })
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
-    // The layout checks are the terminal's: the desktop app docks the pane itself and
-    // reports no fullscreen layout, so a session no terminal draws skips them.
-    const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
-    if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
-    if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
-    noDock = false
     const arg = (e.args ?? '').trim()
     const cwd = await cwdOf($)
     follow = !arg
     const root = arg ? resolve(cwd, arg, home) : cwd
     await reset($, root, true)
+    // Asked for, the tree shows where it is seated now; too narrow for the sidebar, that is
+    // the seat above the prompt it is about to get, and a later narrowing folds it again.
+    const isNarrow = !e.presentation.isFullscreen || e.presentation.columns < 110
+    const inlineOpen = lastPlacement === 'inline' ? narrowEpoch : isNarrow ? narrowEpoch + 1 : -1
+    await patch($, () => ({ collapsed: false, inlineOpen }))
     return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
   })
 
@@ -1250,26 +1360,47 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    if (e.surface === 'terminal' && e.props.placement === 'inline') {
-      noDock = true
-      void $.ui.close({ id: PANE }).catch(() => undefined)
-      const { Box: Empty } = $.ui.resolve(e)
-      return <Empty />
-    }
     const unicode = glyphSetting === 'plain' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
     const theme: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    // Too narrow for the sidebar, the terminal seats the pane above the prompt: the tree
+    // folds to its bar there, and shows again when the terminal is wide enough to dock it.
+    const isInline = e.surface === 'terminal' && e.props.placement === 'inline'
+    if (e.surface === 'terminal' && e.props.placement !== lastPlacement) {
+      if (isInline) narrowEpoch++
+      lastPlacement = e.props.placement
+    }
+    const epoch = narrowEpoch
+    const collapsed = isInline ? t.inlineOpen !== epoch : t.collapsed
+    const fold = (hide: boolean) => void patch($, () => (isInline ? { inlineOpen: hide ? -1 : epoch } : { collapsed: hide }))
+    if (collapsed) {
+      const c = t.top ? t.counts[t.root] : undefined
+      const changed = c ? c[0] + c[1] + c[2] : 0
+      const name = t.root.split('/').pop() || t.root
+      return (
+        <Box flexDirection="row" backgroundColor={theme.bg || undefined}>
+          <Button key="show" plain label="▸ show files" onPress={() => fold(false)} />
+          <Text color={theme.muted} wrap="truncate-end">{` · ${name}${changed ? ` · ${changed} changed` : ''}`}</Text>
+        </Box>
+      )
+    }
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
     if (t.preview) {
-      if (previewed?.path !== t.preview) await loadPreview($, t.preview)
+      const isDiff = t.previewMode === 'diff'
+      if (previewed?.path !== t.preview || previewed.mode !== t.previewMode) {
+        if (isDiff) await loadDiff($, t.preview)
+        else await loadPreview($, t.preview)
+      }
       const p = previewed
-      const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
+      const markdown = !isDiff && /\.(md|markdown|mdx)$/i.test(t.preview)
       const all = (p?.text ?? '').split('\n').length
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
-      const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
+      const from = nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows))
+      const win = isDiff ? diffWindow(p?.text ?? '', from, previewRows) : previewLines(p?.text ?? '', from, previewRows, markdown)
+      const isChanged = Boolean(t.git[t.preview]) && t.git[t.preview] !== 'D'
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
@@ -1279,13 +1410,15 @@ export const register: Register = (on, options) => {
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
+            {isChanged ? <Button key="mode" plain dimColor label={isDiff ? 'text' : 'diff'} onPress={() => void patch($, () => ({ previewMode: isDiff ? 'text' : 'diff', previewTop: 0 }))} /> : null}
+            {isChanged ? <Text> </Text> : null}
             <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
           </Box>
           {p?.note ? <Text dimColor>{p.note}</Text> : null}
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: [], active: '', activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+            props={{ rows: [], active: '', activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown, format: isDiff ? 'diff' : 'source' } } satisfies RowsProps}
           />
         </Box>
       )
@@ -1515,6 +1648,7 @@ export const register: Register = (on, options) => {
             {t.selected && (
               <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
             )}
+            <Button key="hide" plain dimColor label="▾ hide" onPress={() => fold(true)} />
             <Text> </Text>
           </Box>
         </Box>

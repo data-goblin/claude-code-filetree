@@ -53,6 +53,9 @@ export type FileTree = {
   scroll: number | null
   preview: string
   previewTop: number
+  previewMode: 'text' | 'diff'
+  collapsed: boolean
+  inlineOpen: number
 }
 
 export type Theme = {

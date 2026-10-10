@@ -41,6 +41,9 @@ export function emptyTree(root: string): FileTree {
     scroll: null,
     preview: '',
     previewTop: 0,
+    previewMode: 'text',
+    collapsed: false,
+    inlineOpen: -1,
   }
 }
 

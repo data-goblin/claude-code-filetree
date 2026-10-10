@@ -22,6 +22,7 @@ type World = {
   duDelays?: number[]
   links?: string[]
   files?: Record<string, string>
+  patches?: Record<string, string>
 }
 type Ran = string[][]
 const opens: unknown[] = []
@@ -96,7 +97,7 @@ function world(on: any, w: World, ran: Ran) {
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'status') return ok(w.status)
-      if (verb === 'diff') return ok(w.numstat)
+      if (verb === 'diff') return ok(argv.includes('--numstat') ? w.numstat : (w.patches?.[argv.at(-1) ?? ''] ?? ''))
       if (verb === 'ls-files') {
         const files: string[] = []
         for (const [dir, kids] of Object.entries(w.dirs)) for (const [name, kind] of kids) if (kind === 'file' && dir.startsWith(w.top)) files.push(`${dir}/${name}`.slice(w.top.length + 1))
@@ -433,11 +434,10 @@ test('watches only git metadata, copies paths, clears search, Home and End', { t
   await ui.unmount()
 })
 
-test('sidebar only: no pane in the default layout, and an inline pane closes itself', { timeoutMs: 20_000 }, async ($, on) => {
+test('too narrow for the sidebar the tree folds to a show bar, and docks again unfolded', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
   const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
-  const opened = opens
   const closed: unknown[] = []
   on('ui.close', (_$: any, e: any) => {
     closed.push(e)
@@ -445,13 +445,55 @@ test('sidebar only: no pane in the default layout, and an inline pane closes its
   })
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
-  const before = opened.length
-  const r = await $.command.run({ command: 'filetree', args: '', origin: { kind: 'person' }, presentation: { isFullscreen: false, columns: 200 } } as any)
-  expect(JSON.stringify(r)).toContain('/tui fullscreen')
-  expect(opened.length).toBe(before)
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), placement: 'inline' } })
+  const pane = (placement: string) => ({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), placement } }) as any
+  let ui = await $.ui.mount(pane('dock'))
   await clock.settle()
-  expect(closed.length).toBeGreaterThan(0)
+  expect(await texts(ui)).toContain('a.txt')
+  await ui.unmount()
+
+  ui = await $.ui.mount(pane('inline'))
+  await clock.settle()
+  expect(await ui.find({ key: 'show' })).toBeDefined()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('a.txt')
+  await ui.press({ key: 'show' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('a.txt')
+  await ui.press({ key: 'hide' })
+  await clock.settle()
+  expect(await ui.find({ key: 'show' })).toBeDefined()
+  await ui.unmount()
+
+  ui = await $.ui.mount(pane('dock'))
+  await clock.settle()
+  expect(await ui.find({ key: 'show' })).toBeUndefined()
+  expect(await texts(ui)).toContain('a.txt')
+  await ui.press({ key: 'hide' })
+  await clock.settle()
+  expect(await ui.find({ key: 'show' })).toBeDefined()
+  await ui.unmount()
+  expect(closed).toHaveLength(0)
+
+  const r = await $.command.run({ command: 'filetree', args: '', origin: { kind: 'person' }, presentation: { isFullscreen: false, columns: 80 } } as any)
+  await clock.settle()
+  expect(JSON.stringify(r)).toContain('File tree on')
+  ui = await $.ui.mount(pane('inline'))
+  await clock.settle()
+  expect(await texts(ui)).toContain('a.txt')
+  await ui.unmount()
+
+  // Asked for while wide, the tree docks; a later narrowing still folds it.
+  ui = await $.ui.mount(pane('dock'))
+  await clock.settle()
+  await ui.unmount()
+  await $.command.run({ command: 'filetree', args: '', origin: { kind: 'person' }, presentation: { isFullscreen: true, columns: 200 } } as any)
+  await clock.settle()
+  ui = await $.ui.mount(pane('dock'))
+  await clock.settle()
+  expect(await texts(ui)).toContain('a.txt')
+  await ui.unmount()
+  ui = await $.ui.mount(pane('inline'))
+  await clock.settle()
+  expect(await ui.find({ key: 'show' })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1046,3 +1088,138 @@ for (const os of ['linux', 'win32'] as const) {
     await ui.unmount()
   })
 }
+
+const PATCH = (lines: number) =>
+  [
+    'diff --git a/src/a.ts b/src/a.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    `@@ -1,${lines} +1,${lines + 1} @@`,
+    ...Array.from({ length: lines }, (_, i) => (i === 1 ? '+added line' : ` line ${i + 1}`)),
+    '-gone line',
+    '+new line',
+    '',
+  ].join('\n')
+
+function changedRepo(on: any, ran: Ran, asked: any[], answer: () => string) {
+  const root = '/Users/k/proj'
+  // $.ui.ask is a tool call of AskUserQuestion; a dismissed dialog is a refused call.
+  const tool = (e: any) => {
+    if (e.tool !== 'AskUserQuestion') return undefined
+    asked.push(e)
+    const label = answer()
+    if (label === 'dismiss') return { deny: 'dismissed' }
+    return { result: { questions: e.questions, answers: { [e.questions[0].question]: label } } }
+  }
+  const clock = world(on, {
+    tool,
+    os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root,
+    dirs: { [root]: [['src', 'dir'], ['README.md', 'file'], ['notes.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    status: '## main\0 M src/a.ts\0?? notes.md\0', numstat: '3\t1\tsrc/a.ts\0',
+    patches: { [`${root}/src/a.ts`]: PATCH(40) },
+    files: { [`${root}/notes.md`]: '# Notes\nsecond line\n' },
+  }, ran)
+  return { root, clock }
+}
+
+async function code(ui: any) {
+  return (await ui.findAll({ type: 'Code', in: 'rows' }))[0]?.props as { source: string; format?: string } | undefined
+}
+
+async function doubleClick(ui: any, clock: any, path: string) {
+  await ui.post({ press: path }, { in: 'rows' })
+  await ui.post({ press: path }, { in: 'rows' })
+  await clock.settle()
+}
+
+test('a changed file asks how to open it; Diff view shows its hunks in the pane', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const asked: any[] = []
+  const { root, clock } = changedRepo(on, ran, asked, () => 'Diff view')
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/src` }, { in: 'rows' })
+  await clock.settle()
+  await doubleClick(ui, clock, `${root}/src/a.ts`)
+  expect(asked.length).toBe(1)
+  expect(JSON.stringify(asked[0])).toContain('Diff view')
+  expect(JSON.stringify(asked[0])).toContain('Open in app')
+  const c = await code(ui)
+  expect(c?.format).toBe('diff')
+  expect(c?.source.startsWith('@@ -1,40 +1,41 @@')).toBe(true)
+  expect(c?.source).toContain('+added line')
+  expect(c?.source).not.toContain('diff --git')
+  expect(ran.some(a => a[0] === 'open')).toBe(false)
+  await ui.press({ key: 'mode' })
+  await clock.settle()
+  expect((await code(ui))?.format).toBe('source')
+  await ui.unmount()
+})
+
+test('Open in app opens a changed file the usual way; a dismissed question does nothing', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const asked: any[] = []
+  let answer = 'Open in app'
+  const { root, clock } = changedRepo(on, ran, asked, () => answer)
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await doubleClick(ui, clock, `${root}/notes.md`)
+  expect(ran).toContainEqual(['open', '--', `${root}/notes.md`])
+  expect(await code(ui)).toBeUndefined()
+  answer = 'dismiss'
+  const opened = ran.filter(a => a[0] === 'open').length
+  await clock.advance(1000)
+  await doubleClick(ui, clock, `${root}/notes.md`)
+  expect(asked.length).toBe(2)
+  expect(ran.filter(a => a[0] === 'open').length).toBe(opened)
+  expect(await code(ui)).toBeUndefined()
+  await doubleClick(ui, clock, `${root}/README.md`)
+  expect(asked.length).toBe(2)
+  expect(ran).toContainEqual(['open', '--', `${root}/README.md`])
+  await ui.unmount()
+})
+
+test('an untracked file diffs as one hunk of additions, never as Markdown', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const { root, clock } = changedRepo(on, ran, [], () => 'Diff view')
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await doubleClick(ui, clock, `${root}/notes.md`)
+  const c = await code(ui)
+  expect(c?.format).toBe('diff')
+  expect(c?.source).toBe('@@ -0,0 +1,2 @@\n+# Notes\n+second line')
+  expect(await ui.findAll({ type: 'Markdown', in: 'rows' })).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('a scrolled terminal diff starts every window with a recounted hunk header', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const { root, clock } = changedRepo(on, ran, [], () => 'Diff view')
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 10 } }
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props })
+  await clock.settle()
+  await ui.post({ press: `${root}/src` }, { in: 'rows' })
+  await clock.settle()
+  await doubleClick(ui, clock, `${root}/src/a.ts`)
+  for (let i = 0; i < 5; i++) await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  const c = await code(ui)
+  // Rows 5 to 13: the header row is above, so lines 5 to 13 of the hunk (4 context lines before them, one of them added).
+  expect(c?.source.split('\n')[0]).toBe('@@ -4,9 +5,9 @@')
+  expect(c?.source.split('\n')).toHaveLength(10)
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await clock.settle()
+  const tail = (await code(ui))?.source.split('\n') ?? []
+  expect(tail[0]).toMatch(/^@@ -\d+,\d+ \+\d+,\d+ @@$/)
+  expect(tail.at(-1)).toBe('+new line')
+  await ui.unmount()
+})
