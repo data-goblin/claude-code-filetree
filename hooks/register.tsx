@@ -1047,13 +1047,21 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
+    // With no path, /filetree on an open tree closes it, like a toggle;
+    // `/filetree open` opens it, or brings it forward from behind another tab, without toggling.
+    const given = (e.args ?? '').trim()
+    if (!given && (await $.ui.panes().catch(() => [])).some(p => p.id === PANE)) {
+      noDock = true
+      await $.ui.close({ id: PANE }).catch(() => undefined)
+      return { text: 'File tree closed.' }
+    }
     // The layout checks are the terminal's: the desktop app docks the pane itself and
     // reports no fullscreen layout, so a session no terminal draws skips them.
     const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
     if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
     if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
     noDock = false
-    const arg = (e.args ?? '').trim()
+    const arg = given === 'open' ? '' : given
     const cwd = await cwdOf($)
     follow = !arg
     const root = arg ? resolve(cwd, arg, home) : cwd
