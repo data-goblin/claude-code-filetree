@@ -1046,3 +1046,32 @@ for (const os of ['linux', 'win32'] as const) {
     await ui.unmount()
   })
 }
+
+// /filetree with no path on an open tree closes it.
+test('a second /filetree closes the tree', async ($, on) => {
+  const closed: string[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: true, isFocused: false, isPlaced: true }] }) as never)
+  on('ui.close', ($, e) => {
+    closed.push((e as { id: string }).id)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: true } as never)
+  const out = await $.command.run({ command: 'filetree', args: '' } as never)
+  expect(closed).toEqual(['filetree'])
+  expect(JSON.stringify(out)).toContain('closed')
+})
+
+// /filetree open never closes an open tree.
+test('/filetree open keeps an open tree open', async ($, on) => {
+  const closed: string[] = []
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: false, isFocused: false, isPlaced: true }] }) as never)
+  on('ui.close', ($, e) => {
+    closed.push((e as { id: string }).id)
+    return { value: undefined } as never
+  })
+  await $.session.start({ cwd: '/tmp', surface: 'desktop', isInteractive: true } as never)
+  await $.command.run({ command: 'filetree', args: 'open', presentation: { isFullscreen: true, columns: 200 } } as never).catch(() => undefined)
+  expect(closed).toEqual([])
+})
