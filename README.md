@@ -62,6 +62,7 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
 - On Omarchy, the pane takes its colors and background from the current theme and follows theme switches
+- Light themes get their own palette, with every text color at WCAG AAA contrast (7:1 or more), also on the selected and hovered rows: a light `/config` theme in the terminal, and the Desktop app's light appearance, or System on a light OS
 
 ### Resizing the pane
 

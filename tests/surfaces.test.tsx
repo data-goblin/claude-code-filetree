@@ -22,6 +22,7 @@ type World = {
   duDelays?: number[]
   links?: string[]
   files?: Record<string, string>
+  reg?: string
 }
 type Ran = string[][]
 const opens: unknown[] = []
@@ -91,6 +92,7 @@ function world(on: any, w: World, ran: Ran) {
     }
     if (argv[0] === 'uname') return ok(w.os === 'darwin' ? 'Darwin\n' : 'Linux\n')
     if (argv[0] === 'sh') return ok('missing\n')
+    if (argv[0] === 'reg') return ok(w.reg ?? '')
     if (argv[0] === 'git') {
       const verb = argv.slice(4).find(a => !a.startsWith('-'))
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
@@ -923,6 +925,67 @@ test('without an Omarchy theme the pane keeps the terminal background and nothin
   expect(ran.filter(a => a[0] === 'theme-stat').length).toBe(stats)
   expect(await texts(ui)).not.toContain('"backgroundColor":"#')
   await ui.unmount()
+})
+
+test('a light theme, from the theme setting or the desktop app, draws every color at AAA contrast, and a dark one keeps its own', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const app = '/Users/k/Library/Application Support/Claude'
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root,
+    dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']], [app]: [['config.json', 'file']] },
+    status: '## main\0 M a.ts\0?? b.ts\0', numstat: '3\t1\ta.ts\0',
+    files: { [`${app}/config.json`]: '{"userThemeMode":"light"}' },
+  }, ran)
+  let theme = 'light-daltonized'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] as any }))
+  on('config.set', (_$: any, e: any) => {
+    theme = e.value
+    return { value: e.value }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const light = await texts(ui)
+  expect(light).toContain('"activeBg":"#e2e6ec","hoverBg":"#f0f2f5"')
+  for (const c of ['#1e3a8a', '#78350f', '#14532d', '#374151']) expect(light).toContain(`"color":"${c}"`)
+  expect(light).toContain('#431407')
+  expect(light).not.toContain('"color":"#5b9bd5"')
+  await $.config.set({ key: 'theme', value: 'dark' } as any)
+  await clock.settle()
+  const dark = await texts(ui)
+  expect(dark).toContain('"activeBg":"#6b7280","hoverBg":"#3b3d41"')
+  for (const c of ['#5b9bd5', '#e5c07b', '#98c379', '#808a96']) expect(dark).toContain(`"color":"${c}"`)
+  expect(dark).not.toContain('"color":"#1e3a8a"')
+  await ui.unmount()
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const onDesktop = await texts(desktop)
+  expect(onDesktop).toContain('"activeBg":"#e2e6ec","hoverBg":"#f0f2f5"')
+  expect(onDesktop).toContain('"color":"#1e3a8a"')
+  await desktop.unmount()
+})
+
+test('the desktop app on the system appearance follows Windows, and a terminal-only session never asks', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = 'C:/Users/k/proj'
+  const clock = world(on, {
+    os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k', APPDATA: 'C:\\Users\\k\\AppData\\Roaming' }, cwd: root, top: '',
+    dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '',
+    reg: '\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize\r\n    AppsUseLightTheme    REG_DWORD    0x1\r\n',
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(ran.some(a => a[0] === 'reg')).toBe(false)
+  await ui.unmount()
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(ran.find(a => a[0] === 'reg')).toContain('AppsUseLightTheme')
+  expect(await texts(desktop)).toContain('"activeBg":"#e2e6ec","hoverBg":"#f0f2f5"')
+  await desktop.unmount()
 })
 
 test('formatSize: bytes, binary units, one decimal under 100, ? for unknown', async () => {

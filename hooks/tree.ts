@@ -15,6 +15,17 @@ export const DEFAULT_THEME: Theme = {
   bg: '',
 }
 
+// For a light theme: every text color here and in the other LIGHT_ tables keeps 7:1 (WCAG AAA)
+// on white and on the selected and hovered rows.
+export const LIGHT_THEME: Theme = {
+  fg: '',
+  accent: '#1e3a8a',
+  muted: '#374151',
+  urgent: '#7f1d1d',
+  selection: '#e2e6ec',
+  bg: '',
+}
+
 export function emptyTree(root: string): FileTree {
   return {
     root,
