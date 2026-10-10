@@ -16,7 +16,7 @@
 </p>
 
 > [!NOTE]
-> filetree is a Claude Code **mod** and needs **Claude Code 2.1.287+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own, and `/filetree` reopens it there after you close it. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
+> filetree is a Claude Code **mod** and needs **Claude Code 2.1.287+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; in a narrower terminal, or outside the fullscreen layout, it folds to a `▸ show files` bar above the prompt and moves back to the sidebar once there is room. The Desktop app docks it on its own, and `/filetree` reopens it there after you close it. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
 
 ---
 
@@ -58,6 +58,8 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 
 - File and folder sizes: the `Σ` header button swaps the date column for sizes; folders show their disk usage (`du`, or a summed listing on Windows), worked out in the background for the rows on screen and refreshed after Claude writes
 - Double-click a file to open it in its default app
+- Double-click or Enter on a file with git changes asks **Diff view** or **Open in app**. Diff view shows the file's diff against `HEAD` in the pane, and the `text`/`diff` header button switches between the file and its diff. An untracked file shows as all additions, and a deleted file opens straight in its diff
+- `▾ hide` in the header folds the tree to a one-line bar with the folder name and the number of changed files, and `▸ show files` opens it again. When the terminal gets too narrow for the sidebar, the tree folds the same way instead of closing, and shows again in the sidebar once the terminal is wide enough
 - Click to select, arrow keys to move through the tree
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
