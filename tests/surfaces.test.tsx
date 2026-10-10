@@ -1032,6 +1032,48 @@ test('without an Omarchy theme the pane keeps the terminal background and nothin
   await ui.unmount()
 })
 
+test('a light theme setting draws every color at AAA contrast in the terminal, and the desktop app and a dark theme keep the dark palette', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root,
+    dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] },
+    status: '## main\0 M a.ts\0?? b.ts\0', numstat: '3\t1\ta.ts\0',
+  }, ran)
+  let theme = 'light-daltonized'
+  on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] as any }))
+  on('config.set', (_$: any, e: any) => {
+    theme = e.value
+    return { value: e.value }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  let ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const light = await texts(ui)
+  expect(light).toContain('"activeBg":"#e2e6ec","hoverBg":"#f0f2f5"')
+  for (const c of ['#1e3a8a', '#78350f', '#14532d', '#374151']) expect(light).toContain(`"color":"${c}"`)
+  expect(light).toContain('#431407')
+  expect(light).not.toContain('"color":"#5b9bd5"')
+  await ui.unmount()
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const onDesktop = await texts(desktop)
+  expect(onDesktop).toContain('"activeBg":"#6b7280","hoverBg":"#3b3d41"')
+  expect(onDesktop).not.toContain('"color":"#1e3a8a"')
+  await desktop.unmount()
+  ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await texts(ui)).toContain('"color":"#1e3a8a"')
+  await $.config.set({ key: 'theme', value: 'dark' } as any)
+  await clock.settle()
+  const dark = await texts(ui)
+  expect(dark).toContain('"activeBg":"#6b7280","hoverBg":"#3b3d41"')
+  for (const c of ['#5b9bd5', '#e5c07b', '#98c379', '#808a96']) expect(dark).toContain(`"color":"${c}"`)
+  expect(dark).not.toContain('"color":"#1e3a8a"')
+  await ui.unmount()
+})
+
 test('formatSize: bytes, binary units, one decimal under 100, ? for unknown', async () => {
   expect(formatSize(0)).toBe('0 B')
   expect(formatSize(1023)).toBe('1023 B')

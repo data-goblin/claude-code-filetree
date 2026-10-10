@@ -34,6 +34,16 @@ export const TONES: Record<string, { bright: string[]; dim: string[]; solid: str
   red: { bright: ['#ef4444', '#f87171', '#fca5a5', '#fee2e2'], dim: ['#7f1d1d', '#991b1b', '#b54040', '#c96a6a'], solid: '#f87171' },
 }
 
+export const LIGHT_TONES: Record<string, { bright: string[]; dim: string[]; solid: string }> = {
+  orange: { bright: ['#7c2d12', '#69250e', '#561c0b', '#431407'], dim: ['#5d362e', '#52322c', '#482d2a', '#3e2828'], solid: '#7c2d12' },
+  green: { bright: ['#14532d', '#0f4725', '#0a3a1e', '#052e16'], dim: ['#244b3d', '#214439', '#1e3d35', '#1b3731'], solid: '#14532d' },
+  teal: { bright: ['#134e4a', '#0e4441', '#093937', '#042f2e'], dim: ['#23484d', '#204348', '#1e3d43', '#1b373e'], solid: '#134e4a' },
+  blue: { bright: ['#1e3a8a', '#1c3378', '#192c66', '#172554'], dim: ['#293d70', '#283966', '#26355d', '#253253'], solid: '#1e3a8a' },
+  purple: { bright: ['#581c87', '#4e157b', '#450e70', '#3b0764'], dim: ['#492d6f', '#442968', '#3f2562', '#39215b'], solid: '#581c87' },
+  cyan: { bright: ['#164e63', '#114559', '#0d3c4e', '#083344'], dim: ['#25485b', '#224355', '#203e4f', '#1d394a'], solid: '#164e63' },
+  red: { bright: ['#7f1d1d', '#6c1717', '#581010', '#450a0a'], dim: ['#5f2d34', '#542a31', '#49262d', '#3f232a'], solid: '#7f1d1d' },
+}
+
 const GIT_VERBS: Record<string, Omit<GitAction, 'kind'>> = {
   commit: { verb: 'commit', running: 'committing', done: 'committed', tone: 'green', icon: ICON.commit },
   push: { verb: 'push', running: 'pushing', done: 'pushed', tone: 'teal', icon: ICON.push },

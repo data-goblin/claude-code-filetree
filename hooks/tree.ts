@@ -15,6 +15,15 @@ export const DEFAULT_THEME: Theme = {
   bg: '',
 }
 
+export const LIGHT_THEME: Theme = {
+  fg: '',
+  accent: '#1e3a8a',
+  muted: '#374151',
+  urgent: '#7f1d1d',
+  selection: '#e2e6ec',
+  bg: '',
+}
+
 export function emptyTree(root: string): FileTree {
   return {
     root,

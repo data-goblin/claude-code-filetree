@@ -123,6 +123,15 @@ export const GIT_COLOR: Record<string, string> = {
   T: '#e5c07b',
 }
 
+export const LIGHT_GIT_COLOR: Record<string, string> = {
+  A: '#14532d',
+  '?': '#14532d',
+  R: '#1e3a8a',
+  C: '#1e3a8a',
+  M: '#78350f',
+  T: '#78350f',
+}
+
 const PRIORITY = ['U', 'D', 'M', 'T', 'R', 'C', 'A', '?']
 
 export function stronger(a: string | undefined, b: string): string {
