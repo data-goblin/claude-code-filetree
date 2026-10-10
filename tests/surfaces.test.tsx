@@ -411,7 +411,7 @@ test('sidebar only: no pane in the default layout, and an inline pane closes its
   const closed: unknown[] = []
   on('ui.close', (_$: any, e: any) => {
     closed.push(e)
-    return {}
+    return { value: undefined }
   })
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -423,6 +423,21 @@ test('sidebar only: no pane in the default layout, and an inline pane closes its
   await clock.settle()
   expect(closed.length).toBeGreaterThan(0)
   await ui.unmount()
+})
+
+test('in the desktop app /filetree opens the pane without the terminal layout checks', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  await $.session.start({ cwd: root, surface: null, isInteractive: false })
+  await clock.settle()
+  const before = opens.length
+  const r = await $.command.run({ command: 'filetree', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } } as any)
+  await clock.settle()
+  expect(JSON.stringify(r)).toContain('File tree on')
+  expect(opens.length).toBeGreaterThan(before)
+  expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
 })
 
 const shimmer = (name: string, tone: string) => `"t":${JSON.stringify(name)},"sh":"${tone}"`
