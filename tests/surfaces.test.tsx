@@ -315,6 +315,32 @@ test('long trees scroll: wheel, scrollbar drag, and a click does not jump the vi
   await ui.unmount()
 })
 
+test('desktop: a long tree draws every row and leaves the wheel to the app', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/big'
+  const names = Array.from({ length: 60 }, (_, i) => [`f${String(i).padStart(2, '0')}.txt`, 'file'] as [string, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: '', dirs: { [root]: names }, status: '', numstat: '' }, [])
+  const appScrolls: number[] = []
+  on('ui.scroll', (_$: any, e: any) => (appScrolls.push(e.by), {}))
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props })
+  await clock.settle()
+  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  let p = await rowsOf()
+  expect(p.bar).toBeUndefined()
+  expect(p.rows.length).toBe(60)
+  expect(p.rows.at(-1).id).toBe(`${root}/f59.txt`)
+  const wheel = { component: 'Pane', requestId: 'filetree', by: 1, offset: 1, bodyRows: 20, contentRows: 64, origin: { kind: 'person' } }
+  expect(await $.ui.scroll(wheel as any)).toEqual({})
+  expect(appScrolls).toEqual([1])
+  await clock.settle()
+  p = await rowsOf()
+  expect(p.rows.length).toBe(60)
+  expect(p.rows[0].id).toBe(`${root}/f00.txt`)
+  await ui.unmount()
+})
+
 async function scrolledTree($: any, on: any) {
   const root = '/home/k/big'
   const files = Array.from({ length: 60 }, (_, i) => [`f${String(i).padStart(2, '0')}.txt`, 'file'] as [string, 'file'])
