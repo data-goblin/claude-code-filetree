@@ -1,5 +1,6 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
+import type { ButtonProps } from './button'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
@@ -86,6 +87,7 @@ let showWrites = true
 let searchIndex: { root: string; paths: Promise<string[]> } | null = null
 let activityId = 0
 let pointer = true
+let hovered = ''
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
@@ -1006,6 +1008,28 @@ async function loadTheme($: EngineInterface): Promise<void> {
   }
 }
 
+async function pressHeader($: EngineInterface, id: string): Promise<void> {
+  const t = await get($)
+  if (id === 'up') {
+    follow = false
+    await reset($, dirname(t.root))
+  } else if (id === 'cwd') {
+    follow = true
+    await reset($, await cwdOf($))
+  } else if (id === 'refresh') {
+    searchIndex = null
+    await staleSizes($)
+    await loadDirs($, [t.root, ...t.expanded])
+    await detectRepo($)
+    await refreshGit($)
+    if (t.query.trim()) await search($, t.query)
+  } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
+  else if (id === 'size') await patch($, cur => ({ showSize: !cur.showSize }))
+  else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
+  else if (id === 'unselect') await patch($, () => ({ selected: '' }))
+  else if (id === 'external' && t.preview) await openFile($, t.preview, true)
+}
+
 function shortPath(path: string): string {
   return home && inside(home, path) ? `~${path.slice(home.length)}` : path
 }
@@ -1119,6 +1143,16 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.message', async ($, e, next) => {
+    if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
+      const id = e.element.slice('button-'.length)
+      const data = e.data as { over?: unknown; press?: unknown }
+      if (data.press) await pressHeader($, id)
+      else if (data.over === true || hovered === id) {
+        hovered = data.over === true ? id : ''
+        void $.ui.invalidate('ui.render')
+      }
+      return {}
+    }
     if (e.requestId !== PANE || e.element !== 'rows' || !e.data || typeof e.data !== 'object') return next(e)
     const data = e.data as { press?: unknown; key?: unknown; ctrl?: unknown; shift?: unknown; scrollTo?: unknown; copy?: unknown }
     void sync($)
@@ -1263,6 +1297,15 @@ export const register: Register = (on, options) => {
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
+    const button = (b: ButtonProps) => <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
+    // What the hovered header button does, left of the buttons, when it fits beside a title that
+    // long; the buttons are Clients only so that they can say when the pointer is over them.
+    const hint = (buttons: { id: string; hint: string }[], title: number) => {
+      const text = buttons.find(b => b.id === hovered)?.hint
+      if (!text) return null
+      const room = e.props.bodyColumns - title - buttons.length * (e.surface === 'desktop' ? 3 : 2) - 2
+      return text.length <= room ? <Text color={theme.muted}>{`${text} `}</Text> : null
+    }
     if (t.preview) {
       if (previewed?.path !== t.preview) await loadPreview($, t.preview)
       const p = previewed
@@ -1271,6 +1314,7 @@ export const register: Register = (on, options) => {
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
       const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      const external = { id: 'external', label: unicode ? '↗' : '\u{f08e}', dim: true, hint: 'open in default app' }
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
@@ -1279,7 +1323,8 @@ export const register: Register = (on, options) => {
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
-            <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
+            {hint([external], 8 + name.length)}
+            {button(external)}
           </Box>
           {p?.note ? <Text dimColor>{p.note}</Text> : null}
           <Client
@@ -1331,6 +1376,15 @@ export const register: Register = (on, options) => {
       return out
     }
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
+    const buttons = [
+      { id: 'up', label: unicode ? '↑' : '\u{f005d}', dim: true, hint: 'parent folder' },
+      { id: 'cwd', label: unicode ? '⌂' : '\u{f02dc}', dim: !follow, hint: 'follow the cwd' },
+      { id: 'refresh', label: unicode ? '↻' : '\u{f0450}', dim: true, hint: 'reload tree and git' },
+      { id: 'hidden', label: unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files' },
+      { id: 'size', label: unicode ? 'Σ' : '\u{f02ca}', dim: !t.showSize, hint: t.showSize ? 'show dates' : 'show sizes' },
+      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all' },
+      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{f0777}', dim: false, hint: 'clear selection' }] : []),
+    ]
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
 
     const rowSpec = (r: (typeof rows)[number]): RowSpec => {
@@ -1455,66 +1509,9 @@ export const register: Register = (on, options) => {
             {header}
           </Text>
           <Box flexGrow={1} />
-          <Box flexDirection="row" gap={2}>
-            <Button
-              key="up"
-              plain
-              dimColor
-              label={unicode ? '↑' : '\u{f005d}'}
-              onPress={() =>
-                void (async () => {
-                  follow = false
-                  await reset($, dirname(t.root))
-                })()
-              }
-            />
-            <Button
-              key="cwd"
-              plain
-              dimColor={!follow}
-              label={unicode ? '⌂' : '\u{f02dc}'}
-              onPress={() =>
-                void (async () => {
-                  follow = true
-                  await reset($, await cwdOf($))
-                })()
-              }
-            />
-            <Button
-              key="refresh"
-              plain
-              dimColor
-              label={unicode ? '↻' : '\u{f0450}'}
-              onPress={() =>
-                void (async () => {
-                  const cur = await get($)
-                  searchIndex = null
-                  await staleSizes($)
-                  await loadDirs($, [cur.root, ...cur.expanded])
-                  await detectRepo($)
-                  await refreshGit($)
-                  if (cur.query.trim()) await search($, cur.query)
-                })()
-              }
-            />
-            <Button
-              key="hidden"
-              plain
-              dimColor={!t.showHidden}
-              label={unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}'}
-              onPress={() => void patch($, cur => ({ showHidden: !cur.showHidden }))}
-            />
-            <Button
-              key="size"
-              plain
-              dimColor={!t.showSize}
-              label={unicode ? 'Σ' : '\u{f02ca}'}
-              onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
-            />
-            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))} />
-            {t.selected && (
-              <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
-            )}
+          {hint(buttons, header.length)}
+          <Box flexDirection="row" gap={1}>
+            {buttons.map(button)}
             <Text> </Text>
           </Box>
         </Box>

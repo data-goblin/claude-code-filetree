@@ -255,6 +255,43 @@ test('macOS app: every header button and the search box work on the desktop surf
   await ui.unmount()
 })
 
+test('hovering a header button says what it does left of the buttons where it fits, and the buttons sit a column apart', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root, dirs: { [root]: [['.env', 'file'], ['a.ts', 'file']] }, status: '## main\0', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    expect(JSON.stringify(await ui.drawn())).toContain('"gap":1')
+    expect(await texts(ui)).not.toContain('reload tree and git')
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-refresh' })
+    await clock.settle()
+    expect(await texts(ui)).toContain('"reload tree and git "')
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-refresh' })
+    await clock.settle()
+    expect(await texts(ui)).not.toContain('reload tree and git')
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-hidden' })
+    await clock.settle()
+    expect(await texts(ui)).toContain('"hide hidden files "')
+    await ui.press({ key: 'hidden' })
+    await clock.settle()
+    expect(await texts(ui)).toContain('"show hidden files "')
+    await ui.press({ key: 'hidden' })
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-hidden' })
+    await clock.settle()
+    await ui.unmount()
+  }
+  const narrow = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(24) })
+  await clock.settle()
+  await narrow.pointer({ type: 'enter', x: 0, y: 0, in: 'button-refresh' })
+  await clock.settle()
+  expect(await texts(narrow)).not.toContain('reload tree and git')
+  await narrow.pointer({ type: 'leave', x: 0, y: 0, in: 'button-refresh' })
+  await narrow.unmount()
+})
+
 test('outside a repo only git rev-parse runs, never status, diff or ls-files', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/scratch'
