@@ -58,10 +58,14 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 
 - File and folder sizes: the `Σ` header button swaps the date column for sizes; folders show their disk usage (`du`, or a summed listing on Windows), worked out in the background for the rows on screen and refreshed after Claude writes
 - Double-click a file to open it in its default app
-- Click to select, arrow keys to move through the tree
+- Click to select, arrow keys or `j`/`k`/`h`/`l` to move through the tree
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
 - On Omarchy, the pane takes its colors and background from the current theme and follows theme switches
+
+### Keyboard navigation
+
+With the filetree pane focused, use `j`/`k` to move down/up, `l` to expand a folder, and `h` to collapse it or move to its parent. `o` or Enter opens a file or toggles a folder. Press `s` to focus search, type a query, then Enter to jump to the first match and return focus to the tree controls.
 
 ### Resizing the pane
 
@@ -78,7 +82,7 @@ All settings are in `/config` under filetree.
 - **Claude activity:** what shimmers: `reads and writes` (default), `writes`, `reads` or `none`. Git status, line counts and the git status at the bottom always show.
 - **Follow Claude:** `on` (default) scrolls the tree to what Claude reads, writes or commits; `off` keeps the view where you put it, and highlights still show.
 - **Right column:** `date` (default) or `size`; what the right column shows when a session starts. The `Σ` button in the header toggles it.
-- **Open with:** empty (default) opens a double-clicked file in its default app, or inside tmux in `$VISUAL`/`$EDITOR` (nvim: as a buffer of a running nvim in the same tmux session). `preview` shows it in the pane instead: Markdown rendered, code highlighted, arrow keys, Page Up/Down and the wheel to scroll, `←`/`h` or `← files` back to the tree, `↗` the default app. Otherwise a command that double-click and Enter run instead: `{path}` is the file and `{dir}` its folder, and without `{path}` the path goes last. It runs without a shell, so quote a word that holds spaces, and it should start the viewer and return rather than wait for it. Examples: `zed {path}`, `code -g {path}`, or in herdr a tab running [herdr-file-viewer](https://github.com/smarzban/herdr-file-viewer) on the file: `herdr plugin pane open --plugin herdr-file-viewer --entrypoint file-viewer --placement tab --focus --env HERDR_FILE_VIEWER_OPEN={path}`.
+- **Open with:** empty (default) opens files in their default app on double-click or Enter, including inside tmux. `editor` opts into `$VISUAL`, then `$EDITOR`, then `vi` in tmux on Linux/macOS: nvim reuses a running nvim in the same tmux server and session; otherwise the editor opens in a new window in the file's folder. Outside a supported tmux environment it shows a notice instead of opening the file. Editor commands can include arguments; quote an executable path or argument that contains spaces, for example `EDITOR='"/opt/My Editor/nvim" -u NONE'`. Arguments apply when starting a new editor; reusing nvim keeps that instance's configuration. `preview` shows the file in the pane instead: Markdown rendered, code highlighted, arrow keys, Page Up/Down and the wheel to scroll, `←`/`h` or `← files` back to the tree, `↗` always the default app. Otherwise a command that double-click and Enter run instead: `{path}` is the file and `{dir}` its folder, and without `{path}` the path goes last. It runs without a shell, so quote a word that holds spaces, and it should start the viewer and return rather than wait for it. Examples: `zed {path}`, `code -g {path}`, or in herdr a tab running [herdr-file-viewer](https://github.com/smarzban/herdr-file-viewer) on the file: `herdr plugin pane open --plugin herdr-file-viewer --entrypoint file-viewer --placement tab --focus --env HERDR_FILE_VIEWER_OPEN={path}`.
 - **Glyphs:** `auto` (default) uses Nerd Font icons when a Nerd Font is installed and your terminal started after it was installed, plain Unicode in the desktop app, and Nerd Font over SSH. `nerd` or `plain` forces one.
 
 ## herdr

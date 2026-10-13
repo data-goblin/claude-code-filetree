@@ -1,5 +1,5 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
-import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
+import { LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand } from './open'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
@@ -951,17 +951,22 @@ function previewLines(text: string, top: number, rows: number, markdown: boolean
 }
 
 async function openFile($: EngineInterface, path: string, external = false): Promise<void> {
-  if (!external && openWithSetting.trim() === 'preview') return showPreview($, path)
+  const mode = external ? '' : openWithSetting.trim()
+  if (mode === 'preview') return showPreview($, path)
   const os = await osName($)
+  if (mode === 'editor' && (os === 'win32' || !(await $.env.get('TMUX')))) {
+    $.ui.toast('Open with: editor requires tmux on Linux or macOS. Clear Open with to use the default app, or set a custom command.')
+    return
+  }
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
-  const custom = external ? null : openWithCommand(openWithSetting, native(path), native(dirname(path)))
-  const editor = custom || !(await $.env.get('TMUX')) ? undefined : (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi'
-  const { argv, init } = custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path, editor)
+  const custom = mode === 'editor' ? null : openWithCommand(mode, native(path), native(dirname(path)))
+  const editor = mode === 'editor' ? (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi' : undefined
   try {
+    const { argv, init } = editor ? tmuxOpenCommand(editor, path) : custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
     const run = await $.process.run(argv, init)
-    if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
+    if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${editor ?? custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
   } catch {
-    $.ui.toast(`could not open ${path} with ${custom?.[0] ?? argv[0]}`)
+    $.ui.toast(`could not open ${path} with ${editor ?? custom?.[0] ?? 'the default app'}`)
   }
 }
 
@@ -1454,8 +1459,6 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // The rows Client only takes keys after a click, so keyboard focus rests on the open
-    // button: Enter opens the row under the cursor, and the letter hotkeys keep working.
     const park = () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {})
 
     return (
@@ -1539,8 +1542,6 @@ export const register: Register = (on, options) => {
               submitLabel="jump"
               value={t.query}
               onInput={(v: string) => void search($, v)}
-              // leaving the field hands the focus back to the button that entered it, after
-              // this handler; park once that has happened
               onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
             />
           </Box>

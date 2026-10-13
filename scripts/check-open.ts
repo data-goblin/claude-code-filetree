@@ -3,13 +3,15 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
-import { LINUX_LAUNCH, LINUX_OPEN } from '../hooks/open'
+import { createServer } from 'node:net'
+import { LINUX_LAUNCH, LINUX_OPEN, tmuxOpenCommand } from '../hooks/open'
 
 const dir = mkdtempSync(join(tmpdir(), 'pane-open-'))
 const bin = join(dir, 'bin')
 const data = join(dir, 'data with spaces')
 const run = (script: string, args: string[], env = process.env) => spawnSync('/bin/sh', ['-c', script, 'sh', ...args], { encoding: 'utf8', env, timeout: 5000 })
 const dry = LINUX_OPEN.replace(/exec (gio launch [^\n]+|gio open \"\$f\"|xdg-open \"\$f\")/g, '{ echo $1; exit 0; }')
+const sockets: ReturnType<typeof createServer>[] = []
 try {
   mkdirSync(bin)
   mkdirSync(join(data, 'applications'), { recursive: true })
@@ -52,7 +54,48 @@ try {
     assert.equal(result.status, 0, result.stderr)
     console.log(`${target}: ${result.stdout.trim()}`)
   }
+  writeFileSync(join(bin, 'tmux'), `#!/bin/sh
+if [ "$1" = display-message ]; then
+  if [ "$3" = -t ]; then printf '/test/tmux $0 1\\n'; else printf '/test/tmux $0\\n'; fi
+else
+  printf '%s\\0' "$@"
+fi
+`, { mode: 0o700 })
+  const editorDir = join(dir, 'editor with spaces')
+  const runtime = join(dir, 'runtime')
+  const temp = join(dir, 'temp')
+  for (const folder of [editorDir, runtime, temp]) mkdirSync(folder)
+  const tmuxEnv = { ...process.env, PATH: `${bin}:/usr/bin:/bin`, XDG_RUNTIME_DIR: runtime, TMPDIR: temp }
+  const target = join(dir, "A & B's $(touch nope).txt")
+  const editor = join(editorDir, 'vim')
+  const launch = tmuxOpenCommand(`"${editor}" -c "set number"`, target)
+  const opened = spawnSync(launch.argv[0], launch.argv.slice(1), { encoding: 'utf8', env: tmuxEnv, timeout: 5000 })
+  assert.equal(opened.status, 0, opened.stderr)
+  assert.deepEqual(opened.stdout.split('\0').slice(0, -1), ['new-window', '-c', dir, '--', editor, '-c', 'set number', target])
+  writeFileSync(join(editorDir, 'nvim'), `#!/bin/sh
+case "$2" in */nvim.1.0) exec sleep 30 ;; esac
+if [ "$3" = --remote-expr ]; then printf '/test/tmux,1,0 %%1\\n'; fi
+`, { mode: 0o700 })
+  for (const id of [1, 2]) {
+    const socket = createServer()
+    sockets.push(socket)
+    await new Promise<void>((resolve, reject) => {
+      socket.once('error', reject)
+      socket.listen(join(runtime, `nvim.${id}.0`), resolve)
+    })
+    const command = tmuxOpenCommand(`"${join(editorDir, 'nvim')}" -u NONE`, target)
+    const started = Date.now()
+    const result = spawnSync(command.argv[0], command.argv.slice(1), { encoding: 'utf8', env: tmuxEnv, timeout: 5000 })
+    assert.equal(result.status, 0, result.stderr)
+    assert.ok(Date.now() - started < 3000, 'one hung probe must not stall opening')
+    const args = result.stdout.split('\0').slice(0, -1)
+    assert.deepEqual(args, id === 1
+      ? ['new-window', '-c', dir, '--', join(editorDir, 'nvim'), '-u', 'NONE', target]
+      : ['select-window', '-t', '%1', ';', 'select-pane', '-t', '%1'])
+  }
+  console.log('Tmux checks passed: literal arguments, hung probe fallback, next responsive socket')
   console.log('Open checks passed; no applications launched')
 } finally {
+  for (const socket of sockets) socket.close()
   rmSync(dir, { recursive: true, force: true })
 }
