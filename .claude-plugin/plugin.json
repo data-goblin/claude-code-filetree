@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.2.24",
+  "version": "0.2.25",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -47,14 +47,35 @@
         "off"
       ]
     },
+    "start": {
+      "type": "string",
+      "title": "Open at start",
+      "description": "on: the pane opens when a session starts. off: it stays closed until you run /filetree.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "column": {
       "type": "string",
       "title": "Right column",
-      "description": "What the right column shows by default: date (last modified) or size (files in bytes, folders as disk usage computed in the background). The header button toggles it.",
+      "description": "What the right column shows by default: date (last modified), age (time since last modified, short: now, 12m, 3h, 5d, then Oct 9 past a week and the year past a year) or size (files in bytes, folders as disk usage computed in the background). The header button toggles between size and the date or age.",
       "default": "date",
       "options": [
         "date",
+        "age",
         "size"
+      ]
+    },
+    "hints": {
+      "type": "string",
+      "title": "Hints",
+      "description": "on: outside a git repo, a line under the header says git status starts after git init. off: the line is hidden and the tree gets the row.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
       ]
     },
     "open": {

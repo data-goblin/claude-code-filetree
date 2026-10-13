@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.287-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.287 or newer">
-  <img src="https://img.shields.io/badge/version-0.2.24-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.2.25-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -58,7 +58,9 @@ Installed it as `filetree@filetree` before the repository was renamed? Nothing t
 
 - File and folder sizes: the `Σ` header button swaps the date column for sizes; folders show their disk usage (`du`, or a summed listing on Windows), worked out in the background for the rows on screen and refreshed after Claude writes
 - Double-click a file to open it in its default app
+- On macOS, Space on a file shows it in Quick Look
 - Click to select, arrow keys or `j`/`k`/`h`/`l` to move through the tree
+- Hover a header button to see what it does
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
 - On Omarchy, the pane takes its colors and background from the current theme and follows theme switches
@@ -81,7 +83,9 @@ All settings are in `/config` under filetree.
 
 - **Claude activity:** what shimmers: `reads and writes` (default), `writes`, `reads` or `none`. Git status, line counts and the git status at the bottom always show.
 - **Follow Claude:** `on` (default) scrolls the tree to what Claude reads, writes or commits; `off` keeps the view where you put it, and highlights still show.
-- **Right column:** `date` (default) or `size`; what the right column shows when a session starts. The `Σ` button in the header toggles it.
+- **Open at start:** `on` (default) opens the pane when a session starts; `off` keeps it closed until you run `/filetree`.
+- **Right column:** `date` (default), `age` or `size`; what the right column shows when a session starts. `age` shows how long ago a file changed in a few characters: `now`, `12m`, `3h`, `5d`, then the day (`Oct 9`) past a week and the year past a year. The `Σ` button in the header toggles between sizes and the dates or ages.
+- **Hints:** `on` (default) shows a line under the header outside a git repo saying git status starts after `git init`; `off` hides it.
 - **Open with:** empty (default) opens files in their default app on double-click or Enter, including inside tmux. `editor` opts into `$VISUAL`, then `$EDITOR`, then `vi` in tmux on Linux/macOS: nvim reuses a running nvim in the same tmux server and session; otherwise the editor opens in a new window in the file's folder. Outside a supported tmux environment it shows a notice instead of opening the file. Editor commands can include arguments; quote an executable path or argument that contains spaces, for example `EDITOR='"/opt/My Editor/nvim" -u NONE'`. Arguments apply when starting a new editor; reusing nvim keeps that instance's configuration. `preview` shows the file in the pane instead: Markdown rendered, code highlighted, arrow keys, Page Up/Down and the wheel to scroll, `←`/`h` or `← files` back to the tree, `↗` always the default app. Otherwise a command that double-click and Enter run instead: `{path}` is the file and `{dir}` its folder, and without `{path}` the path goes last. It runs without a shell, so quote a word that holds spaces, and it should start the viewer and return rather than wait for it. Examples: `zed {path}`, `code -g {path}`, or in herdr a tab running [herdr-file-viewer](https://github.com/smarzban/herdr-file-viewer) on the file: `herdr plugin pane open --plugin herdr-file-viewer --entrypoint file-viewer --placement tab --focus --env HERDR_FILE_VIEWER_OPEN={path}`.
 - **Glyphs:** `auto` (default) uses Nerd Font icons when a Nerd Font is installed and your terminal started after it was installed, plain Unicode in the desktop app, and Nerd Font over SSH. `nerd` or `plain` forces one.
 

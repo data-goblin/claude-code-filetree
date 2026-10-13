@@ -1,4 +1,4 @@
-import type { ClientModule } from 'claude-code'
+import type { ClientModule, RenderElement } from 'claude-code'
 
 export type Seg = { t: string; c?: string; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
 export type RowSpec = { id: string; left: Seg[]; right: Seg[] }
@@ -16,6 +16,8 @@ export type RowsProps = {
 type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
 const TICK_MS = 90
+const TREE_BUDGET = 70_000
+const MAX_ROWS = 1_500
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
 function shimmer(i: number, phase: number, len: number, palette: string[]): string {
@@ -31,6 +33,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     state = { hover: -1, phase: 0, drag: false, ref: {} }
     surface.setState(state)
   }
+  let visible = props.rows.length
   const lit = props.rows.some(r => r.left.some(s => s.sh || s.spin) || r.right.some(s => s.sh || s.spin))
   if (lit && !state.ref.stop) {
     state.ref.stop = surface.every(TICK_MS, () => {
@@ -59,7 +62,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
         return
       }
     }
-    if (e.type === 'leave' || e.y < 0 || e.y >= props.rows.length) {
+    if (e.type === 'leave' || e.y < 0 || e.y >= visible) {
       if (cur.hover !== -1) surface.setState({ ...cur, hover: -1 })
       return
     }
@@ -121,29 +124,42 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
       </Text>
     )
   }
-  return (
-    <Box flexDirection="column">
-      {props.rows.map((r, i) => (
-        <Box
-          flexDirection="row"
-          height={1}
-          overflow="hidden"
-          backgroundColor={r.id && r.id === props.active ? props.activeBg : r.id && i === state.hover ? props.hoverBg : undefined}
-        >
-          <Box flexShrink={1} overflow="hidden">
-            {r.left.map(draw)}
-          </Box>
-          <Box flexGrow={1} />
-          {r.right.map(draw)}
-          {props.bar && (
-            <Text color={i >= props.bar.pos && i < props.bar.pos + props.bar.size ? props.bar.thumb : props.bar.track}>
-              {i >= props.bar.pos && i < props.bar.pos + props.bar.size ? '┃' : '│'}
-            </Text>
-          )}
-        </Box>
-      ))}
+  const rowEl = (r: RowSpec, i: number) => (
+    <Box
+      flexDirection="row"
+      height={1}
+      overflow="hidden"
+      backgroundColor={r.id && r.id === props.active ? props.activeBg : r.id && i === state.hover ? props.hoverBg : undefined}
+    >
+      <Box flexShrink={1} overflow="hidden">
+        {r.left.map(draw)}
+      </Box>
+      <Box flexGrow={1} />
+      {r.right.map(draw)}
+      {props.bar && (
+        <Text color={i >= props.bar.pos && i < props.bar.pos + props.bar.size ? props.bar.thumb : props.bar.track}>
+          {i >= props.bar.pos && i < props.bar.pos + props.bar.size ? '┃' : '│'}
+        </Text>
+      )}
     </Box>
   )
+  const drawn: RenderElement[] = []
+  let size = 0
+  for (let i = 0; i < props.rows.length; i++) {
+    const el = rowEl(props.rows[i] as RowSpec, i)
+    let cost = 1_000
+    try {
+      cost = JSON.stringify(el).length
+    } catch {}
+    if (size + cost > TREE_BUDGET || drawn.length >= MAX_ROWS) {
+      visible = i
+      drawn.push(<Text dimColor>{`  … ${props.rows.length - i} more rows, collapse folders or use search`}</Text>)
+      break
+    }
+    size += cost
+    drawn.push(el)
+  }
+  return <Box flexDirection="column">{drawn}</Box>
 }
 
 export default Rows

@@ -318,6 +318,19 @@ export function stamp(ms: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+export function age(ms: number, now: number): string {
+  if (!ms) return ''
+  const s = (now - ms) / 1000
+  if (s < 60 && s > -60) return 'now'
+  if (s > 0 && s < 3600) return `${Math.floor(s / 60)}m`
+  if (s > 0 && s < 86_400) return `${Math.floor(s / 3600)}h`
+  if (s > 0 && s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`
+  const d = new Date(ms)
+  return Math.abs(s) < 365 * 86_400 ? `${MONTHS[d.getMonth()]} ${d.getDate()}` : String(d.getFullYear())
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 0) return '?'
   if (bytes < 1024) return `${bytes} B`

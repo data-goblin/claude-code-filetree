@@ -1,11 +1,13 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand } from './open'
+import type { ButtonProps } from './button'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
 import {
+  age,
   ancestorsOf,
   type Change,
   DEFAULT_THEME,
@@ -43,6 +45,7 @@ const RUNNING_MAX_MS = 600_000
 const NO_REPO_DEPTH = 4
 const DOUBLE_MS = 450
 const FIND_LIMIT = 200
+const ROWS_BUDGET = 80_000
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
@@ -63,9 +66,11 @@ const HOME_PRUNE = ['Library', 'AppData', '.Trash']
 const SIZE_TIMEOUT_MS = 15_000
 const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
+const AGE_TICK_MS = 60_000
 
 let blink: Timer | null = null
 let themePoll: Timer | null = null
+let ageTick: Timer | null = null
 let themeMtime: number | null = null
 let generation = 0
 let lastPress = { key: '', at: 0 }
@@ -86,6 +91,7 @@ let showWrites = true
 let searchIndex: { root: string; paths: Promise<string[]> } | null = null
 let activityId = 0
 let pointer = true
+let hovered = ''
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
@@ -97,6 +103,8 @@ let markId = 0
 let listSeq = 0
 let lastRoot = ''
 let sizeDefault = false
+let showAge = false
+let showHints = true
 let sizeEpoch = 0
 let sizeActive = 0
 let sizeQueue: string[] = []
@@ -970,6 +978,14 @@ async function openFile($: EngineInterface, path: string, external = false): Pro
   }
 }
 
+async function quickLook($: EngineInterface, path: string): Promise<void> {
+  try {
+    await $.process.run(['sh', '-c', '(nohup qlmanage -p "$1" >/dev/null 2>&1 &); sleep 0.4; osascript -e \'tell application "System Events" to set frontmost of first process whose name is "qlmanage" to true\' >/dev/null 2>&1 || true', 'sh', path], { timeoutMs: 10_000 })
+  } catch {
+    $.ui.toast(`could not preview ${path} with Quick Look`)
+  }
+}
+
 async function toggle($: EngineInterface, n: FileNode): Promise<void> {
   if (n.kind === 'dir' && !(await get($)).expanded.includes(n.id)) await loadDirs($, [n.id])
   await patch($, t => {
@@ -1018,7 +1034,7 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
     else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent }))
   } else if (cur && key === 'return') await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
-  else if (cur && key === ' ') await toggle($, cur)
+  else if (cur && (key === ' ' || key === 'space')) await (cur.kind !== 'dir' && (await osName($)) === 'darwin' ? quickLook($, cur.id) : toggle($, cur))
 }
 
 async function loadTheme($: EngineInterface): Promise<void> {
@@ -1036,6 +1052,28 @@ async function loadTheme($: EngineInterface): Promise<void> {
   }
 }
 
+async function pressHeader($: EngineInterface, id: string): Promise<void> {
+  const t = await get($)
+  if (id === 'up') {
+    follow = false
+    await reset($, dirname(t.root))
+  } else if (id === 'cwd') {
+    follow = true
+    await reset($, await cwdOf($))
+  } else if (id === 'refresh') {
+    searchIndex = null
+    await staleSizes($)
+    await loadDirs($, [t.root, ...t.expanded])
+    await detectRepo($)
+    await refreshGit($)
+    if (t.query.trim()) await search($, t.query)
+  } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
+  else if (id === 'size') await patch($, cur => ({ showSize: !cur.showSize }))
+  else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
+  else if (id === 'unselect') await patch($, () => ({ selected: '' }))
+  else if (id === 'external' && t.preview) await openFile($, t.preview, true)
+}
+
 function shortPath(path: string): string {
   return home && inside(home, path) ? `~${path.slice(home.length)}` : path
 }
@@ -1047,7 +1085,10 @@ export const register: Register = (on, options) => {
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
   sizeDefault = options?.column === 'size'
+  showAge = options?.column === 'age'
+  showHints = options?.hints !== 'off'
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
+  noDock = options?.start === 'off'
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
     const windows = (await $.env.get('OS')) === 'Windows_NT'
@@ -1065,6 +1106,8 @@ export const register: Register = (on, options) => {
       await loadTheme($)
       themePoll?.cancel()
       themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
+      ageTick?.cancel()
+      ageTick = showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
@@ -1092,12 +1135,13 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', async ($, e, next) => {
-    if (e.tool !== 'Edit' && e.tool !== 'Write' && e.tool !== 'NotebookEdit' && e.tool !== 'Bash') return next(e)
-    const command = e.tool === 'Bash' ? e.command : ''
-    const cwd = e.tool === 'Bash' ? await cwdOf($) : ''
+    const shell = e.tool === 'Bash' || e.tool === 'PowerShell'
+    if (e.tool !== 'Edit' && e.tool !== 'Write' && e.tool !== 'NotebookEdit' && !shell) return next(e)
+    const command = e.tool === 'Bash' || e.tool === 'PowerShell' ? e.command : ''
+    const cwd = shell ? await cwdOf($) : ''
     const actions = gitActions(command)
     const quiet = !actions.length && readOnly(command)
-    const since = await sinceNow($, e.tool === 'Bash' && !quiet)
+    const since = await sinceNow($, shell && !quiet)
     const before = actions.some(a => a.verb === 'commit') ? await get($) : null
     const head = before?.top ? await headOf($, before.root) : ''
     const pending: Pending | null = actions.length ? { actions, ids: await startGit($, actions), command, head } : null
@@ -1113,12 +1157,12 @@ export const register: Register = (on, options) => {
       const ids = pending.ids
       void setActivities($, cur => cur.filter(a => !ids.includes(a.id)))
     }
-    if (result.deny || (result.isError && e.tool !== 'Bash')) {
+    if (result.deny || (result.isError && !shell)) {
       if (since.mark) void $.process.run(['rm', '-f', since.mark], { timeoutMs: 3_000 }).catch(() => undefined)
       return result
     }
-    if (e.tool === 'Bash') {
-      const out: Partial<BuiltinToolResults['Bash']> = !result.isError && result.result && typeof result.result === 'object' ? result.result : {}
+    if (shell) {
+      const out: Partial<BuiltinToolResults['Bash']> = !result.isError && result.result && typeof result.result === 'object' ? (result.result as Partial<BuiltinToolResults['Bash']>) : {}
       const reads = showReads ? readTargets(command, cwd, typeof out.stdout === 'string' ? out.stdout : '', home) : []
       const job: Job = { actions: [], since, initRepo: actions.some(a => a.init), readOnly: quiet || result.isReadOnly === true }
       if (out.backgroundTaskId) background.set(out.backgroundTaskId, { p: pending, job, reads })
@@ -1148,7 +1192,28 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  for (const tool of ['Grep', 'Glob'] as const)
+    on('tool.call', { tool }, async ($, e, next) => {
+      const result = await next(e)
+      if (result.deny || result.isError || !showReads) return result
+      const names = (result.result as Partial<BuiltinToolResults['Grep']> | undefined)?.filenames
+      if (!Array.isArray(names) || names.length === 0) return result
+      const cwd = await cwdOf($)
+      void touched($, names.slice(0, SEARCH_REVEAL_LIMIT).map(f => resolve(cwd, posix(f), home)), 'purple', true)
+      return result
+    })
+
   on('ui.message', async ($, e, next) => {
+    if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
+      const id = e.element.slice('button-'.length)
+      const data = e.data as { over?: unknown; press?: unknown }
+      if (data.press) await pressHeader($, id)
+      else if (data.over === true || hovered === id) {
+        hovered = data.over === true ? id : ''
+        void $.ui.invalidate('ui.render')
+      }
+      return {}
+    }
     if (e.requestId !== PANE || e.element !== 'rows' || !e.data || typeof e.data !== 'object') return next(e)
     const data = e.data as { press?: unknown; key?: unknown; ctrl?: unknown; shift?: unknown; scrollTo?: unknown; copy?: unknown }
     void sync($)
@@ -1274,6 +1339,15 @@ export const register: Register = (on, options) => {
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
+    const button = (b: ButtonProps) => <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
+    // What the hovered header button does, left of the buttons, when it fits beside a title that
+    // long; the buttons are Clients only so that they can say when the pointer is over them.
+    const hint = (buttons: { id: string; hint: string }[], title: number) => {
+      const text = buttons.find(b => b.id === hovered)?.hint
+      if (!text) return null
+      const room = e.props.bodyColumns - title - buttons.length * (e.surface === 'desktop' ? 3 : 2) - 2
+      return text.length <= room ? <Text color={theme.muted}>{`${text} `}</Text> : null
+    }
     if (t.preview) {
       if (previewed?.path !== t.preview) await loadPreview($, t.preview)
       const p = previewed
@@ -1282,6 +1356,7 @@ export const register: Register = (on, options) => {
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
       const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      const external = { id: 'external', label: unicode ? '↗' : '\u{f08e}', dim: true, hint: 'open in default app' }
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
@@ -1290,7 +1365,8 @@ export const register: Register = (on, options) => {
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
-            <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
+            {hint([external], 8 + name.length)}
+            {button(external)}
           </Box>
           {p?.note ? <Text dimColor>{p.note}</Text> : null}
           <Client
@@ -1310,7 +1386,7 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
-    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
+    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (t.selected || latest ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1342,6 +1418,15 @@ export const register: Register = (on, options) => {
       return out
     }
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
+    const buttons = [
+      { id: 'up', label: unicode ? '↑' : '\u{f005d}', dim: true, hint: 'parent folder' },
+      { id: 'cwd', label: unicode ? '⌂' : '\u{f02dc}', dim: !follow, hint: 'follow the cwd' },
+      { id: 'refresh', label: unicode ? '↻' : '\u{f0450}', dim: true, hint: 'reload tree and git' },
+      { id: 'hidden', label: unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files' },
+      { id: 'size', label: unicode ? 'Σ' : '\u{f02ca}', dim: !t.showSize, hint: t.showSize ? 'show dates' : 'show sizes' },
+      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all' },
+      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{f0777}', dim: false, hint: 'clear selection' }] : []),
+    ]
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
 
     const rowSpec = (r: (typeof rows)[number]): RowSpec => {
@@ -1367,7 +1452,9 @@ export const register: Register = (on, options) => {
         : loc
           ? ''
           : n.kind === 'file'
-            ? stamp(n.mtime)
+            ? showAge
+              ? age(n.mtime, now)
+              : stamp(n.mtime)
             : ''
       const locText = loc ? `${loc[0] ? ` +${loc[0]}` : ''}${loc[1] ? ` -${loc[1]}` : ''}` : ''
       const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
@@ -1401,6 +1488,11 @@ export const register: Register = (on, options) => {
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
       ...shown.map(rowSpec),
     ]
+    if (nativeScroll) {
+      let size = 0
+      const cut = specs.findIndex(r => (size += JSON.stringify(r).length + 1) > ROWS_BUDGET)
+      if (cut >= 0) specs.splice(cut, specs.length - cut, note(`  … ${specs.length - cut} more rows, collapse folders or use search`))
+    }
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
       !nativeScroll && rows.length > shown.length + pinned.length
@@ -1468,71 +1560,14 @@ export const register: Register = (on, options) => {
             {header}
           </Text>
           <Box flexGrow={1} />
-          <Box flexDirection="row" gap={2}>
-            <Button
-              key="up"
-              plain
-              dimColor
-              label={unicode ? '↑' : '\u{f005d}'}
-              onPress={() =>
-                void (async () => {
-                  follow = false
-                  await reset($, dirname(t.root))
-                })()
-              }
-            />
-            <Button
-              key="cwd"
-              plain
-              dimColor={!follow}
-              label={unicode ? '⌂' : '\u{f02dc}'}
-              onPress={() =>
-                void (async () => {
-                  follow = true
-                  await reset($, await cwdOf($))
-                })()
-              }
-            />
-            <Button
-              key="refresh"
-              plain
-              dimColor
-              label={unicode ? '↻' : '\u{f0450}'}
-              onPress={() =>
-                void (async () => {
-                  const cur = await get($)
-                  searchIndex = null
-                  await staleSizes($)
-                  await loadDirs($, [cur.root, ...cur.expanded])
-                  await detectRepo($)
-                  await refreshGit($)
-                  if (cur.query.trim()) await search($, cur.query)
-                })()
-              }
-            />
-            <Button
-              key="hidden"
-              plain
-              dimColor={!t.showHidden}
-              label={unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}'}
-              onPress={() => void patch($, cur => ({ showHidden: !cur.showHidden }))}
-            />
-            <Button
-              key="size"
-              plain
-              dimColor={!t.showSize}
-              label={unicode ? 'Σ' : '\u{f02ca}'}
-              onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
-            />
-            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))} />
-            {t.selected && (
-              <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
-            )}
+          {hint(buttons, header.length)}
+          <Box flexDirection="row" gap={1}>
+            {buttons.map(button)}
             <Text> </Text>
           </Box>
         </Box>
         {branchRow()}
-        {!t.top && <Text color={theme.muted}>{unicode ? '± ' : '\u{e702} '}no git repo · git status starts after git init</Text>}
+        {!t.top && showHints && <Text color={theme.muted}>{unicode ? '± ' : '\u{e702} '}no git repo · git status starts after git init</Text>}
         <Box flexDirection="row">
           <Box flexGrow={1}>
             <Input
