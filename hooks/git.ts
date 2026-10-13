@@ -25,13 +25,13 @@ const ICON = {
 }
 
 export const TONES: Record<string, { bright: string[]; dim: string[]; solid: string }> = {
-  orange: { bright: ['#f97316', '#fb923c', '#fdba74', '#ffedd5'], dim: ['#8a4316', '#a3562a', '#bd7444', '#d29267'], solid: '#f97316' },
-  green: { bright: ['#22c55e', '#4ade80', '#86efac', '#dcfce7'], dim: ['#14532d', '#166534', '#2f7a47', '#4f9a66'], solid: '#4ade80' },
-  teal: { bright: ['#14b8a6', '#2dd4bf', '#5eead4', '#ccfbf1'], dim: ['#0f5e57', '#16786f', '#2a9488', '#4fb3a8'], solid: '#2dd4bf' },
-  blue: { bright: ['#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe'], dim: ['#1e3a8a', '#1d4ed8', '#3b6fd1', '#6b93dc'], solid: '#60a5fa' },
-  purple: { bright: ['#a855f7', '#c084fc', '#d8b4fe', '#f3e8ff'], dim: ['#581c87', '#6b21a8', '#8b47c4', '#a874d6'], solid: '#c084fc' },
-  cyan: { bright: ['#06b6d4', '#22d3ee', '#67e8f9', '#cffafe'], dim: ['#155e75', '#0e7490', '#2b8ea3', '#5aa9b8'], solid: '#22d3ee' },
-  red: { bright: ['#ef4444', '#f87171', '#fca5a5', '#fee2e2'], dim: ['#7f1d1d', '#991b1b', '#b54040', '#c96a6a'], solid: '#f87171' },
+  orange: { bright: ['#d65d0e', '#fe8019', '#f7a04f', '#fccf93'], dim: ['#ad5012', '#a45a1c', '#a06d3d', '#a38965'], solid: '#fe8019' },
+  green: { bright: ['#98971a', '#b8bb26', '#cac657', '#e7e197'], dim: ['#6e6e1d', '#7a7d24', '#858441', '#969468'], solid: '#b8bb26' },
+  teal: { bright: ['#689d6a', '#8ec07c', '#afc98f', '#dae2b0'], dim: ['#4e7251', '#618058', '#758563', '#8e9477'], solid: '#8ec07c' },
+  blue: { bright: ['#458588', '#83a598', '#a7b8a1', '#d7dab9'], dim: ['#3e7376', '#5a7068', '#707b6e', '#8d907c'], solid: '#83a598' },
+  purple: { bright: ['#b16286', '#d3869b', '#dba4a3', '#efd1ba'], dim: ['#965674', '#8a5d6a', '#8f6f6f', '#9b8a7d'], solid: '#d3869b' },
+  cyan: { bright: ['#689d6a', '#8ec07c', '#afc98f', '#dae2b0'], dim: ['#4e7251', '#618058', '#758563', '#8e9477'], solid: '#8ec07c' },
+  red: { bright: ['#ce261e', '#fb4934', '#f57c60', '#fbbf9b'], dim: ['#ce261e', '#bd3e2e', '#9f5747', '#a27f6a'], solid: '#fb4934' },
 }
 
 const GIT_VERBS: Record<string, Omit<GitAction, 'kind'>> = {

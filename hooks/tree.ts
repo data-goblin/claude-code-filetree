@@ -8,11 +8,18 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'bas
 
 export const DEFAULT_THEME: Theme = {
   fg: '',
-  accent: '#5b9bd5',
-  muted: '#808a96',
-  urgent: '#d0605e',
-  selection: '#6b7280',
-  bg: '',
+  accent: '#83a598',
+  muted: '#928374',
+  urgent: '#fb4934',
+  selection: '#3c3836',
+  bg: '#1d2021',
+}
+
+/** The hover highlight: the selection pulled halfway toward a dark neutral, so it reads as a step below the selected row. */
+export function faint(hex: string): string {
+  const v = parseInt(hex.slice(1), 16)
+  const ch = (shift: number) => Math.round(0x26 + (((v >> shift) & 255) - 0x26) * 0.5)
+  return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
 }
 
 export function emptyTree(root: string): FileTree {

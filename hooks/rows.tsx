@@ -23,7 +23,7 @@ const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '
 function shimmer(i: number, phase: number, len: number, palette: string[]): string {
   const band = ((phase * 1.6) % (len + 8)) - 4
   const d = Math.abs(i - band)
-  return palette[d < 0.8 ? 3 : d < 1.8 ? 2 : d < 2.8 ? 1 : 0] ?? palette[0] ?? '#f97316'
+  return palette[d < 0.8 ? 3 : d < 1.8 ? 2 : d < 2.8 ? 1 : 0] ?? palette[0] ?? '#fe8019'
 }
 
 const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
