@@ -1610,11 +1610,11 @@ export const register: Register = (on, options) => {
           {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
         </Box>
         <Box flexDirection="row" gap={2}>
-          {([['j', '↓'], ['k', '↑'], ['h', '←'], ['l', '→']] as const).map(([k, label]) => (
-            <Button key={`nav-${k}`} plain dimColor hotkey={k} label={label} onPress={() => void navigate($, k).then(park)} />
+          {([['j', '↓', '\u{f0045}'], ['k', '↑', '\u{f005d}'], ['h', '←', '\u{f004d}'], ['l', '→', '\u{f0054}']] as const).map(([k, plain, nerd]) => (
+            <Button key={`nav-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void navigate($, k).then(park)} />
           ))}
-          <Button key="nav-o" plain dimColor autoFocus hotkey="o" label="open" onPress={() => void navigate($, 'return')} />
-          <Button key="nav-s" plain dimColor hotkey="s" label="search" onPress={() => void $.ui.focus({ requestId: PANE, key: 'q' })} />
+          <Button key="nav-o" plain dimColor autoFocus hotkey="o" label={unicode ? 'open' : '\u{f03cb} open'} onPress={() => void navigate($, 'return')} />
+          <Button key="nav-s" plain dimColor hotkey="s" label={unicode ? 'search' : '\u{f0349} search'} onPress={() => void $.ui.focus({ requestId: PANE, key: 'q' })} />
         </Box>
         <Client
           key="rows"
