@@ -769,6 +769,7 @@ for (const [env, expected] of [
     await ui.press({ key: 'pv-k' })
     await clock.settle()
     expect(await top()).toBe(3)
+    if (expected !== null) expect(JSON.stringify(await ui.drawn())).toContain('"label":"edit :3"')
     if (expected === null) {
       expect(await ui.find({ key: 'edit' })).toBeUndefined()
       await ui.post({ key: 'e' }, { in: 'rows' })
