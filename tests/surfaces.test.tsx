@@ -616,7 +616,7 @@ for (const [visual, editor, chosen] of [['vim', 'nano', 'vim'], ['', 'nano', 'na
     await ui.post({ press: `${root}/a b.md` }, { in: 'rows' })
     await ui.press({ key: 'nav-o' })
     await clock.settle()
-    expect(ran).toContainEqual(['sh', '-c', TMUX_OPEN, 'sh', `${root}/a b.md`, root, chosen])
+    expect(ran).toContainEqual(['sh', '-c', TMUX_OPEN, 'sh', `${root}/a b.md`, root, '', chosen])
     expect(ran.some(a => a[0] === 'editor')).toBe(false)
     await ui.unmount()
   })
@@ -739,6 +739,54 @@ test('open with preview: a double-click shows the file in the pane, left goes ba
   await ui.unmount()
 })
 
+for (const [env, expected] of [
+  [{ HOME: '/Users/k', TMUX: '/tmp/tmux-501/default,1,0', VISUAL: 'nvim' }, ['sh', '-c', TMUX_OPEN, 'sh', '/Users/k/proj/a.ts', '/Users/k/proj', '3', 'nvim']],
+  [{ HOME: '/Users/k', VISUAL: 'nvim' }, null],
+] as const) {
+  test(`open with preview: Ctrl+F/B and the f/b/j/k buttons scroll, e opens the file at the top line shown${'TMUX' in env ? ' in tmux' : ', hidden outside tmux'}`, { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/Users/k/proj'
+    const clock = world(on, { os: 'darwin', env, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: `const a = 1\n${'a++\n'.repeat(200)}` } }, ran)
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+    await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+    await ui.post({ key: 'down' }, { in: 'rows' })
+    await ui.post({ key: 'down' }, { in: 'rows' })
+    await ui.post({ key: 'f', ctrl: true }, { in: 'rows' })
+    await clock.settle()
+    const top = async () => Number(/"startLine":(\d+)/.exec(JSON.stringify(await ui.drawn()))?.[1])
+    expect(await top()).toBeGreaterThan(4)
+    await ui.post({ key: 'b', ctrl: true }, { in: 'rows' })
+    await clock.settle()
+    expect(await top()).toBe(3)
+    await ui.press({ key: 'pv-f' })
+    await clock.settle()
+    expect(await top()).toBeGreaterThan(4)
+    await ui.press({ key: 'pv-b' })
+    await ui.press({ key: 'pv-j' })
+    await ui.press({ key: 'pv-k' })
+    await clock.settle()
+    expect(await top()).toBe(3)
+    if (expected === null) {
+      expect(await ui.find({ key: 'edit' })).toBeUndefined()
+      await ui.post({ key: 'e' }, { in: 'rows' })
+      await clock.settle()
+      expect(ran.some(a => a.includes('nvim'))).toBe(false)
+    } else {
+      await ui.post({ key: 'e' }, { in: 'rows' })
+      await clock.settle()
+      expect(ran).toContainEqual([...expected])
+      const before = ran.length
+      await ui.press({ key: 'edit' })
+      await clock.settle()
+      expect(ran.slice(before)).toContainEqual([...expected])
+    }
+    await ui.unmount()
+  })
+}
+
 test('open with on linux: the command runs detached, like the default opener', { timeoutMs: 20_000, options: { open: 'evince {path}' } }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
@@ -769,7 +817,7 @@ test('open with preview: End shows the last screen, an edit reloads the file, a 
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain('"startLine":42')
+  expect(shown).toContain('"startLine":43')
   expect(shown).toContain('line 59')
   w.files![`${root}/a.ts`] = 'changed\n'
   await $.tool.call({ tool: 'Edit', file_path: `${root}/a.ts`, old_string: 'a', new_string: 'b' } as any)

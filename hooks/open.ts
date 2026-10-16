@@ -23,9 +23,9 @@ export const LINUX_OPEN = [
 ].join('\n')
 
 export const TMUX_OPEN = [
-  'f=$1 d=$2; shift 2',
+  'f=$1 d=$2 n=$3; shift 3',
   'bin=$1',
-  'case ${bin##*/} in nvim) ;; *) exec tmux new-window -c "$d" -- "$@" "$f" ;; esac',
+  'case ${bin##*/} in nvim) ;; *) exec tmux new-window -c "$d" -- "$@" ${n:+"+$n"} "$f" ;; esac',
   'probe() {',
   '  "$bin" --server "$s" --remote-expr \'$TMUX . " " . $TMUX_PANE\' 2>/dev/null &',
   '  request=$!',
@@ -49,19 +49,20 @@ export const TMUX_OPEN = [
   '  best=$s pane=$p act=$activity',
   'done',
   'if [ -n "$best" ] && "$bin" --server "$best" --remote "$f"; then',
+  '  [ -z "$n" ] || "$bin" --server "$best" --remote-send "<C-\\><C-N>:$n<CR>"',
   '  exec tmux select-window -t "$pane" \\; select-pane -t "$pane"',
   'fi',
-  'exec tmux new-window -c "$d" -- "$@" "$f"',
+  'exec tmux new-window -c "$d" -- "$@" ${n:+"+$n"} "$f"',
 ].join('\n')
 
 const WIN_OPEN = "$ErrorActionPreference = 'Stop'; [Diagnostics.Process]::Start([Diagnostics.ProcessStartInfo]@{ FileName = $env:PANE_OPEN_TARGET; UseShellExecute = $true }) | Out-Null"
 
-export function tmuxOpenCommand(editor: string, target: string) {
+export function tmuxOpenCommand(editor: string, target: string, line?: number) {
   const argv = words(editor)
   if (!argv[0]) throw new Error('Editor command is empty')
   const dir = target.slice(0, target.lastIndexOf('/')) || '/'
   return {
-    argv: ['sh', '-c', TMUX_OPEN, 'sh', target, dir, ...argv],
+    argv: ['sh', '-c', TMUX_OPEN, 'sh', target, dir, line ? String(line) : '', ...argv],
     init: { timeoutMs: 10_000 },
   }
 }

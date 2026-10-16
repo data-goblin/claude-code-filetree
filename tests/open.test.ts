@@ -3,12 +3,16 @@ import { openCommand, openWithCommand, tmuxOpenCommand, TMUX_OPEN } from '../hoo
 
 test('inside tmux, open hands the file to the tmux opener with the editor and its folder', () => {
   const { argv } = tmuxOpenCommand('nvim', '/work/A & B/dax.ts')
-  expect(argv).toEqual(['sh', '-c', TMUX_OPEN, 'sh', '/work/A & B/dax.ts', '/work/A & B', 'nvim'])
+  expect(argv).toEqual(['sh', '-c', TMUX_OPEN, 'sh', '/work/A & B/dax.ts', '/work/A & B', '', 'nvim'])
+})
+
+test('tmux editor: a line goes to the opener as its own argument', () => {
+  expect(tmuxOpenCommand('nvim', '/a/b.ts', 12).argv.slice(4)).toEqual(['/a/b.ts', '/a', '12', 'nvim'])
 })
 
 test('tmux editor: quoted executable paths and arguments stay literal', () => {
   const { argv } = tmuxOpenCommand('"/opt/My Editor/nvim" -u NONE -c "set number"', '/work/A & B/$(touch nope).ts')
-  expect(argv.slice(4)).toEqual(['/work/A & B/$(touch nope).ts', '/work/A & B', '/opt/My Editor/nvim', '-u', 'NONE', '-c', 'set number'])
+  expect(argv.slice(4)).toEqual(['/work/A & B/$(touch nope).ts', '/work/A & B', '', '/opt/My Editor/nvim', '-u', 'NONE', '-c', 'set number'])
   expect(() => tmuxOpenCommand('   ', '/a.ts')).toThrow('Editor command is empty')
   expect(() => tmuxOpenCommand('""', '/a.ts')).toThrow('Editor command is empty')
 })

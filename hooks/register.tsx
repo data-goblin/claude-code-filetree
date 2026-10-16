@@ -83,6 +83,8 @@ let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
 let openWithSetting = ''
+let inTmux = false
+let previewLine = 1
 let previewed: { path: string; text: string; note: string } | null = null
 let previewRows = 20
 let follow = true
@@ -937,10 +939,16 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
 async function showPreview($: EngineInterface, path: string): Promise<void> {
   await loadPreview($, path)
   await patch($, () => ({ preview: path, previewTop: 0, selected: path }))
+  $.clock.after(100, () => parkPreview($))
+}
+
+function parkPreview($: EngineInterface): void {
+  void $.ui.focus({ requestId: PANE, key: inTmux ? 'edit' : 'back' }).catch(() => {})
 }
 
 async function closePreview($: EngineInterface): Promise<void> {
   await patch($, () => ({ preview: '', previewTop: 0 }))
+  $.clock.after(100, () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {}))
 }
 
 async function scrollPreview($: EngineInterface, by: number): Promise<void> {
@@ -972,8 +980,8 @@ function previewLines(text: string, top: number, rows: number, markdown: boolean
   return { text: shown.join('\n'), top: from }
 }
 
-async function openFile($: EngineInterface, path: string, external = false): Promise<void> {
-  const mode = external ? '' : openWithSetting.trim()
+async function openFile($: EngineInterface, path: string, how: { mode?: string; line?: number } = {}): Promise<void> {
+  const mode = (how.mode ?? openWithSetting).trim()
   if (mode === 'preview') return showPreview($, path)
   const os = await osName($)
   if (mode === 'editor' && (os === 'win32' || !(await $.env.get('TMUX')))) {
@@ -984,12 +992,16 @@ async function openFile($: EngineInterface, path: string, external = false): Pro
   const custom = mode === 'editor' ? null : openWithCommand(mode, native(path), native(dirname(path)))
   const editor = mode === 'editor' ? (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi' : undefined
   try {
-    const { argv, init } = editor ? tmuxOpenCommand(editor, path) : custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
+    const { argv, init } = editor ? tmuxOpenCommand(editor, path, how.line) : custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
     const run = await $.process.run(argv, init)
     if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${editor ?? custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
   } catch {
     $.ui.toast(`could not open ${path} with ${editor ?? custom?.[0] ?? 'the default app'}`)
   }
+}
+
+async function editPreview($: EngineInterface, path: string): Promise<void> {
+  if (inTmux) await openFile($, path, { mode: 'editor', line: previewLine })
 }
 
 async function quickLook($: EngineInterface, path: string): Promise<void> {
@@ -1085,7 +1097,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'size') await patch($, cur => ({ showSize: !cur.showSize }))
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') await patch($, () => ({ selected: '' }))
-  else if (id === 'external' && t.preview) await openFile($, t.preview, true)
+  else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
 }
 
 function shortPath(path: string): string {
@@ -1107,6 +1119,7 @@ export const register: Register = (on, options) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
+    inTmux = !windows && Boolean(await $.env.get('TMUX'))
     home = posix(((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/[\\/]+$/, ''))
     activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
     void (async () => {
@@ -1260,7 +1273,9 @@ export const register: Register = (on, options) => {
     if (t.preview) {
       const page = Math.max(1, previewRows - 2)
       const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
-      if (data.key === 'left' || data.key === 'h') await closePreview($)
+      if (data.ctrl && (data.key === 'f' || data.key === 'b')) await scrollPreview($, data.key === 'f' ? page : -page)
+      else if (data.key === 'left' || data.key === 'h') await closePreview($)
+      else if (data.key === 'e') await editPreview($, t.preview)
       else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
       return {}
     }
@@ -1380,20 +1395,27 @@ export const register: Register = (on, options) => {
       const p = previewed
       const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
       const all = (p?.text ?? '').split('\n').length
-      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
+      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 3 : 2))
       const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
+      previewLine = win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const external = { id: 'external', label: unicode ? '↗' : '\u{f08e}', dim: true, hint: 'open in default app' }
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
-            <Button key="back" plain label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
+            <Button key="back" plain hotkey="h" autoFocus={inTmux ? undefined : true} label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
             <Text> </Text>
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
             {hint([external], 8 + name.length)}
             {button(external)}
+          </Box>
+          <Box flexDirection="row" gap={2}>
+            {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => (
+              <Button key={`pv-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void scrollPreview($, by).then(() => parkPreview($))} />
+            ))}
+            {inTmux ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={unicode ? 'edit' : '\u{f03eb} edit'} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client
