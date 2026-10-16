@@ -1272,9 +1272,8 @@ export const register: Register = (on, options) => {
     if (typeof data.key !== 'string') return {}
     if (t.preview) {
       const page = Math.max(1, previewRows - 2)
-      const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
-      if (data.ctrl && (data.key === 'f' || data.key === 'b')) await scrollPreview($, data.key === 'f' ? page : -page)
-      else if (data.key === 'left' || data.key === 'h') await closePreview($)
+      const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, f: page, b: -page, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
+      if (data.key === 'left' || data.key === 'h') await closePreview($)
       else if (data.key === 'e') await editPreview($, t.preview)
       else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
       return {}
