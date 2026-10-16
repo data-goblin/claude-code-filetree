@@ -739,11 +739,12 @@ test('open with preview: a double-click shows the file in the pane, left goes ba
   await ui.unmount()
 })
 
-for (const [env, expected] of [
-  [{ HOME: '/Users/k', TMUX: '/tmp/tmux-501/default,1,0', VISUAL: 'nvim' }, ['sh', '-c', TMUX_OPEN, 'sh', '/Users/k/proj/a.ts', '/Users/k/proj', '3', 'nvim']],
-  [{ HOME: '/Users/k', VISUAL: 'nvim' }, null],
+for (const [edit, env, expected] of [
+  ['', { HOME: '/Users/k', TMUX: '/tmp/tmux-501/default,1,0', VISUAL: 'nvim' }, ['sh', '-c', TMUX_OPEN, 'sh', '/Users/k/proj/a.ts', '/Users/k/proj', '3', 'nvim']],
+  ['code -g {path}:{line}', { HOME: '/Users/k' }, ['code', '-g', '/Users/k/proj/a.ts:3']],
+  ['', { HOME: '/Users/k', VISUAL: 'nvim' }, null],
 ] as const) {
-  test(`open with preview: Ctrl+F/B and the f/b/j/k buttons scroll, e opens the file at the top line shown${'TMUX' in env ? ' in tmux' : ', hidden outside tmux'}`, { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+  test(`open with preview: Ctrl+F/B and the f/b/j/k buttons scroll, e opens the file at the top line shown, Edit with "${edit}"${'TMUX' in env ? ' in tmux' : ''}`, { timeoutMs: 20_000, options: { open: 'preview', edit } }, async ($, on) => {
     const ran: Ran = []
     const root = '/Users/k/proj'
     const clock = world(on, { os: 'darwin', env, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: `const a = 1\n${'a++\n'.repeat(200)}` } }, ran)
@@ -774,7 +775,7 @@ for (const [env, expected] of [
       expect(await ui.find({ key: 'edit' })).toBeUndefined()
       await ui.post({ key: 'e' }, { in: 'rows' })
       await clock.settle()
-      expect(ran.some(a => a.includes('nvim'))).toBe(false)
+      expect(ran.some(a => a.includes('nvim') || a[0] === 'code')).toBe(false)
     } else {
       await ui.post({ key: 'e' }, { in: 'rows' })
       await clock.settle()

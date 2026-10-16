@@ -83,6 +83,12 @@
       "title": "Open with",
       "description": "What a double-click or Enter does with a file. Empty: the default app, also inside tmux. editor: use $VISUAL, then $EDITOR, then vi in tmux (Linux/macOS only; otherwise shows a notice). preview: show it in the pane (left goes back; ↗ always opens the default app). Anything else is a command run instead: {path} is the file and {dir} its folder; without {path} the path goes last. Words split on spaces, quotes keep a word whole, and no shell runs it. It should start the viewer and return; on Linux it runs detached.",
       "default": ""
+    },
+    "edit": {
+      "type": "string",
+      "title": "Edit with",
+      "description": "What e does in the preview: open the file at the top line shown. Empty: $VISUAL, then $EDITOR, then vi in tmux with +line (Linux/macOS only; the e button is hidden elsewhere). Anything else is a command like Open with, where {line} is that line, for example code -g {path}:{line} or zed {path}:{line}.",
+      "default": ""
     }
   },
   "license": "MIT"

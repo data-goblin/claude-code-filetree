@@ -102,9 +102,9 @@ function words(command: string): string[] {
   return out
 }
 
-export function openWithCommand(command: string, path: string, dir: string): string[] | null {
+export function openWithCommand(command: string, path: string, dir: string, line = 1): string[] | null {
   const argv = words(command)
   if (!argv.length) return null
-  const filled = argv.map(w => w.replace(/\{(path|dir)\}/g, (_, key) => (key === 'path' ? path : dir)))
+  const filled = argv.map(w => w.replace(/\{(path|dir|line)\}/g, (_, key) => (key === 'path' ? path : key === 'dir' ? dir : String(line))))
   return argv.some(w => w.includes('{path}')) ? filled : [...filled, path]
 }

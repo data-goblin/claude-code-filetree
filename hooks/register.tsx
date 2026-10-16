@@ -83,6 +83,7 @@ let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
 let openWithSetting = ''
+let editWithSetting = ''
 let inTmux = false
 let previewLine = 1
 let previewed: { path: string; text: string; note: string } | null = null
@@ -943,7 +944,7 @@ async function showPreview($: EngineInterface, path: string): Promise<void> {
 }
 
 function parkPreview($: EngineInterface): void {
-  void $.ui.focus({ requestId: PANE, key: inTmux ? 'edit' : 'back' }).catch(() => {})
+  void $.ui.focus({ requestId: PANE, key: editWithSetting || inTmux ? 'edit' : 'back' }).catch(() => {})
 }
 
 async function closePreview($: EngineInterface): Promise<void> {
@@ -989,7 +990,7 @@ async function openFile($: EngineInterface, path: string, how: { mode?: string; 
     return
   }
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
-  const custom = mode === 'editor' ? null : openWithCommand(mode, native(path), native(dirname(path)))
+  const custom = mode === 'editor' ? null : openWithCommand(mode, native(path), native(dirname(path)), how.line)
   const editor = mode === 'editor' ? (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi' : undefined
   try {
     const { argv, init } = editor ? tmuxOpenCommand(editor, path, how.line) : custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
@@ -1001,7 +1002,7 @@ async function openFile($: EngineInterface, path: string, how: { mode?: string; 
 }
 
 async function editPreview($: EngineInterface, path: string): Promise<void> {
-  if (inTmux) await openFile($, path, { mode: 'editor', line: previewLine })
+  if (editWithSetting || inTmux) await openFile($, path, { mode: editWithSetting || 'editor', line: previewLine })
 }
 
 async function quickLook($: EngineInterface, path: string): Promise<void> {
@@ -1114,6 +1115,7 @@ export const register: Register = (on, options) => {
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
+  editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   noDock = options?.start === 'off'
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
@@ -1403,7 +1405,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
-            <Button key="back" plain hotkey="h" autoFocus={inTmux ? undefined : true} label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
+            <Button key="back" plain hotkey="h" autoFocus={editWithSetting || inTmux ? undefined : true} label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
             <Text> </Text>
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
@@ -1415,7 +1417,7 @@ export const register: Register = (on, options) => {
             {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => (
               <Button key={`pv-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void scrollPreview($, by).then(() => parkPreview($))} />
             ))}
-            {inTmux ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
+            {editWithSetting || inTmux ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client

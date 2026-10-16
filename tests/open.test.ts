@@ -39,6 +39,7 @@ test('open with: words keep quotes whole, placeholders fill in, and the path goe
   expect(openWithCommand('   ', '/a/b.md', '/a')).toBe(null)
   expect(openWithCommand('zed', '/w/A & B/b.md', '/w/A & B')).toEqual(['zed', '/w/A & B/b.md'])
   expect(openWithCommand('code -g {path}:1', '/a/b.md', '/a')).toEqual(['code', '-g', '/a/b.md:1'])
+  expect(openWithCommand('code -g {path}:{line}', '/a/b.md', '/a', 7)).toEqual(['code', '-g', '/a/b.md:7'])
   expect(openWithCommand(`herdr plugin pane open --cwd {dir} --env "VIEW={path}" ''`, '/a/{dir}.md', '/a')).toEqual(['herdr', 'plugin', 'pane', 'open', '--cwd', '/a', '--env', 'VIEW=/a/{dir}.md', ''])
   expect(openWithCommand('open -a "Sublime Text" --cwd {dir}', '/a/b.md', '/a')).toEqual(['open', '-a', 'Sublime Text', '--cwd', '/a', '/a/b.md'])
 })
