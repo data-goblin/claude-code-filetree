@@ -1,5 +1,5 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
-import { LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand } from './open'
+import { herdrError, herdrOpenCommand, herdrPane, LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand } from './open'
 import type { ButtonProps } from './button'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
@@ -85,6 +85,7 @@ let glyphSetting = 'auto'
 let openWithSetting = ''
 let editWithSetting = ''
 let inTmux = false
+let inHerdr = false
 let previewLine = 1
 let previewed: { path: string; text: string; note: string } | null = null
 let previewRows = 20
@@ -944,7 +945,7 @@ async function showPreview($: EngineInterface, path: string): Promise<void> {
 }
 
 function parkPreview($: EngineInterface): void {
-  void $.ui.focus({ requestId: PANE, key: editWithSetting || inTmux ? 'edit' : 'back' }).catch(() => {})
+  void $.ui.focus({ requestId: PANE, key: editWithSetting || inTmux || inHerdr ? 'edit' : 'back' }).catch(() => {})
 }
 
 async function closePreview($: EngineInterface): Promise<void> {
@@ -985,14 +986,16 @@ async function openFile($: EngineInterface, path: string, how: { mode?: string; 
   const mode = (how.mode ?? openWithSetting).trim()
   if (mode === 'preview') return showPreview($, path)
   const os = await osName($)
-  if (mode === 'editor' && (os === 'win32' || !(await $.env.get('TMUX')))) {
-    $.ui.toast('Open with: editor requires tmux on Linux or macOS. Clear Open with to use the default app, or set a custom command.')
+  const host = mode === 'editor' ? await editorHost($, os) : ''
+  if (mode === 'editor' && !host) {
+    $.ui.toast('Open with: editor requires tmux or herdr on Linux or macOS. Clear Open with to use the default app, or set a custom command.')
     return
   }
   const native = (p: string) => (os === 'win32' ? p.replace(/\//g, '\\') : p)
   const custom = mode === 'editor' ? null : openWithCommand(mode, native(path), native(dirname(path)), how.line)
   const editor = mode === 'editor' ? (await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'vi' : undefined
   try {
+    if (editor && host === 'herdr') return await openInHerdr($, editor, path, how.line)
     const { argv, init } = editor ? tmuxOpenCommand(editor, path, how.line) : custom ? { argv: os === 'linux' ? ['sh', '-c', LINUX_LAUNCH, 'sh', ...custom] : custom, init: { timeoutMs: 10_000 } } : openCommand(os, path)
     const run = await $.process.run(argv, init)
     if (run.exitCode !== 0) $.ui.toast(`could not open ${path} with ${editor ?? custom?.[0] ?? argv[0]}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
@@ -1001,8 +1004,22 @@ async function openFile($: EngineInterface, path: string, how: { mode?: string; 
   }
 }
 
+async function editorHost($: EngineInterface, os: 'linux' | 'darwin' | 'win32'): Promise<'tmux' | 'herdr' | ''> {
+  if (os === 'win32') return ''
+  if (await $.env.get('TMUX')) return 'tmux'
+  return (await $.env.get('HERDR_ENV')) ? 'herdr' : ''
+}
+
+// Two herdr calls: split a pane beside this one, then run the editor in that pane's shell.
+async function openInHerdr($: EngineInterface, editor: string, path: string, line?: number): Promise<void> {
+  const { split, run, init } = herdrOpenCommand((await $.env.get('HERDR_BIN_PATH')) || 'herdr', editor, path, line)
+  const made = await $.process.run(split, init)
+  const sent = made.exitCode === 0 ? await $.process.run(run(herdrPane(made.stdout)), init) : made
+  if (sent.exitCode !== 0) $.ui.toast(`could not open ${path} with ${editor}: ${herdrError(sent.stderr) || `exit ${sent.exitCode}`}`)
+}
+
 async function editPreview($: EngineInterface, path: string): Promise<void> {
-  if (editWithSetting || inTmux) await openFile($, path, { mode: editWithSetting || 'editor', line: previewLine })
+  if (editWithSetting || inTmux || inHerdr) await openFile($, path, { mode: editWithSetting || 'editor', line: previewLine })
 }
 
 async function quickLook($: EngineInterface, path: string): Promise<void> {
@@ -1122,6 +1139,7 @@ export const register: Register = (on, options) => {
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
     inTmux = !windows && Boolean(await $.env.get('TMUX'))
+    inHerdr = !windows && Boolean(await $.env.get('HERDR_ENV'))
     home = posix(((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/[\\/]+$/, ''))
     activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
     void (async () => {
@@ -1404,7 +1422,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
-            <Button key="back" plain hotkey="h" autoFocus={editWithSetting || inTmux ? undefined : true} label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
+            <Button key="back" plain hotkey="h" autoFocus={editWithSetting || inTmux || inHerdr ? undefined : true} label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
             <Text> </Text>
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
@@ -1416,7 +1434,7 @@ export const register: Register = (on, options) => {
             {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => (
               <Button key={`pv-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void scrollPreview($, by).then(() => parkPreview($))} />
             ))}
-            {editWithSetting || inTmux ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
+            {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client

@@ -1,5 +1,5 @@
 import { expect, test } from 'claude-code/testing'
-import { openCommand, openWithCommand, tmuxOpenCommand, TMUX_OPEN } from '../hooks/open'
+import { herdrError, herdrOpenCommand, herdrPane, openCommand, openWithCommand, tmuxOpenCommand, TMUX_OPEN } from '../hooks/open'
 
 test('inside tmux, open hands the file to the tmux opener with the editor and its folder', () => {
   const { argv } = tmuxOpenCommand('nvim', '/work/A & B/dax.ts')
@@ -42,4 +42,35 @@ test('open with: words keep quotes whole, placeholders fill in, and the path goe
   expect(openWithCommand('code -g {path}:{line}', '/a/b.md', '/a', 7)).toEqual(['code', '-g', '/a/b.md:7'])
   expect(openWithCommand(`herdr plugin pane open --cwd {dir} --env "VIEW={path}" ''`, '/a/{dir}.md', '/a')).toEqual(['herdr', 'plugin', 'pane', 'open', '--cwd', '/a', '--env', 'VIEW=/a/{dir}.md', ''])
   expect(openWithCommand('open -a "Sublime Text" --cwd {dir}', '/a/b.md', '/a')).toEqual(['open', '-a', 'Sublime Text', '--cwd', '/a', '/a/b.md'])
+})
+
+test("inside herdr, open splits a pane beside the current one and runs the editor in it; the file name travels in the pane's environment, not in the shell text", () => {
+  const dir = "/work/A & B's $(touch nope)"
+  const target = `${dir}/\`touch nope2\`; dax.ts`
+  const { split, run, init } = herdrOpenCommand('/opt/herdr/bin/herdr', 'nvim', target)
+  expect(split).toEqual(['/opt/herdr/bin/herdr', 'pane', 'split', '--current', '--direction', 'right', '--focus', '--cwd', dir, '--env', `PANE_OPEN_TARGET=${target}`])
+  expect(run('w1:p37')).toEqual(['/opt/herdr/bin/herdr', 'pane', 'run', 'w1:p37', `exec 'nvim' "$PANE_OPEN_TARGET"`])
+  expect(run('w1:p37')[4]).not.toContain('touch')
+  expect(init).toEqual({ timeoutMs: 10_000 })
+})
+
+test('herdr editor: a line goes to the editor as +N before the file', () => {
+  expect(herdrOpenCommand('herdr', 'nvim', '/a/b.ts', 12).run('w1:p2')).toEqual(['herdr', 'pane', 'run', 'w1:p2', `exec 'nvim' '+12' "$PANE_OPEN_TARGET"`])
+  expect(herdrOpenCommand('herdr', 'nvim', '/a.ts').split.slice(7, 9)).toEqual(['--cwd', '/'])
+})
+
+test('herdr editor: quoted executable paths and arguments stay literal for the pane shell', () => {
+  const { run } = herdrOpenCommand('herdr', `"/opt/My Editor/nvim" -u NONE -c "echo 'hi'"`, '/a.ts')
+  expect(run('w1:p2')[4]).toBe(`exec '/opt/My Editor/nvim' '-u' 'NONE' '-c' 'echo '\\''hi'\\''' "$PANE_OPEN_TARGET"`)
+  expect(() => herdrOpenCommand('herdr', '   ', '/a.ts')).toThrow('Editor command is empty')
+  expect(() => herdrOpenCommand('herdr', '""', '/a.ts')).toThrow('Editor command is empty')
+})
+
+test('herdr replies: the pane id comes from the split JSON and a failure message from the error JSON', () => {
+  expect(herdrPane('{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p37","parent_pane_id":"w1:p35"},"type":"pane_info"}}')).toBe('w1:p37')
+  expect(() => herdrPane('{"id":"cli:pane:split","result":{"type":"ok"}}')).toThrow('herdr returned no pane id')
+  expect(() => herdrPane('')).toThrow()
+  expect(herdrError('{"error":{"code":"pane_not_found","message":"pane w1:p35 not found"},"id":"cli:pane:split"}\n')).toBe('pane w1:p35 not found')
+  expect(herdrError('error: unexpected argument\nUsage: herdr pane split')).toBe('error: unexpected argument')
+  expect(herdrError('')).toBe('')
 })

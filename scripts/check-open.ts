@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createServer } from 'node:net'
-import { LINUX_LAUNCH, LINUX_OPEN, tmuxOpenCommand } from '../hooks/open'
+import { herdrOpenCommand, LINUX_LAUNCH, LINUX_OPEN, tmuxOpenCommand } from '../hooks/open'
 
 const dir = mkdtempSync(join(tmpdir(), 'pane-open-'))
 const bin = join(dir, 'bin')
@@ -94,6 +94,18 @@ if [ "$3" = --remote-expr ]; then printf '/test/tmux,1,0 %%1\\n'; fi
       : ['select-window', '-t', '%1', ';', 'select-pane', '-t', '%1'])
   }
   console.log('Tmux checks passed: literal arguments, hung probe fallback, next responsive socket')
+  writeFileSync(join(editorDir, 'editor'), '#!/bin/sh\nprintf "%s\\0" "$@"\n', { mode: 0o700 })
+  const paneTarget = join(dir, "A & B's $(touch nope) `touch nope2`; x.txt")
+  const pane = herdrOpenCommand('herdr', `"${join(editorDir, 'editor')}" -u NONE -c "echo 'hi'"`, paneTarget, 12)
+  assert.equal(pane.split.at(-1), `PANE_OPEN_TARGET=${paneTarget}`)
+  const shells = ['sh', 'bash', 'zsh', 'fish'].filter(shell => spawnSync('sh', ['-c', `command -v ${shell}`], { stdio: 'ignore' }).status === 0)
+  for (const shell of shells) {
+    const edited = spawnSync(shell, ['-c', pane.run('w1:p37')[4]!], { encoding: 'utf8', cwd: dir, env: { ...process.env, PANE_OPEN_TARGET: paneTarget }, timeout: 5000 })
+    assert.equal(edited.status, 0, `${shell}: ${edited.stderr}`)
+    assert.deepEqual(edited.stdout.split('\0').slice(0, -1), ['-u', 'NONE', '-c', "echo 'hi'", '+12', paneTarget], shell)
+  }
+  assert.ok(!existsSync(join(dir, 'nope')) && !existsSync(join(dir, 'nope2')), 'a file name ran as a command')
+  console.log(`Herdr checks passed in ${shells.join(', ')}: the file name reaches the editor verbatim and nothing in it runs`)
   console.log('Open checks passed; no applications launched')
 } finally {
   for (const socket of sockets) socket.close()

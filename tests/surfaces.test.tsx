@@ -12,6 +12,7 @@ type World = {
   status: string
   numstat: string
   exits?: Record<string, [number, string]>
+  stdout?: Record<string, string>
   delays?: Record<string, number[]>
   denied?: string[]
   heads?: string[]
@@ -25,6 +26,7 @@ type World = {
   mtimes?: Record<string, number>
 }
 type Ran = string[][]
+const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
 const opens: unknown[] = []
 const envs: Record<string, string>[] = []
 
@@ -84,6 +86,8 @@ function world(on: any, w: World, ran: Ran) {
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     const exit = w.exits?.[argv[0] ?? '']
     if (exit) return { value: { exitCode: exit[0], stdout: '', stderr: exit[1], isStdoutTruncated: false, isStderrTruncated: false } }
+    const out = w.stdout?.[argv.slice(0, 3).join(' ')]
+    if (out !== undefined) return ok(out)
     if (argv[0] === 'find' && w.find !== undefined) return ok(w.find)
     if (argv[0] === 'du') {
       const delay = w.duDelays?.shift()
@@ -626,7 +630,7 @@ for (const [surface, os] of [['terminal', 'darwin'], ['desktop', 'darwin'], ['te
   test(`open with editor in an unsupported environment: ${surface} on ${os} requests a toast without opening a file`, { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
     const ran: Ran = []
     const root = os === 'win32' ? 'C:/Users/k/proj' : '/Users/k/proj'
-    const env = os === 'win32' ? { OS: 'Windows_NT', TMUX: '/tmp/tmux-501/default,1,0', EDITOR: 'vim' } : { HOME: '/Users/k', EDITOR: 'vim' }
+    const env = os === 'win32' ? { OS: 'Windows_NT', TMUX: '/tmp/tmux-501/default,1,0', HERDR_ENV: '1', EDITOR: 'vim' } : { HOME: '/Users/k', EDITOR: 'vim' }
     const clock = world(on, { os, env, cwd: root, top: '', dirs: { [root]: [['a.md', 'file']] }, status: '', numstat: '' }, ran)
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
@@ -635,10 +639,64 @@ for (const [surface, os] of [['terminal', 'darwin'], ['desktop', 'darwin'], ['te
     await ui.post({ press: `${root}/a.md` }, { in: 'rows' })
     await ui.post({ press: `${root}/a.md` }, { in: 'rows' })
     await clock.settle()
-    expect(ran.filter(a => a[0] !== 'uname')).toEqual([['toast', 'Open with: editor requires tmux on Linux or macOS. Clear Open with to use the default app, or set a custom command.']])
+    expect(ran.filter(a => a[0] !== 'uname')).toEqual([['toast', 'Open with: editor requires tmux or herdr on Linux or macOS. Clear Open with to use the default app, or set a custom command.']])
     await ui.unmount()
   })
 }
+
+for (const [bin, env] of [
+  ['/opt/herdr/bin/herdr', { HOME: '/home/k', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr/bin/herdr', EDITOR: 'nvim' }],
+  ['herdr', { HOME: '/home/k', HERDR_ENV: '1', EDITOR: 'nvim' }],
+] as const) {
+  test(`open with editor in herdr: Enter splits a pane beside Claude's and ${bin === 'herdr' ? 'herdr on PATH' : 'HERDR_BIN_PATH'} runs the editor there, the file name only in its environment`, { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const name = "A & B's $(touch nope) `touch nope2`; x.md"
+    const clock = world(on, { os: 'linux', env, cwd: root, top: '', dirs: { [root]: [[name, 'file']] }, status: '', numstat: '', stdout: { [`${bin} pane split`]: HERDR_SPLIT } }, ran)
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
+    await ui.press({ key: 'nav-o' })
+    await clock.settle()
+    expect(ran.filter(a => a[0] === bin && a[1] === 'pane')).toEqual([
+      [bin, 'pane', 'split', '--current', '--direction', 'right', '--focus', '--cwd', root, '--env', `PANE_OPEN_TARGET=${root}/${name}`],
+      [bin, 'pane', 'run', 'w1:p37', `exec 'nvim' "$PANE_OPEN_TARGET"`],
+    ])
+    expect(ran.some(a => a.includes(TMUX_OPEN) || a[0] === 'toast')).toBe(false)
+    await ui.unmount()
+  })
+}
+
+test('open with editor: tmux inside herdr keeps using the tmux window', { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k', TMUX: '/tmp/tmux-1000/default,1,0', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr/bin/herdr', EDITOR: 'nvim' }, cwd: root, top: '', dirs: { [root]: [['a.md', 'file']] }, status: '', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.post({ press: `${root}/a.md` }, { in: 'rows' })
+  await ui.press({ key: 'nav-o' })
+  await clock.settle()
+  expect(ran).toContainEqual(['sh', '-c', TMUX_OPEN, 'sh', `${root}/a.md`, root, '', 'nvim'])
+  expect(ran.some(a => a[0] === '/opt/herdr/bin/herdr' && a[1] === 'pane')).toBe(false)
+  await ui.unmount()
+})
+
+test("open with editor in herdr: a failed split shows herdr's message and sends nothing to a pane", { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr/bin/herdr', EDITOR: 'nvim' }, cwd: root, top: '', dirs: { [root]: [['a.md', 'file']] }, status: '', numstat: '', exits: { '/opt/herdr/bin/herdr': [1, '{"error":{"code":"pane_not_found","message":"pane w1:p35 not found"},"id":"cli:pane:split"}\n'] } }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.post({ press: `${root}/a.md` }, { in: 'rows' })
+  await ui.press({ key: 'nav-o' })
+  await clock.settle()
+  expect(ran.filter(a => a[0] === '/opt/herdr/bin/herdr' && a[1] === 'pane').length).toBe(1)
+  expect(ran).toContainEqual(['toast', `could not open ${root}/a.md with nvim: pane w1:p35 not found`])
+  await ui.unmount()
+})
 
 test('macOS: space on a file opens Quick Look, space on a folder still toggles it', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
@@ -742,12 +800,13 @@ test('open with preview: a double-click shows the file in the pane, left goes ba
 for (const [edit, env, expected] of [
   ['', { HOME: '/Users/k', TMUX: '/tmp/tmux-501/default,1,0', VISUAL: 'nvim' }, ['sh', '-c', TMUX_OPEN, 'sh', '/Users/k/proj/a.ts', '/Users/k/proj', '3', 'nvim']],
   ['code -g {path}:{line}', { HOME: '/Users/k' }, ['code', '-g', '/Users/k/proj/a.ts:3']],
+  ['', { HOME: '/Users/k', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr/bin/herdr', VISUAL: 'nvim' }, ['/opt/herdr/bin/herdr', 'pane', 'run', 'w1:p37', `exec 'nvim' '+3' "$PANE_OPEN_TARGET"`]],
   ['', { HOME: '/Users/k', VISUAL: 'nvim' }, null],
 ] as const) {
-  test(`open with preview: Ctrl+F/B and the f/b/j/k buttons scroll, e opens the file at the top line shown, Edit with "${edit}"${'TMUX' in env ? ' in tmux' : ''}`, { timeoutMs: 20_000, options: { open: 'preview', edit } }, async ($, on) => {
+  test(`open with preview: Ctrl+F/B and the f/b/j/k buttons scroll, e opens the file at the top line shown, Edit with "${edit}"${'TMUX' in env ? ' in tmux' : 'HERDR_ENV' in env ? ' in herdr' : ''}`, { timeoutMs: 20_000, options: { open: 'preview', edit } }, async ($, on) => {
     const ran: Ran = []
     const root = '/Users/k/proj'
-    const clock = world(on, { os: 'darwin', env, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: `const a = 1\n${'a++\n'.repeat(200)}` } }, ran)
+    const clock = world(on, { os: 'darwin', env, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: `const a = 1\n${'a++\n'.repeat(200)}` }, stdout: { '/opt/herdr/bin/herdr pane split': HERDR_SPLIT } }, ran)
     await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
     await clock.settle()
     const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })

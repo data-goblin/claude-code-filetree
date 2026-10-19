@@ -67,6 +67,34 @@ export function tmuxOpenCommand(editor: string, target: string, line?: number) {
   }
 }
 
+// herdr runs text in the new pane's shell, so the file name travels in that pane's environment and the shell
+// reads it back verbatim; only the editor words, which the user wrote, are quoted into the text.
+export function herdrOpenCommand(herdr: string, editor: string, target: string, line?: number) {
+  const argv = words(editor)
+  if (!argv[0]) throw new Error('Editor command is empty')
+  const dir = target.slice(0, target.lastIndexOf('/')) || '/'
+  const command = [...argv, ...(line ? [`+${line}`] : [])].map(w => `'${w.replace(/'/g, "'\\''")}'`).join(' ')
+  return {
+    split: [herdr, 'pane', 'split', '--current', '--direction', 'right', '--focus', '--cwd', dir, '--env', `PANE_OPEN_TARGET=${target}`],
+    run: (pane: string) => [herdr, 'pane', 'run', pane, `exec ${command} "$PANE_OPEN_TARGET"`],
+    init: { timeoutMs: 10_000 },
+  }
+}
+
+export function herdrPane(stdout: string): string {
+  const id: unknown = JSON.parse(stdout)?.result?.pane?.pane_id
+  if (typeof id !== 'string' || !id) throw new Error('herdr returned no pane id')
+  return id
+}
+
+export function herdrError(stderr: string): string {
+  let message: unknown
+  try {
+    message = JSON.parse(stderr)?.error?.message
+  } catch {}
+  return typeof message === 'string' && message ? message : (stderr.trim().split('\n')[0] ?? '')
+}
+
 export function openCommand(os: 'linux' | 'darwin' | 'win32', target: string) {
   const argv = os === 'linux'
     ? ['sh', '-c', LINUX_LAUNCH, 'sh', 'sh', '-c', LINUX_OPEN, 'sh', target]
