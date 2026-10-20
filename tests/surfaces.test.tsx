@@ -1242,6 +1242,24 @@ test('the pane takes its background from the Omarchy theme and follows a theme s
   await ui.unmount()
 })
 
+test('the palette setting wins over the Omarchy theme key by key and names an entry it cannot read', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598 nope=#fff muted=gray' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '', theme: { toml: 'background = "#1e1e2e"\ndark_background = "#161622"\nforeground = "#cdd6f4"\n', mtimeMs: 1 } }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = await texts(ui)
+  expect(shown).toContain('"backgroundColor":"#1d2021"')
+  expect(shown).not.toContain('#161622')
+  expect(shown).toContain('#83a598')
+  const toast = ran.find(a => a[0] === 'toast' && a[1]?.includes('filetree palette'))
+  expect(toast?.[1]).toContain('nope=#fff muted=gray')
+  await ui.unmount()
+})
+
 test('without an Omarchy theme the pane keeps the terminal background and nothing polls', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'

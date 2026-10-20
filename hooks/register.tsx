@@ -5,6 +5,7 @@ import type { ButtonProps } from './button'
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
+import { type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, LIGHT_GIT_COLOR } from './icons'
 import {
   age,
@@ -78,6 +79,7 @@ let blink: Timer | null = null
 let themePoll: Timer | null = null
 let gitPoll: Timer | null = null
 let gitStamp = ''
+let gitDirOf = { root: '', dir: '' }
 let ageTick: Timer | null = null
 let themeMtime: number | null = null
 let lightTerminal = false
@@ -87,6 +89,7 @@ let noNerd = false
 let glyphSetting = 'auto'
 let openWithSetting = ''
 let editWithSetting = ''
+let palette: Palette = parsePalette('')
 let inTmux = false
 let inHerdr = false
 let previewLine = 1
@@ -649,7 +652,9 @@ async function gitPaths($: EngineInterface, root: string, prefix: string, commit
 }
 
 async function gitChanged($: EngineInterface): Promise<void> {
-  const gd = await gitDir($, (await get($)).root)
+  const root = (await get($)).root
+  if (gitDirOf.root !== root) gitDirOf = { root, dir: await gitDir($, root) }
+  const gd = gitDirOf.dir
   const stamps = gd ? await Promise.all(['index', 'HEAD'].map(f => $.fs.stat(join(gd, f)).then(st => st.mtimeMs, () => 0))) : []
   const stamp = gd ? `${gd}:${stamps.join(':')}` : ''
   const before = gitStamp
@@ -1151,9 +1156,11 @@ export const register: Register = (on, options) => {
   showHints = options?.hints !== 'off'
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
   editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
+  palette = parsePalette(options?.palette)
   noDock = options?.start === 'off'
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
+    if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
     inTmux = !windows && Boolean(await $.env.get('TMUX'))
@@ -1411,12 +1418,12 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
     const light = !themeMtime && e.surface !== 'desktop' && lightTerminal
-    const theme: Theme = light ? LIGHT_THEME : ((await $.state.get(THEME)).value ?? DEFAULT_THEME)
+    const theme: Theme = { ...(light ? LIGHT_THEME : ((await $.state.get(THEME)).value ?? DEFAULT_THEME)), ...palette.theme }
     const tones = light ? LIGHT_TONES : TONES
-    const gitColors = light ? LIGHT_GIT_COLOR : GIT_COLOR
-    const addColor = light ? LIGHT_ADD_COLOR : ADD_COLOR
-    const delColor = light ? LIGHT_DEL_COLOR : DEL_COLOR
-    const rowColors = { activeBg: theme.selection, hoverBg: light ? LIGHT_HOVER : faint(theme.selection), tones: light ? LIGHT_SHIMMER : SHIMMER }
+    const gitColors = { ...(light ? LIGHT_GIT_COLOR : GIT_COLOR), ...palette.git }
+    const addColor = palette.add ?? (light ? LIGHT_ADD_COLOR : ADD_COLOR)
+    const delColor = palette.del ?? (light ? LIGHT_DEL_COLOR : DEL_COLOR)
+    const rowColors = { activeBg: theme.selection, hoverBg: palette.hover ?? (light ? LIGHT_HOVER : faint(theme.selection)), tones: light ? LIGHT_SHIMMER : SHIMMER }
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
