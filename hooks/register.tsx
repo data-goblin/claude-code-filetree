@@ -56,7 +56,6 @@ const ACTIVITY_TTL_MS = 45_000
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
 const THEME_POLL_MS = 2000
 const GIT_POLL_MS = 2000
-const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
   '[ -n "$f" ] || f=$(ls "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd* 2>/dev/null | head -n1); ' +
@@ -75,7 +74,7 @@ const AGE_TICK_MS = 60_000
 let blink: Timer | null = null
 let themePoll: Timer | null = null
 let gitPoll: Timer | null = null
-let gitStamp = ''
+let gitStamp: string | null = null
 let gitDirOf = { root: '', dir: '' }
 let ageTick: Timer | null = null
 let themeMtime: number | null = null
@@ -227,8 +226,8 @@ async function loadDirs($: EngineInterface, dirs: string[]): Promise<Map<string,
   return listed
 }
 
-async function git($: EngineInterface, cwd: string, args: string[], timeoutMs = 20_000) {
-  return $.process.run(['git', '--no-optional-locks', '-C', cwd, ...args], { timeoutMs, env: { GIT_OPTIONAL_LOCKS: '0' } })
+async function git($: EngineInterface, cwd: string, args: string[], timeoutMs = 20_000, stdin?: string) {
+  return $.process.run(['git', '--no-optional-locks', '-C', cwd, ...args], { timeoutMs, env: { GIT_OPTIONAL_LOCKS: '0' }, ...(stdin === undefined ? {} : { stdin }) })
 }
 
 async function detectRepo($: EngineInterface): Promise<void> {
@@ -659,7 +658,10 @@ async function gitChanged($: EngineInterface): Promise<void> {
   const stamp = gd ? `${gd}:${stamps.join(':')}` : ''
   const before = gitStamp
   gitStamp = stamp
-  if (before && stamp && before !== stamp) void sync($, true)
+  if (before === '' && stamp) {
+    await detectRepo($)
+    void sync($, true)
+  } else if (before && stamp && before !== stamp) void sync($, true)
 }
 
 async function settleRoot($: EngineInterface): Promise<void> {
@@ -965,7 +967,8 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
 async function loadDiff($: EngineInterface, path: string, folder: boolean): Promise<boolean> {
   const cwd = folder ? path : dirname(path)
   const born = await git($, cwd, ['rev-parse', '--verify', '--quiet', 'HEAD']).then(r => r.exitCode === 0, () => false)
-  const base = born ? 'HEAD' : EMPTY_TREE
+  const base = born ? 'HEAD' : await git($, cwd, ['hash-object', '-t', 'tree', '--stdin'], 10_000, '').then(r => r.stdout.trim(), () => '')
+  if (!base) return false
   const tracked = await git($, cwd, ['diff', base, '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--', path]).then(r => r.stdout, () => '')
   const others = await git($, cwd, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', path]).then(r => r.stdout.split('\0').filter(Boolean), () => [] as string[])
   const top = (await get($)).top || cwd
@@ -1256,7 +1259,7 @@ export const register: Register = (on, options) => {
       ageTick?.cancel()
       ageTick = showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
       gitPoll?.cancel()
-      gitStamp = ''
+      gitStamp = null
       gitPoll = $.clock.every(GIT_POLL_MS, () => void gitChanged($))
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))

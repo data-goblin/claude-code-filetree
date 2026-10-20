@@ -102,6 +102,7 @@ function world(on: any, w: World, ran: Ran) {
     if (argv[0] === 'sh') return ok('missing\n')
     if (argv[0] === 'git') {
       const verb = argv.slice(4).find(a => !a.startsWith('-'))
+      if (verb === 'hash-object') return ok('4b825dc642cb6eb9a060e54bf8d69288fbee4904\n')
       if (verb === 'rev-parse' && argv.includes('--verify') && w.unborn) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -646,6 +647,7 @@ test('d diffs against the empty tree before the first commit, and a binary chang
   await ui.post({ key: 'end' }, { in: 'rows' })
   await ui.post({ key: 'd' }, { in: 'rows' })
   await clock.settle()
+  expect(ran.some(a => a[0] === 'git' && a.includes('hash-object'))).toBe(true)
   expect(ran.some(a => a[0] === 'git' && a.includes('--no-ext-diff') && a.includes('4b825dc642cb6eb9a060e54bf8d69288fbee4904'))).toBe(true)
   expect(await texts(ui)).toContain('(binary file changed)')
   await ui.unmount()
