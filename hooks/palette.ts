@@ -9,6 +9,12 @@ export type Palette = {
   unknown: string[]
 }
 
+export const ADD_COLOR = '#98c379'
+export const DEL_COLOR = '#e06c75'
+export const LIGHT_ADD_COLOR = '#14532d'
+export const LIGHT_DEL_COLOR = '#7f1d1d'
+export const LIGHT_HOVER = '#f0f2f5'
+
 const THEME_KEYS = ['fg', 'bg', 'accent', 'muted', 'urgent', 'selection'] as const
 const GIT_KEYS: Record<string, string[]> = { added: ['A', '?'], modified: ['M', 'T'], renamed: ['R', 'C'] }
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i

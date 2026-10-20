@@ -1,0 +1,38 @@
+name: contrast
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['hooks/**', 'scripts/contrast.ts', '.github/workflows/contrast.yml']
+  pull_request:
+    paths: ['hooks/**', 'scripts/contrast.ts', '.github/workflows/contrast.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  contrast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Did a color change
+        id: colors
+        run: |
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff -U0 "$base" HEAD -- hooks scripts/contrast.ts .github/workflows/contrast.yml | grep -E '^[+-][^+-]' | grep -qiE '#[0-9a-f]{3}([0-9a-f]{3})?\b|contrast'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No color changed; contrast gate skipped."
+          fi
+      - uses: oven-sh/setup-bun@v2
+        if: steps.colors.outputs.changed == 'true'
+      - name: Contrast gate
+        if: steps.colors.outputs.changed == 'true'
+        run: bun scripts/contrast.ts

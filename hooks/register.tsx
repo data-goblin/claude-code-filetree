@@ -6,7 +6,7 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
-import { type Palette, parsePalette } from './palette'
+import { ADD_COLOR, DEL_COLOR, LIGHT_ADD_COLOR, LIGHT_DEL_COLOR, LIGHT_HOVER, type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, LIGHT_GIT_COLOR } from './icons'
 import {
   age,
@@ -53,11 +53,6 @@ const ROWS_BUDGET = 80_000
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
-const ADD_COLOR = '#98c379'
-const DEL_COLOR = '#e06c75'
-const LIGHT_ADD_COLOR = '#14532d'
-const LIGHT_DEL_COLOR = '#7f1d1d'
-const LIGHT_HOVER = '#f0f2f5'
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
 const THEME_POLL_MS = 2000
 const GIT_POLL_MS = 2000
