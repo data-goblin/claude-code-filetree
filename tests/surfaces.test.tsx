@@ -28,6 +28,7 @@ type World = {
   untracked?: string[]
   untrackedPatch?: string
   unborn?: boolean
+  diffTree?: string[]
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -102,6 +103,7 @@ function world(on: any, w: World, ran: Ran) {
     if (argv[0] === 'sh') return ok('missing\n')
     if (argv[0] === 'git') {
       const verb = argv.slice(4).find(a => !a.startsWith('-'))
+      if (verb === 'diff-tree') return ok((w.diffTree ?? []).join('\0'))
       if (verb === 'hash-object') return ok('4b825dc642cb6eb9a060e54bf8d69288fbee4904\n')
       if (verb === 'rev-parse' && argv.includes('--verify') && w.unborn) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
@@ -1707,5 +1709,40 @@ test('the ignore setting leaves a name out of the listing, the change scan and t
   expect(shown).toContain(shimmer('b.ts', 'purple'))
   expect(shown).not.toContain('.spool')
   expect(shown).not.toContain('.cache')
+  await ui.unmount()
+})
+
+const cached = (n: number) => Array.from({ length: n }, (_, i) => `.cache/k${String(i).padStart(3, '0')}.ts`)
+
+test('the ignore setting keeps ignored tracked files out of the git search index before the hit cap', { timeoutMs: 20_000, options: { ignore: '.cache' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [`${root}/.cache`]: cached(61).map(p => [p.slice(7), 'file'] as [string, 'file']), [root]: [['.cache', 'dir'], ['src', 'dir']], [`${root}/src`]: [['k.ts', 'file']] }, status: '## main\0', numstat: '' }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await ui.input({ key: 'q', text: 'k', kind: 'change' })
+  await clock.settle()
+  expect(await texts(ui)).toContain(`"id":"${root}/src/k.ts"`)
+  await ui.unmount()
+})
+
+test('the ignore setting applies before the reveal cap on a commit and on a Grep result', { timeoutMs: 20_000, options: { ignore: '.cache' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['.cache', 'dir'], ['src', 'dir'], ['gen', 'dir']], [`${root}/src`]: [['k.ts', 'file']], [`${root}/gen`]: [['g.ts', 'file']] }, status: '## main\0', numstat: '', heads: ['abc1234def0', 'fed4321cba9'], diffTree: [...cached(12), 'src/k.ts'] }
+  w.tool = e => (e.tool === 'Grep' ? { result: { numFiles: 61, filenames: [...cached(60), 'gen/g.ts'] } } : undefined)
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m real' } as any)
+  await clock.settle()
+  expect(await texts(ui)).toContain(shimmer('k.ts', 'green'))
+  await $.tool.call({ tool: 'Grep', pattern: 'x' } as any)
+  await clock.settle()
+  expect(await texts(ui)).toContain(shimmer('g.ts', 'purple'))
   await ui.unmount()
 })
