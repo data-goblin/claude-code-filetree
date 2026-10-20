@@ -1037,8 +1037,8 @@ async function jumpDiff($: EngineInterface, dir: 1 | -1): Promise<void> {
   const marks = lines.flatMap((l, i) => {
     if (files) return l.kind === '@' ? [i] : []
     const prev = lines[i - 1]
-    const jump = !prev || l.old !== prev.old + (prev.kind === '+' ? 0 : 1) || l.new !== prev.new + (prev.kind === '-' ? 0 : 1)
-    return jump ? [i] : []
+    const gap = !prev || l.old !== prev.old + (prev.kind === '+' ? 0 : 1) || l.new !== prev.new + (prev.kind === '-' ? 0 : 1)
+    return gap ? [i] : []
   })
   const t = await get($)
   const to = dir > 0 ? marks.find(i => i > t.previewTop) : [...marks].reverse().find(i => i < t.previewTop)
