@@ -116,6 +116,12 @@
       "description": "What d does on a changed file, in the tree or the preview. Empty: show its diff against HEAD in the pane, drawn by Claude Code's own diff view (an untracked file shows as all added; d again goes back to the file). Anything else is a terminal command, run on the file in a tmux window, a herdr pane or, on Linux, a new terminal window through xdg-terminal-exec, the file path going last. Examples: hunk diff --, lazygit -f, git difftool -y --, nvim -c Gvdiffsplit.",
       "default": ""
     },
+    "ignore": {
+      "type": "string",
+      "title": "Ignore",
+      "description": "File and folder names to leave out of the tree, its search and its shimmer, separated by spaces or commas. A name matches at any depth, like the built-in .git and node_modules. Example: .cache .tmp",
+      "default": ""
+    },
     "palette": {
       "type": "string",
       "title": "Palette",

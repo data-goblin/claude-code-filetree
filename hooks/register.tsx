@@ -118,6 +118,7 @@ let lastRoot = ''
 let sizeDefault = false
 let showAge = false
 let showHints = true
+let ignoreNames: string[] = []
 let searchGap = true
 let showShortcuts = true
 let sizeEpoch = 0
@@ -200,7 +201,7 @@ async function list($: EngineInterface, dir: string): Promise<FileNode[] | null>
       }),
     )
     unreadable.delete(dir)
-    return toNodes(dir, resolved)
+    return toNodes(dir, resolved.filter(e => !ignoreNames.includes(e.name)))
   } catch (err) {
     if (!(await exists($, dir))) return []
     if (!unreadable.has(dir)) {
@@ -335,8 +336,13 @@ async function revealPaths($: EngineInterface, paths: string[]): Promise<void> {
   }
 }
 
+// A path is ignored when any of its names below the root is in the Ignore setting.
+function isIgnored(root: string, path: string): boolean {
+  return ignoreNames.length > 0 && relative(root, path).split('/').some(name => ignoreNames.includes(name))
+}
+
 function pruneArgs(root: string, ignored: string[] = []): string[] {
-  const names = broad(root) ? [...PRUNE, ...HOME_PRUNE] : PRUNE
+  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames]
   return ['(', ...names.flatMap((name, i) => (i === 0 ? ['-name', name] : ['-o', '-name', name])), ...ignored.flatMap(p => ['-o', '-path', p]), ')', '-prune', '-o']
 }
 
@@ -743,7 +749,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
     const found = fresh.top
       ? await changedInRepo($, t.root, since, before, fresh.ignored)
       : { hits: since.os === 'win32' ? [] : await changedSince($, t.root, since, NO_REPO_DEPTH), gone: [] }
-    const hits = found.hits.filter(x => inside(t.root, x) && !underAny(x, ignored, t.root)).slice(0, FIND_LIMIT)
+    const hits = found.hits.filter(x => inside(t.root, x) && !underAny(x, ignored, t.root) && !isIgnored(t.root, x)).slice(0, FIND_LIMIT)
     await revealPaths($, hits)
     const loaded = await get($)
     const dirs = [...new Set([loaded.root, ...openDirs(loaded), ...hits.map(dirname), ...found.gone.map(dirname)])].filter(d => inside(loaded.root, d))
@@ -762,7 +768,7 @@ async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
     const found: string[] = []
     for (const r of reads) {
       if (found.length >= READ_REVEAL_LIMIT) break
-      if (r !== t.root && inside(t.root, r) && !underAny(r, ignored, t.root) && (await exists($, r))) found.push(r)
+      if (r !== t.root && inside(t.root, r) && !underAny(r, ignored, t.root) && !isIgnored(t.root, r) && (await exists($, r))) found.push(r)
     }
     if (found.length) {
       await revealPaths($, found)
@@ -810,7 +816,7 @@ async function touched($: EngineInterface, paths: string[], tone: string, show: 
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
-  const within = paths.map(posix).filter(p => inside(t.root, p))
+  const within = paths.map(posix).filter(p => inside(t.root, p) && !isIgnored(t.root, p))
   if (within.length === 0) return
   if (tone !== 'purple') {
     searchIndex = null
@@ -1228,6 +1234,7 @@ export const register: Register = (on, options) => {
   sizeDefault = options?.column === 'size'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
+  ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
   showShortcuts = options?.shortcuts !== 'off'
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
