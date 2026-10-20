@@ -56,6 +56,7 @@ const ACTIVITY_TTL_MS = 45_000
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
 const THEME_POLL_MS = 2000
 const GIT_POLL_MS = 2000
+const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
   '[ -n "$f" ] || f=$(ls "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd* 2>/dev/null | head -n1); ' +
@@ -652,7 +653,7 @@ async function gitPaths($: EngineInterface, root: string, prefix: string, commit
 
 async function gitChanged($: EngineInterface): Promise<void> {
   const root = (await get($)).root
-  if (gitDirOf.root !== root) gitDirOf = { root, dir: await gitDir($, root) }
+  if (gitDirOf.root !== root || !gitDirOf.dir) gitDirOf = { root, dir: await gitDir($, root) }
   const gd = gitDirOf.dir
   const stamps = gd ? await Promise.all(['index', 'HEAD'].map(f => $.fs.stat(join(gd, f)).then(st => st.mtimeMs, () => 0))) : []
   const stamp = gd ? `${gd}:${stamps.join(':')}` : ''
@@ -963,7 +964,9 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
 
 async function loadDiff($: EngineInterface, path: string, folder: boolean): Promise<boolean> {
   const cwd = folder ? path : dirname(path)
-  const tracked = await git($, cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--', path]).then(r => r.stdout, () => '')
+  const born = await git($, cwd, ['rev-parse', '--verify', '--quiet', 'HEAD']).then(r => r.exitCode === 0, () => false)
+  const base = born ? 'HEAD' : EMPTY_TREE
+  const tracked = await git($, cwd, ['diff', base, '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--', path]).then(r => r.stdout, () => '')
   const others = await git($, cwd, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', path]).then(r => r.stdout.split('\0').filter(Boolean), () => [] as string[])
   const top = (await get($)).top || cwd
   const files = splitPatch(tracked.slice(0, PREVIEW_CHARS))
@@ -998,8 +1001,7 @@ async function diffFile($: EngineInterface, path: string): Promise<void> {
   try {
     if (host === 'herdr') return await openInHerdr($, diffWithSetting, path)
     if (host === 'tmux') {
-      const { argv, init } = tmuxOpenCommand(diffWithSetting, path)
-      const run = await $.process.run(argv, init)
+      const run = await $.process.run(['tmux', 'new-window', '-c', dirname(path), '--', ...words(diffWithSetting), path], { timeoutMs: 10_000 })
       if (run.exitCode !== 0) $.ui.toast(`could not diff ${shortPath(path)} with ${diffWithSetting}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
       return
     }

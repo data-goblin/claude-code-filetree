@@ -27,6 +27,7 @@ type World = {
   patch?: string
   untracked?: string[]
   untrackedPatch?: string
+  unborn?: boolean
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -101,6 +102,7 @@ function world(on: any, w: World, ran: Ran) {
     if (argv[0] === 'sh') return ok('missing\n')
     if (argv[0] === 'git') {
       const verb = argv.slice(4).find(a => !a.startsWith('-'))
+      if (verb === 'rev-parse' && argv.includes('--verify') && w.unborn) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'status') return ok(w.status)
@@ -628,7 +630,24 @@ test('Diff with runs lazygit in a tmux window', { timeoutMs: 20_000, options: { 
   await ui.post({ key: 'end' }, { in: 'rows' })
   await ui.post({ key: 'd' }, { in: 'rows' })
   await clock.settle()
-  expect(ran).toContainEqual(['sh', '-c', TMUX_OPEN, 'sh', `${root}/a.ts`, root, '', 'lazygit', '-f'])
+  expect(ran).toContainEqual(['tmux', 'new-window', '-c', root, '--', 'lazygit', '-f', `${root}/a.ts`])
+  await ui.unmount()
+})
+
+test('d diffs against the empty tree before the first commit, and a binary change still shows', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const patch = 'diff --git a/logo.png b/logo.png\nnew file mode 100644\nindex 0000000..1111111\nBinary files /dev/null and b/logo.png differ\n'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['logo.png', 'file']] }, status: '## No commits yet on main\0A  logo.png\0', numstat: '', patch, unborn: true }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  expect(ran.some(a => a[0] === 'git' && a.includes('--no-ext-diff') && a.includes('4b825dc642cb6eb9a060e54bf8d69288fbee4904'))).toBe(true)
+  expect(await texts(ui)).toContain('(binary file changed)')
   await ui.unmount()
 })
 
@@ -1339,7 +1358,7 @@ test('the pane takes its background from the Omarchy theme and follows a theme s
   await ui.unmount()
 })
 
-test('the palette setting wins over the Omarchy theme key by key and names an entry it cannot read', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598 nope=#fff muted=gray' } }, async ($, on) => {
+test('the palette setting wins over the Omarchy theme key by key and names an entry it cannot read', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598 nope=#fff muted=gray selection=#fff' } }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
   const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '', theme: { toml: 'background = "#1e1e2e"\ndark_background = "#161622"\nforeground = "#cdd6f4"\n', mtimeMs: 1 } }
@@ -1352,6 +1371,8 @@ test('the palette setting wins over the Omarchy theme key by key and names an en
   expect(shown).toContain('"backgroundColor":"#1d2021"')
   expect(shown).not.toContain('#161622')
   expect(shown).toContain('#83a598')
+  expect(shown).toContain('"activeBg":"#ffffff"')
+  expect(shown).not.toContain('#1b1f67')
   const toast = ran.find(a => a[0] === 'toast' && a[1]?.includes('filetree palette'))
   expect(toast?.[1]).toContain('nope=#fff muted=gray')
   await ui.unmount()

@@ -29,7 +29,7 @@ export function parsePalette(text: unknown): Palette {
       out.unknown.push(pair)
       continue
     }
-    const color = value.trim().toLowerCase()
+    const color = value.trim().toLowerCase().replace(/^#(.)(.)(.)$/, '#$1$1$2$2$3$3')
     if ((THEME_KEYS as readonly string[]).includes(key)) out.theme[key as (typeof THEME_KEYS)[number]] = color
     else if (key in GIT_KEYS) for (const status of GIT_KEYS[key] ?? []) out.git[status] = color
     else if (key === 'add' || key === 'del' || key === 'hover') out[key] = color

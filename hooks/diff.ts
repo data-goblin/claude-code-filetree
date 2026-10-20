@@ -31,9 +31,11 @@ export function splitPatch(patch: string): { path: string; lines: DiffLine[] }[]
     .map(part => {
       const plus = /^\+\+\+ (?:b\/)?(.+)$/m.exec(part)?.[1]
       const head = /^diff --git a\/.+ b\/(.+)$/m.exec(part)?.[1]
-      return { path: (plus && plus !== '/dev/null' ? plus : head) ?? '', lines: parseDiff(part) }
+      const lines = parseDiff(part)
+      const note = /^Binary files /m.test(part) ? 'binary file changed' : /^rename from /m.test(part) ? 'renamed, no text change' : /^(old|new) mode /m.test(part) ? 'file mode changed' : ''
+      return { path: (plus && plus !== '/dev/null' ? plus : head) ?? '', lines: lines.length || !note ? lines : [{ kind: ' ' as const, text: `(${note})`, old: 1, new: 1 }] }
     })
-    .filter(f => f.lines.length)
+    .filter(f => f.path && f.lines.length)
 }
 
 export function diffWindow(lines: DiffLine[], top: number, rows: number): { segments: DiffSegment[]; top: number } {
