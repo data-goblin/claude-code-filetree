@@ -108,7 +108,7 @@ export function openCommand(os: 'linux' | 'darwin' | 'win32', target: string) {
   }
 }
 
-function words(command: string): string[] {
+export function words(command: string): string[] {
   const out: string[] = []
   let word: string | null = null
   let quote = ''

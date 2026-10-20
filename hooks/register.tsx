@@ -1,10 +1,11 @@
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
-import { herdrError, herdrOpenCommand, herdrPane, LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand } from './open'
+import { herdrError, herdrOpenCommand, herdrPane, LINUX_LAUNCH, openCommand, openWithCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
+import { type DiffLine, diffWindow, parseDiff } from './diff'
 import { type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, LIGHT_GIT_COLOR } from './icons'
 import {
@@ -89,11 +90,12 @@ let noNerd = false
 let glyphSetting = 'auto'
 let openWithSetting = ''
 let editWithSetting = ''
+let diffWithSetting = ''
 let palette: Palette = parsePalette('')
 let inTmux = false
 let inHerdr = false
 let previewLine = 1
-let previewed: { path: string; text: string; note: string } | null = null
+let previewed: { path: string; text: string; note: string; diff?: DiffLine[] } | null = null
 let previewRows = 20
 let follow = true
 let followClaude = true
@@ -962,6 +964,53 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   previewed = { path, text: fit.join('\n'), note }
 }
 
+async function loadDiff($: EngineInterface, path: string): Promise<boolean> {
+  const cwd = dirname(path)
+  const tracked = await git($, cwd, ['ls-files', '--error-unmatch', '--', path]).then(r => r.exitCode === 0, () => false)
+  const run = tracked
+    ? await git($, cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--', path])
+    : await git($, cwd, ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', path])
+  const lines = parseDiff(run.stdout.slice(0, PREVIEW_CHARS))
+  if (!lines.length) return false
+  const note = run.stdout.length > PREVIEW_CHARS ? `first ${lines.length.toLocaleString('en')} diff lines` : tracked ? 'changes against HEAD' : 'untracked file'
+  previewed = { path, text: lines.map(l => l.text).join('\n'), note, diff: lines }
+  return true
+}
+
+async function diffFile($: EngineInterface, path: string): Promise<void> {
+  if (!diffWithSetting) {
+    const t = await get($)
+    if (t.preview === path && previewed?.path === path && previewed.diff) return showPreview($, path)
+    if (!(await loadDiff($, path))) {
+      $.ui.toast(`no changes in ${shortPath(path)}`)
+      return
+    }
+    await patch($, () => ({ preview: path, previewTop: 0, selected: path }))
+    $.clock.after(100, () => parkPreview($))
+    return
+  }
+  const os = await osName($)
+  const host = await editorHost($, os)
+  try {
+    if (host === 'herdr') return await openInHerdr($, diffWithSetting, path)
+    if (host === 'tmux') {
+      const { argv, init } = tmuxOpenCommand(diffWithSetting, path)
+      const run = await $.process.run(argv, init)
+      if (run.exitCode !== 0) $.ui.toast(`could not diff ${shortPath(path)} with ${diffWithSetting}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
+      return
+    }
+    if (os === 'linux') {
+      const argv = ['sh', '-c', LINUX_LAUNCH, 'sh', 'xdg-terminal-exec', 'sh', '-c', 'cd "$1" && shift && exec "$@"', 'sh', dirname(path), ...words(diffWithSetting), path]
+      const run = await $.process.run(argv, { timeoutMs: 10_000 })
+      if (run.exitCode !== 0) $.ui.toast(`could not diff ${shortPath(path)} with ${diffWithSetting}: ${run.stderr.trim().split('\n')[0] || `exit ${run.exitCode}`}`)
+      return
+    }
+    $.ui.toast('Diff with: a terminal command needs tmux, herdr or Linux. Clear Diff with to see the diff in the pane.')
+  } catch {
+    $.ui.toast(`could not diff ${shortPath(path)} with ${diffWithSetting}`)
+  }
+}
+
 async function showPreview($: EngineInterface, path: string): Promise<void> {
   await loadPreview($, path)
   await patch($, () => ({ preview: path, previewTop: 0, selected: path }))
@@ -979,7 +1028,7 @@ async function closePreview($: EngineInterface): Promise<void> {
 
 async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   const t = await get($)
-  const last = Math.max(0, (previewed?.text.split('\n').length ?? 1) - previewRows)
+  const last = Math.max(0, (previewed?.diff?.length ?? previewed?.text.split('\n').length ?? 1) - previewRows)
   const top = Math.max(0, Math.min(last, t.previewTop + by))
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
@@ -1095,6 +1144,7 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
   else if (key === 'pagedown') await move(10)
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
+  else if (cur && key === 'd' && cur.kind !== 'dir') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
@@ -1157,6 +1207,7 @@ export const register: Register = (on, options) => {
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
   editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   palette = parsePalette(options?.palette)
+  diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   noDock = options?.start === 'off'
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
@@ -1323,6 +1374,7 @@ export const register: Register = (on, options) => {
       const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, f: page, b: -page, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
       if (data.key === 'left' || data.key === 'h') await closePreview($)
       else if (data.key === 'e') await editPreview($, t.preview)
+      else if (data.key === 'd') await diffFile($, t.preview)
       else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
       return {}
     }
@@ -1440,9 +1492,10 @@ export const register: Register = (on, options) => {
       if (previewed?.path !== t.preview) await loadPreview($, t.preview)
       const p = previewed
       const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
-      const all = (p?.text ?? '').split('\n').length
+      const all = p?.diff?.length ?? (p?.text ?? '').split('\n').length
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 3 : 2))
-      const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
+      const start = nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows))
+      const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
       previewLine = win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const external = { id: 'external', label: unicode ? '↗' : '\u{f08e}', dim: true, hint: 'open in default app' }
@@ -1461,13 +1514,14 @@ export const register: Register = (on, options) => {
             {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => (
               <Button key={`pv-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void scrollPreview($, by).then(() => parkPreview($))} />
             ))}
+            <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? 'file' : 'diff'} onPress={() => void diffFile($, t.preview)} />
             {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown: markdown && !p?.diff, diff: Boolean(p?.diff) } } satisfies RowsProps}
           />
         </Box>
       )

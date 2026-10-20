@@ -24,6 +24,7 @@ type World = {
   links?: string[]
   files?: Record<string, string>
   mtimes?: Record<string, number>
+  patch?: string
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -101,6 +102,7 @@ function world(on: any, w: World, ran: Ran) {
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'status') return ok(w.status)
+      if (verb === 'diff' && argv.includes('--no-ext-diff')) return ok(w.patch ?? '')
       if (verb === 'diff') return ok(w.numstat)
       if (verb === 'ls-files') {
         const files: string[] = []
@@ -547,6 +549,57 @@ test('with the classic hooks bypassed, /clear still rebuilds the tree from sessi
   const shown = await texts(ui)
   expect(shown).toContain(`"id":"${root}/sub/b.ts"`)
   expect(shown).not.toContain(`"id":"${root}/a.ts"`)
+  await ui.unmount()
+})
+
+test('d shows a changed file as a diff drawn by the engine, and d again goes back to the file', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file']] }, status: '## main\0 M a.ts\0', numstat: '', files: { '/home/k/proj/a.ts': 'const a = 1\nconst b = 3\nconst c = 4\n' }, patch: 'diff --git a/a.ts b/a.ts\nindex 1..2 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,3 @@\n const a = 1\n-const b = 2\n+const b = 3\n const c = 4\n' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  let shown = await texts(ui)
+  expect(shown).toContain('"format":"diff"')
+  expect(shown).toContain('@@ -1,3 +1,3 @@\\n const a = 1\\n-const b = 2\\n+const b = 3')
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  shown = await texts(ui)
+  expect(shown).toContain('"format":"source"')
+  await ui.unmount()
+})
+
+test('Diff with runs lazygit in a tmux window', { timeoutMs: 20_000, options: { diff: 'lazygit -f' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k', TMUX: '/tmp/tmux-1/default,1,0' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file']] }, status: '## main\0 M a.ts\0', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  expect(ran).toContainEqual(['sh', '-c', TMUX_OPEN, 'sh', `${root}/a.ts`, root, '', 'lazygit', '-f'])
+  await ui.unmount()
+})
+
+test('Diff with outside tmux and herdr opens a new terminal window on Linux', { timeoutMs: 20_000, options: { diff: 'hunk diff --' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file']] }, status: '## main\0 M a.ts\0', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  expect(ran).toContainEqual(['sh', '-c', LINUX_LAUNCH, 'sh', 'xdg-terminal-exec', 'sh', '-c', 'cd "$1" && shift && exec "$@"', 'sh', root, 'hunk', 'diff', '--', `${root}/a.ts`])
   await ui.unmount()
 })
 
