@@ -24,6 +24,8 @@ pull request credits them even when the code that shipped was rewritten.
 - A Gruvbox Dark Hard palette, which became the Palette setting and its README example: [@Mourey](https://github.com/Mourey) ([#13](https://github.com/data-goblin/claude-code-filetree/pull/13))
 - A preview key that opens the file in an editor at the line being read: [@mangow314](https://github.com/mangow314) ([#21](https://github.com/data-goblin/claude-code-filetree/issues/21))
 
+- Dropping the classic and prompt.attachment hooks that Team and Enterprise sessions skip: [@Liquidmasl](https://github.com/Liquidmasl) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
+
 ## Bug reports
 
 - Desktop wheel and scrollbar could not reach the bottom of a long tree: [@janzd](https://github.com/janzd) ([#5](https://github.com/data-goblin/claude-code-filetree/issues/5))

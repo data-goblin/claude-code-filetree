@@ -474,17 +474,14 @@ test('follow off: reads, writes and folders Claude opens above the view never mo
 
 test('watches only git metadata, copies paths, clears search, Home and End', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
+  const mtimes: Record<string, number> = {}
   const root = '/home/k/proj'
-  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['.git', 'dir'], ['a.txt', 'file'], ['b.txt', 'file'], ['c.txt', 'file']], [`${root}/.git`]: [['index', 'file'], ['HEAD', 'file']] }, status: '## main\0', numstat: '' }, ran)
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['.git', 'dir'], ['a.txt', 'file'], ['b.txt', 'file'], ['c.txt', 'file']], [`${root}/.git`]: [['index', 'file'], ['HEAD', 'file']] }, status: '## main\0', numstat: '', mtimes }, ran)
   const copied: string[] = []
   on('ui.copy', (_$: any, e: any) => {
     copied.push(e.text)
     return { value: { isCopied: true } }
   })
-  on('classic.SessionStart', () => ({}))
-  on('classic.FileChanged', () => ({}))
-  const started = await $.classic.SessionStart({ source: 'startup', cwd: root } as any)
-  expect((started as any).watchPaths).toEqual([`${root}/.git/index`, `${root}/.git/HEAD`])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
@@ -515,9 +512,12 @@ test('watches only git metadata, copies paths, clears search, Home and End', { t
   await ui.input({ key: 'q', text: 'c', kind: 'submit' })
   await clock.settle()
   expect((await rowsOf()).active).toBe(`${root}/c.txt`)
+  await clock.advance(2100)
+  await clock.settle()
   const before = ran.filter(a => a.includes('status')).length
-  await $.classic.FileChanged({ file_path: `${root}/.git/index`, event: 'change' } as any)
-  await clock.advance(400)
+  mtimes[`${root}/.git/index`] = 1_800_000_009_000
+  await clock.advance(2100)
+  await clock.settle()
   expect(ran.filter(a => a.includes('status')).length).toBeGreaterThan(before)
   await ui.unmount()
 })
@@ -712,18 +712,20 @@ test('after /clear the tree rebuilds itself, keeps a pinned folder, and an empty
   const ran: Ran = []
   const root = '/home/k/proj'
   const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']], [`${root}/sub`]: [['b.ts', 'file']] }, status: '', numstat: '' }, ran)
-  on('classic.SessionStart', () => ({}))
+  on('session.end', (_$: any, e: any) => ({ sessionId: e.sessionId }))
   expect(ancestorsOf('/repo/a.ts', '')).toEqual([])
   expect(ancestorsOf('/repo2/a.ts', '/repo')).toEqual([])
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await $.tool.call({ tool: 'Read', file_path: `${root}/a.ts` } as any)
   await clock.settle()
-  await $.classic.SessionStart({ source: 'clear', cwd: root } as any)
+  await $.session.end({ reason: 'clear', sessionId: 'test-session' } as any)
+  await clock.advance(10)
   await clock.settle()
   expect(await texts(ui)).toContain(`"id":"${root}/a.ts"`)
   await $.command.run(fullscreen(`${root}/sub`))
   await clock.settle()
-  await $.classic.SessionStart({ source: 'clear', cwd: root } as any)
+  await $.session.end({ reason: 'clear', sessionId: 'test-session' } as any)
+  await clock.advance(10)
   await clock.settle()
   const shown = await texts(ui)
   expect(shown).toContain(`"id":"${root}/sub/b.ts"`)
@@ -1144,7 +1146,6 @@ test('a cwd change moves the tree and drops the old selection before the next pr
   const c = '/home/k/repo-c'
   const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: a, top: '', dirs: { [a]: [['a.txt', 'file']], [b]: [['b.txt', 'file']], [c]: [['c.txt', 'file']] }, status: '', numstat: '' }
   const clock = world(on, w, ran)
-  on('classic.CwdChanged', () => ({}))
   await $.session.start({ cwd: a, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
@@ -1156,9 +1157,14 @@ test('a cwd change moves the tree and drops the old selection before the next pr
   await clock.settle()
   expect(await texts(ui)).toContain('b.txt')
   w.cwd = c
-  await $.classic.CwdChanged({ old_cwd: b, new_cwd: c } as any)
+  await $.tool.call({ tool: 'Bash', command: `cd ${c}` } as any)
+  await clock.advance(500)
   await clock.settle()
   expect(await texts(ui)).toContain('c.txt')
+  w.cwd = a
+  await clock.advance(2100)
+  await clock.settle()
+  expect(await texts(ui)).toContain('a.txt')
   await ui.unmount()
 })
 
@@ -1169,7 +1175,6 @@ test('open at start off: no pane at start, on a cwd change or a prompt, until /f
   const c = '/home/k/repo-c'
   const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: a, top: '', dirs: { [a]: [['a.txt', 'file']], [b]: [['b.txt', 'file']], [c]: [['c.txt', 'file']] }, status: '', numstat: '' }
   const clock = world(on, w, ran)
-  on('classic.CwdChanged', () => ({}))
   const before = opens.length
   await $.session.start({ cwd: a, surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -1177,7 +1182,8 @@ test('open at start off: no pane at start, on a cwd change or a prompt, until /f
   await $.prompt.submit({ text: 'look at @b.txt', wait: false } as any)
   await clock.settle()
   w.cwd = c
-  await $.classic.CwdChanged({ old_cwd: b, new_cwd: c } as any)
+  await $.tool.call({ tool: 'Bash', command: `cd ${c}` } as any)
+  await clock.advance(500)
   await clock.settle()
   await $.session.start({ cwd: c, surface: 'terminal', isInteractive: true })
   await clock.settle()
@@ -1187,7 +1193,8 @@ test('open at start off: no pane at start, on a cwd change or a prompt, until /f
   expect(opens.slice(before)).toContainEqual(expect.objectContaining({ id: 'filetree', focus: true }))
   const shown = opens.length
   w.cwd = a
-  await $.classic.CwdChanged({ old_cwd: c, new_cwd: a } as any)
+  await $.tool.call({ tool: 'Bash', command: `cd ${a}` } as any)
+  await clock.advance(500)
   await clock.settle()
   expect(opens.length).toBeGreaterThan(shown)
 })

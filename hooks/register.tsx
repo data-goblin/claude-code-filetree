@@ -1260,7 +1260,7 @@ export const register: Register = (on, options) => {
       ageTick = showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
       gitPoll?.cancel()
       gitStamp = null
-      gitPoll = $.clock.every(GIT_POLL_MS, () => void gitChanged($))
+      gitPoll = $.clock.every(GIT_POLL_MS, () => void followCwd($).then(moved => moved || gitChanged($)))
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
@@ -1409,28 +1409,9 @@ export const register: Register = (on, options) => {
     return {}
   })
 
-  on('classic.SessionStart', async ($, e, next) => {
-    const result = await next(e)
-    if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') void settleRoot($)
-    const gd = await gitDir($, posix(e.cwd))
-    return gd ? { ...result, watchPaths: [...(result.watchPaths ?? []), join(gd, 'index'), join(gd, 'HEAD')] } : result
-  })
-
   on('session.end', async ($, e, next) => {
     const result = await next(e)
-    if (e.reason === 'clear' || e.reason === 'resume') $.clock.after(0, () => void settleRoot($))
-    return result
-  })
-
-  on('classic.CwdChanged', async ($, e, next) => {
-    const result = await next(e)
-    void followCwd($)
-    return result
-  })
-
-  on('classic.FileChanged', async ($, e, next) => {
-    const result = await next(e)
-    if (/[\\/]\.git[\\/]|[\\/](index|HEAD)$/.test(e.file_path)) $.clock.after(300, () => void sync($, true))
+    if (e.reason === 'clear' || e.reason === 'resume' || e.reason === 'other') $.clock.after(0, () => void settleRoot($))
     return result
   })
 
@@ -1478,11 +1459,6 @@ export const register: Register = (on, options) => {
       })()
     }
     return next(context.length ? { ...e, context } : e)
-  })
-
-  on('prompt.attachment', async ($, e, next) => {
-    void settleBackground($, e.text)
-    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
