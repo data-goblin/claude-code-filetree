@@ -1,4 +1,4 @@
-# Attributions
+# Acknowledgements
 
 filetree is shaped by the people who send code, ideas and bug reports. Each
 entry names what they gave and where; a feature built from someone's idea or
