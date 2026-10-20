@@ -78,6 +78,26 @@
         "off"
       ]
     },
+    "spacing": {
+      "type": "string",
+      "title": "Search spacing",
+      "description": "on: a blank line above and below the search bar. off: the search bar sits right under the header and the tree gets the two rows.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
+    "shortcuts": {
+      "type": "string",
+      "title": "Shortcut row",
+      "description": "on: the j/k/h/l/open/search row under the search bar. off: the row is hidden and the tree gets it; the keys still work with the tree focused.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "open": {
       "type": "string",
       "title": "Open with",

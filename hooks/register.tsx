@@ -123,6 +123,8 @@ let lastRoot = ''
 let sizeDefault = false
 let showAge = false
 let showHints = true
+let searchGap = true
+let showShortcuts = true
 let sizeEpoch = 0
 let sizeActive = 0
 let sizeQueue: string[] = []
@@ -1030,7 +1032,7 @@ function parkPreview($: EngineInterface): void {
 
 async function closePreview($: EngineInterface): Promise<void> {
   await patch($, () => ({ preview: '', previewTop: 0 }))
-  $.clock.after(100, () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {}))
+  $.clock.after(100, () => void $.ui.focus({ requestId: PANE, key: showShortcuts ? 'nav-o' : 'rows' }).catch(() => {}))
 }
 
 async function jumpDiff($: EngineInterface, dir: 1 | -1): Promise<void> {
@@ -1226,6 +1228,8 @@ export const register: Register = (on, options) => {
   sizeDefault = options?.column === 'size'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
+  searchGap = options?.spacing !== 'off'
+  showShortcuts = options?.shortcuts !== 'off'
   openWithSetting = typeof options?.open === 'string' ? options.open : ''
   editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   palette = parsePalette(options?.palette)
@@ -1560,7 +1564,7 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
-    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (t.selected || latest ? 1 : 0)
+    const fixed = 1 + (showShortcuts ? 1 : 0) + (searchGap ? 2 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (t.selected || latest ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1725,7 +1729,7 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const park = () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {})
+    const park = () => void $.ui.focus({ requestId: PANE, key: showShortcuts ? 'nav-o' : 'rows' }).catch(() => {})
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
@@ -1742,6 +1746,7 @@ export const register: Register = (on, options) => {
         </Box>
         {branchRow()}
         {!t.top && showHints && <Text color={theme.muted}>{unicode ? '± ' : '\u{e702} '}no git repo · git status starts after git init</Text>}
+        {searchGap ? <Text key="gap-above"> </Text> : null}
         <Box flexDirection="row">
           <Box flexGrow={1}>
             <Input
@@ -1756,6 +1761,8 @@ export const register: Register = (on, options) => {
           </Box>
           {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
         </Box>
+        {searchGap ? <Text key="gap-below"> </Text> : null}
+        {showShortcuts ? (
         <Box flexDirection="row" gap={2}>
           {([['j', '↓', '\u{f0045}'], ['k', '↑', '\u{f005d}'], ['h', '←', '\u{f004d}'], ['l', '→', '\u{f0054}']] as const).map(([k, plain, nerd]) => (
             <Button key={`nav-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void navigate($, k).then(park)} />
@@ -1763,6 +1770,7 @@ export const register: Register = (on, options) => {
           <Button key="nav-o" plain dimColor autoFocus hotkey="o" label={unicode ? 'open' : '\u{f03cb} open'} onPress={() => void navigate($, 'return')} />
           <Button key="nav-s" plain dimColor hotkey="s" label={unicode ? 'search' : '\u{f0349} search'} onPress={() => void $.ui.focus({ requestId: PANE, key: 'q' })} />
         </Box>
+        ) : null}
         <Client
           key="rows"
           module="./rows.tsx"

@@ -1568,10 +1568,29 @@ for (const hints of ['on', 'off'] as const) {
     await clock.settle()
     const drawn = (await ui.drawn()) as any
     expect(JSON.stringify(drawn).includes('git init')).toBe(hints === 'on')
-    expect(drawn.children.find((c: any) => c.type === 'Client').props.props.rows.length).toBe(hints === 'on' ? 16 : 17)
+    expect(drawn.children.find((c: any) => c.type === 'Client').props.props.rows.length).toBe(hints === 'on' ? 14 : 15)
     await ui.unmount()
   })
 }
+
+test('spacing off and shortcuts off drop the blank lines and the shortcut row, and the tree takes all three rows', { timeoutMs: 20_000, options: { hints: 'off', spacing: 'off', shortcuts: 'off' } }, async ($, on) => {
+  const root = '/home/k/big'
+  const names = Array.from({ length: 60 }, (_, i) => [`f${String(i).padStart(2, '0')}.txt`, 'file'] as [string, 'file'])
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: names }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } } })
+  await clock.settle()
+  const drawn = (await ui.drawn()) as any
+  expect(drawn.children.find((c: any) => c.type === 'Client').props.props.rows.length).toBe(18)
+  expect(await ui.find({ key: 'nav-j' })).toBeUndefined()
+  expect(await ui.find({ key: 'gap-above' })).toBeUndefined()
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  const after = (await ui.drawn()) as any
+  expect(after.children.find((c: any) => c.type === 'Client').props.props.active).toBe(`${root}/f01.txt`)
+  await ui.unmount()
+})
 
 for (const os of ['linux', 'win32'] as const) {
   test(`${os}: a failed file opener is visible`, { timeoutMs: 20_000 }, async ($, on) => {
