@@ -5,7 +5,7 @@ import type { ButtonProps } from './button'
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { type DiffLine, diffWindow, parseDiff } from './diff'
+import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, LIGHT_GIT_COLOR } from './icons'
 import {
@@ -964,24 +964,31 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   previewed = { path, text: fit.join('\n'), note }
 }
 
-async function loadDiff($: EngineInterface, path: string): Promise<boolean> {
-  const cwd = dirname(path)
-  const tracked = await git($, cwd, ['ls-files', '--error-unmatch', '--', path]).then(r => r.exitCode === 0, () => false)
-  const run = tracked
-    ? await git($, cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--', path])
-    : await git($, cwd, ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', path])
-  const lines = parseDiff(run.stdout.slice(0, PREVIEW_CHARS))
-  if (!lines.length) return false
-  const note = run.stdout.length > PREVIEW_CHARS ? `first ${lines.length.toLocaleString('en')} diff lines` : tracked ? 'changes against HEAD' : 'untracked file'
-  previewed = { path, text: lines.map(l => l.text).join('\n'), note, diff: lines }
+async function loadDiff($: EngineInterface, path: string, folder: boolean): Promise<boolean> {
+  const cwd = folder ? path : dirname(path)
+  const tracked = await git($, cwd, ['diff', 'HEAD', '--no-color', '--no-ext-diff', '--', path]).then(r => r.stdout, () => '')
+  const others = await git($, cwd, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', path]).then(r => r.stdout.split('\0').filter(Boolean), () => [] as string[])
+  const top = (await get($)).top || cwd
+  const files = splitPatch(tracked.slice(0, PREVIEW_CHARS))
+  for (const rel of others.slice(0, 50)) {
+    const run = await git($, top, ['diff', '--no-index', '--no-color', '--no-ext-diff', '--', '/dev/null', rel]).catch(() => null)
+    const file = run ? splitPatch(run.stdout.slice(0, PREVIEW_CHARS))[0] : undefined
+    if (file) files.push({ path: rel, lines: file.lines })
+  }
+  if (!files.length) return false
+  const many = folder || files.length > 1
+  const lines = files.flatMap(f => (many ? [{ kind: '@' as const, text: f.path, old: 0, new: 0 }, ...f.lines] : f.lines))
+  const note = many ? `${files.length} changed file${files.length === 1 ? '' : 's'} against HEAD` : others.length ? 'untracked file' : 'changes against HEAD'
+  previewed = { path, text: '', note, diff: lines }
   return true
 }
 
 async function diffFile($: EngineInterface, path: string): Promise<void> {
   if (!diffWithSetting) {
     const t = await get($)
-    if (t.preview === path && previewed?.path === path && previewed.diff) return showPreview($, path)
-    if (!(await loadDiff($, path))) {
+    const folder = t.nodes.find(n => n.id === path)?.kind === 'dir'
+    if (t.preview === path && previewed?.path === path && previewed.diff) return folder ? closePreview($) : showPreview($, path)
+    if (!(await loadDiff($, path, folder))) {
       $.ui.toast(`no changes in ${shortPath(path)}`)
       return
     }
@@ -1024,6 +1031,21 @@ function parkPreview($: EngineInterface): void {
 async function closePreview($: EngineInterface): Promise<void> {
   await patch($, () => ({ preview: '', previewTop: 0 }))
   $.clock.after(100, () => void $.ui.focus({ requestId: PANE, key: 'nav-o' }).catch(() => {}))
+}
+
+async function jumpDiff($: EngineInterface, dir: 1 | -1): Promise<void> {
+  const lines = previewed?.diff
+  if (!lines) return
+  const files = lines.some(l => l.kind === '@')
+  const marks = lines.flatMap((l, i) => {
+    if (files) return l.kind === '@' ? [i] : []
+    const prev = lines[i - 1]
+    const jump = !prev || l.old !== prev.old + (prev.kind === '+' ? 0 : 1) || l.new !== prev.new + (prev.kind === '-' ? 0 : 1)
+    return jump ? [i] : []
+  })
+  const t = await get($)
+  const to = dir > 0 ? marks.find(i => i > t.previewTop) : [...marks].reverse().find(i => i < t.previewTop)
+  if (to !== undefined) await scrollPreview($, to - t.previewTop)
 }
 
 async function scrollPreview($: EngineInterface, by: number): Promise<void> {
@@ -1144,7 +1166,7 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
   else if (key === 'pagedown') await move(10)
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
-  else if (cur && key === 'd' && cur.kind !== 'dir') await diffFile($, cur.id)
+  else if (cur && key === 'd') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
@@ -1375,6 +1397,7 @@ export const register: Register = (on, options) => {
       if (data.key === 'left' || data.key === 'h') await closePreview($)
       else if (data.key === 'e') await editPreview($, t.preview)
       else if (data.key === 'd') await diffFile($, t.preview)
+      else if (previewed?.diff && (data.key === 'j' || data.key === 'k')) await jumpDiff($, data.key === 'j' ? 1 : -1)
       else if (data.key in by) await scrollPreview($, by[data.key] ?? 0)
       return {}
     }
@@ -1511,17 +1534,19 @@ export const register: Register = (on, options) => {
             {button(external)}
           </Box>
           <Box flexDirection="row" gap={2}>
-            {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => (
-              <Button key={`pv-${k}`} plain dimColor hotkey={k} label={unicode ? plain : nerd} onPress={() => void scrollPreview($, by).then(() => parkPreview($))} />
-            ))}
-            <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? 'file' : 'diff'} onPress={() => void diffFile($, t.preview)} />
+            {([['j', '↓', '\u{f0045}', 1], ['k', '↑', '\u{f005d}', -1], ['f', 'page ↓', '\u{f0045} page', previewRows - 2], ['b', 'page ↑', '\u{f005d} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => {
+              const step = p?.diff && (k === 'j' || k === 'k') ? (p.diff.some(l => l.kind === '@') ? 'file' : 'hunk') : ''
+              const label = step ? `${unicode ? plain : nerd} ${step}` : unicode ? plain : nerd
+              return <Button key={`pv-${k}`} plain dimColor hotkey={k} label={label} onPress={() => void (step ? jumpDiff($, by > 0 ? 1 : -1) : scrollPreview($, by)).then(() => parkPreview($))} />
+            })}
+            <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? (t.nodes.find(n => n.id === t.preview)?.kind === 'dir' ? 'tree' : 'file') : 'diff'} onPress={() => void diffFile($, t.preview)} />
             {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{f03eb} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text dimColor={!light} color={light ? theme.muted : undefined}>{p.note}</Text> : null}
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown: markdown && !p?.diff, diff: Boolean(p?.diff) } } satisfies RowsProps}
+            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
           />
         </Box>
       )

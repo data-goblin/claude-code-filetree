@@ -11,7 +11,7 @@ export type RowsProps = {
   spinner?: string[]
   pointer?: boolean
   bar?: { pos: number; size: number; thumb: string; track: string }
-  preview?: { text: string; path: string; startLine: number; markdown: boolean; diff?: boolean }
+  preview?: { text: string; path: string; startLine: number; markdown: boolean; segments?: { title: string; source: string }[]; titleColor?: string }
 }
 type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
@@ -87,9 +87,21 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   surface.onKey(e => surface.post({ key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }))
   // The preview draws in this same element, so the focus a click gave the tree stays put.
   if (props.preview) {
-    const { Markdown, Code } = surface.elements
+    const { Markdown, Code, Box: Column, Text: Title } = surface.elements
     const p = props.preview
-    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} format={p.diff ? 'diff' : 'source'} wrap="truncate-end" />
+    if (p.segments) {
+      return (
+        <Column flexDirection="column">
+          {p.segments.map((g, i) => (
+            <Column key={`seg-${i}`} flexDirection="column">
+              {g.title ? <Title bold color={p.titleColor || undefined}>{g.title}</Title> : null}
+              {g.source ? <Code source={g.source} path={g.title || p.path} format="diff" wrap="truncate-end" /> : null}
+            </Column>
+          ))}
+        </Column>
+      )
+    }
+    return p.markdown ? <Markdown text={p.text} /> : <Code source={p.text} path={p.path} startLine={p.startLine} wrap="truncate-end" />
   }
   const frames = props.spinner?.length ? props.spinner : FRAMES
   const draw = (s: Seg) => {

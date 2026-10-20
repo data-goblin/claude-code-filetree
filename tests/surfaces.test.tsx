@@ -25,6 +25,8 @@ type World = {
   files?: Record<string, string>
   mtimes?: Record<string, number>
   patch?: string
+  untracked?: string[]
+  untrackedPatch?: string
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -102,7 +104,9 @@ function world(on: any, w: World, ran: Ran) {
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'status') return ok(w.status)
+      if (verb === 'diff' && argv.includes('--no-index')) return ok(w.untrackedPatch ?? '')
       if (verb === 'diff' && argv.includes('--no-ext-diff')) return ok(w.patch ?? '')
+      if (verb === 'ls-files' && argv.includes('--others')) return ok((w.untracked ?? []).join('\0'))
       if (verb === 'diff') return ok(w.numstat)
       if (verb === 'ls-files') {
         const files: string[] = []
@@ -569,7 +573,39 @@ test('d shows a changed file as a diff drawn by the engine, and d again goes bac
   await ui.post({ key: 'd' }, { in: 'rows' })
   await clock.settle()
   shown = await texts(ui)
-  expect(shown).toContain('"format":"source"')
+  expect(shown).not.toContain('"format":"diff"')
+  expect(shown).toContain('const b = 3')
+  await ui.unmount()
+})
+
+test('d on a folder shows every changed file under it in one diff, and j/k jump from file to file', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const long = Array.from({ length: 60 }, (_, i) => `+line ${i}`).join('\n')
+  const patch = `diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,2 +1,62 @@\n-old a\n+new a\n${long}\n same\n` + 'diff --git a/src/b.ts b/src/b.ts\n--- a/src/b.ts\n+++ b/src/b.ts\n@@ -4,1 +4,1 @@\n-old b\n+new b\n'
+  const fresh = 'diff --git a/src/c.ts b/src/c.ts\nnew file mode 100644\n--- /dev/null\n+++ b/src/c.ts\n@@ -0,0 +1,1 @@\n+brand new\n'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file'], ['b.ts', 'file'], ['c.ts', 'file']] }, status: '## main\0 M src/a.ts\0 M src/b.ts\0?? src/c.ts\0', numstat: '', patch, untracked: ['src/c.ts'], untrackedPatch: fresh }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await ui.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  let shown = await texts(ui)
+  expect(shown).toContain('3 changed files against HEAD')
+  expect(shown).toContain('"src/a.ts"')
+  expect(shown).toContain('+new a')
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  shown = await texts(ui)
+  expect(shown).not.toContain('+new a')
+  for (const name of ['src/b.ts', 'src/c.ts']) expect(shown).toContain(`"${name}"`)
+  expect(shown).toContain('+new b')
+  expect(shown).toContain('+brand new')
+  await ui.post({ key: 'k' }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('+new a')
   await ui.unmount()
 })
 

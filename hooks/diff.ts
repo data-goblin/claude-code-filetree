@@ -1,4 +1,5 @@
-export type DiffLine = { kind: ' ' | '+' | '-'; text: string; old: number; new: number }
+export type DiffLine = { kind: ' ' | '+' | '-' | '@'; text: string; old: number; new: number }
+export type DiffSegment = { title: string; source: string }
 
 export function parseDiff(patch: string): DiffLine[] {
   const out: DiffLine[] = []
@@ -23,10 +24,31 @@ export function parseDiff(patch: string): DiffLine[] {
   return out
 }
 
-export function diffWindow(lines: DiffLine[], top: number, rows: number): { text: string; top: number } {
+export function splitPatch(patch: string): { path: string; lines: DiffLine[] }[] {
+  return patch
+    .replace(/\r\n?/g, '\n')
+    .split(/^(?=diff --git )/m)
+    .map(part => {
+      const plus = /^\+\+\+ (?:b\/)?(.+)$/m.exec(part)?.[1]
+      const head = /^diff --git a\/.+ b\/(.+)$/m.exec(part)?.[1]
+      return { path: (plus && plus !== '/dev/null' ? plus : head) ?? '', lines: parseDiff(part) }
+    })
+    .filter(f => f.lines.length)
+}
+
+export function diffWindow(lines: DiffLine[], top: number, rows: number): { segments: DiffSegment[]; top: number } {
   const from = Math.max(0, Math.min(top, lines.length - 1))
   const shown = lines.slice(from, from + rows)
-  const out: string[] = []
+  const segments: DiffSegment[] = []
+  let title = ''
+  for (let i = from; i >= 0; i--) {
+    const l = lines[i]
+    if (l?.kind === '@') {
+      title = i === from ? '' : l.text
+      break
+    }
+  }
+  let out: string[] = []
   let run: DiffLine[] = []
   const flush = () => {
     const first = run[0]
@@ -36,13 +58,23 @@ export function diffWindow(lines: DiffLine[], top: number, rows: number): { text
     out.push(`@@ -${first.old},${olds} +${first.new},${news} @@`, ...run.map(l => `${l.kind}${l.text}`))
     run = []
   }
+  const close = () => {
+    flush()
+    if (out.length || title) segments.push({ title, source: out.join('\n') })
+    out = []
+  }
   for (const line of shown) {
+    if (line.kind === '@') {
+      close()
+      title = line.text
+      continue
+    }
     const prev = run[run.length - 1]
     const nextOld = prev ? prev.old + (prev.kind === '+' ? 0 : 1) : 0
     const nextNew = prev ? prev.new + (prev.kind === '-' ? 0 : 1) : 0
     if (prev && (line.old !== nextOld || line.new !== nextNew)) flush()
     run.push(line)
   }
-  flush()
-  return { text: out.join('\n'), top: from }
+  close()
+  return { segments, top: from }
 }
