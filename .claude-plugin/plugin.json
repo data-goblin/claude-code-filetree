@@ -119,7 +119,7 @@
     "ignore": {
       "type": "string",
       "title": "Ignore",
-      "description": "File and folder names to leave out of the tree, its search and its shimmer, separated by spaces or commas. A name matches at any depth, like the built-in .git and node_modules. Example: .cache .tmp",
+      "description": "File and folder names to leave out of the tree, its search and its shimmer, separated by spaces or commas. Names match exactly, without wildcards, at any depth, like the built-in .git and node_modules. Example: .cache .tmp",
       "default": ""
     },
     "palette": {

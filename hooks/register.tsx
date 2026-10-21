@@ -336,13 +336,12 @@ async function revealPaths($: EngineInterface, paths: string[]): Promise<void> {
   }
 }
 
-// A path is ignored when any of its names below the root is in the Ignore setting.
 function isIgnored(root: string, path: string): boolean {
   return ignoreNames.length > 0 && relative(root, path).split('/').some(name => ignoreNames.includes(name))
 }
 
 function pruneArgs(root: string, ignored: string[] = []): string[] {
-  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames]
+  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames.map(n => n.replace(/[*?[\]\\]/g, '\\$&'))]
   return ['(', ...names.flatMap((name, i) => (i === 0 ? ['-name', name] : ['-o', '-name', name])), ...ignored.flatMap(p => ['-o', '-path', p]), ')', '-prune', '-o']
 }
 
