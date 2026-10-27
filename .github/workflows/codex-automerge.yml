@@ -1,0 +1,61 @@
+name: codex-automerge
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: codex-automerge-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
+      contains(github.event.comment.body, 'codex-review-state:v1')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ github.event.issue.number }}
+      BODY: ${{ github.event.comment.body }}
+    steps:
+      - name: Read the Codex verdict
+        id: verdict
+        run: |
+          state=$(printf '%s' "$BODY" | sed -n 's/.*codex-review-state:v1 \({.*}\) -->.*/\1/p' | head -n1)
+          review=$(printf '%s' "$state" | jq -c '.code_review')
+          pr=$(gh pr view "$PR" --json headRefOid,isDraft,isCrossRepository,state,author)
+          blocked=$(gh api "repos/$GH_REPO/pulls/$PR/reviews" --jq '[group_by(.user.login)[] | map(select(.state != "COMMENTED")) | last | select(. != null and .state == "CHANGES_REQUESTED")] | length')
+          echo "review: $review"
+          echo "pr: $pr"
+          access=$(gh api "repos/$GH_REPO/collaborators/$(printf '%s' "$pr" | jq -r .author.login)/permission" --jq .permission || echo none)
+          echo "changes requested: $blocked"
+          echo "author access: $access"
+          ok=$(jq -n --argjson r "$review" --argjson p "$pr" --argjson b "$blocked" --arg a "$access" '
+            $r.status == "completed" and
+            $r.has_unresolved_findings == false and
+            $r.commit_sha == $p.headRefOid and
+            $p.state == "OPEN" and
+            ($p.isDraft | not) and
+            ($a == "admin" or $a == "maintain" or $a == "write") and
+            $b == 0')
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "sha=$(printf '%s' "$pr" | jq -r .headRefOid)" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for checks
+        if: steps.verdict.outputs.ok == 'true'
+        run: |
+          sleep 15
+          gh pr checks "$PR" --watch --fail-fast --interval 20 || true
+          gh pr checks "$PR" --json bucket --jq '[.[] | select(.bucket == "fail" or .bucket == "cancel")] | length == 0' | grep -qx true
+
+      - name: Merge
+        if: steps.verdict.outputs.ok == 'true'
+        run: gh pr merge "$PR" --merge --delete-branch --match-head-commit "${{ steps.verdict.outputs.sha }}"
