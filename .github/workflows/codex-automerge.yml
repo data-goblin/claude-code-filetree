@@ -58,4 +58,9 @@ jobs:
 
       - name: Merge
         if: steps.verdict.outputs.ok == 'true'
-        run: gh pr merge "$PR" --merge --delete-branch --match-head-commit "${{ steps.verdict.outputs.sha }}"
+        run: |
+          for attempt in 1 2 3 4 5; do
+            gh pr merge "$PR" --merge --delete-branch --match-head-commit "${{ steps.verdict.outputs.sha }}" && exit 0
+            sleep $((attempt * 10))
+          done
+          exit 1
