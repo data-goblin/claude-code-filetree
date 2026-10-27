@@ -2,7 +2,7 @@ import { LIGHT_TONES, TONES } from '../hooks/git'
 import { GIT_COLOR } from '../hooks/icons'
 import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
-import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
+import { boxLook, ratio, rgbOf, type Rgb } from '../hooks/pixmap'
 
 type Check = { name: string; color: string; min: number }
 
@@ -85,13 +85,12 @@ const LABEL = 4.5
 const EDGE = 1.4
 console.log('\ntreemap boxes (background, foreground, blue, bright black, bright white)')
 for (const [name, hexes] of Object.entries(THEMES)) {
-  const [paper, fg, blue, , white] = hexes.map(rgbOf)
-  if (!paper || !fg || !blue || !white) throw new Error(`${name}: unreadable palette`)
-  const inks = [fg, paper, white, paper]
-  const looks = [0, 0.05, 0.3, 1].map(share => boxLook(paper, blue, inks, 0, share))
-  const nested = boxLook(paper, blue, inks, 1, 0.1)
+  const [paper, fg, blue, , white] = hexes.map(h => rgbOf(h) as Rgb) as Rgb[]
+  const inks = [fg, paper, white, paper] as Rgb[]
+  const looks = [0, 0.05, 0.3, 1].map(share => boxLook(paper as Rgb, blue as Rgb, inks, 0, share))
+  const nested = boxLook(paper as Rgb, blue as Rgb, inks, 1, 0.1)
   const label = Math.min(...[...looks, nested].map(l => ratio(l.ink, l.fill)))
-  const edge = Math.min(...looks.map(l => ratio(l.fill, paper)))
+  const edge = Math.min(...looks.map(l => ratio(l.fill, paper as Rgb)))
   const nest = Math.min(...looks.map(l => ratio(l.fill, nested.fill)))
   const ok = label >= LABEL && edge >= EDGE && nest >= EDGE
   if (!ok) failed++

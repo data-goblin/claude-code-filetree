@@ -143,17 +143,17 @@ export function layoutPixels(usage: Usage[], width: number, height: number, cw: 
 export function draw(tiles: Tile[], columns: number, rows: number, look: (t: Tile) => TileLook, label: (t: Tile) => string): RowSpec[] {
   const text = Array.from({ length: rows }, () => new Array<string>(columns).fill(' '))
   const style = Array.from({ length: rows }, () => new Array<Omit<Seg, 't'>>(columns).fill({}))
-  const order = tiles.map(t => ({ t, lk: look(t) })).sort((a, b) => a.t.depth - b.t.depth)
+  const looks = new Map(tiles.map(t => [t, look(t)]))
+  const order = [...tiles].sort((a, b) => a.depth - b.depth)
   const g = CELL_INSET
-  for (const { t, lk } of order) {
+  for (const t of order) {
+    const lk = looks.get(t) as TileLook
     const tab = t.path
     const f = fillOf(t, g)
     const cell = (x: number, y: number, st: Omit<Seg, 't'>, ch: string) => {
-      const line = text[y]
-      const styled = style[y]
-      if (!line || !styled || x < 0 || x >= columns) return
-      line[x] = ch
-      styled[x] = st
+      if (y < 0 || y >= rows || x < 0 || x >= columns) return
+      ;(text[y] as string[])[x] = ch
+      ;(style[y] as Omit<Seg, 't'>[])[x] = st
     }
     const fill = lk.bg ? { bg: lk.bg } : {}
     for (let y = f.y0; y < f.y1; y++) for (let x = f.x0; x < f.x1; x++) cell(x, y, { ...fill, tab }, ' ')
