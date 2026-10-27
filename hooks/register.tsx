@@ -1589,7 +1589,6 @@ async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
 
-// The desktop draws the whole file straight from the pane: the same text through a Client drew nothing there.
 function directPreview(elements: any, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
   const { Box, Text, Markdown, Code } = elements
   if ('segments' in win) {
@@ -1612,7 +1611,6 @@ function previewLines(text: string, top: number, rows: number, markdown: boolean
   const from = Math.max(0, Math.min(top, lines.length - 1))
   let shown = lines.slice(from, from + rows)
   if (markdown) {
-    // Reopen a code fence the window starts inside, so the rest is not read as prose.
     let fence = ''
     let opener = ''
     for (const line of lines.slice(0, from)) {
@@ -1886,8 +1884,6 @@ export const register: Register = (on, options) => {
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: 'File tree closed.' }
     }
-    // The layout checks are the terminal's: the desktop app docks the pane itself and
-    // reports no fullscreen layout, so a session no terminal draws skips them.
     const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
     if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
     if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
@@ -2124,12 +2120,8 @@ export const register: Register = (on, options) => {
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
     const rowColors = { activeBg: theme.selection, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
-    // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
-    // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
     const button = (b: ButtonProps) => <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
-    // What the hovered header button does, left of the buttons, when it fits beside a title that
-    // long; the buttons are Clients only so that they can say when the pointer is over them.
     const hint = (buttons: { id: string; label: string; hint: string }[], title: number) => {
       const text = buttons.find(b => b.id === hovered)?.hint
       if (!text) return null

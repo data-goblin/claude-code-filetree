@@ -86,7 +86,6 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     if (row.id) surface.post({ press: row.id, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })
   })
   surface.onKey(e => surface.post({ key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }))
-  // The preview draws in this same element, so the focus a click gave the tree stays put.
   if (props.preview) {
     const { Markdown, Code, Box: Column, Text: Title } = surface.elements
     const p = props.preview
