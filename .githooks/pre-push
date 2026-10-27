@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+git fetch -q origin main
+base=$(git show origin/main:.claude-plugin/plugin.json | jq -r .version)
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in refs/heads/main|refs/tags/*) continue ;; esac
+  [ "$local_sha" = 0000000000000000000000000000000000000000 ] && continue
+  head=$(git show "$local_sha:.claude-plugin/plugin.json" | jq -r .version)
+  if [ "$head" = "$base" ] || [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -n1)" != "$head" ]; then
+    echo "pre-push: ${remote_ref#refs/heads/} keeps version $head; bump .claude-plugin/plugin.json above $base" >&2
+    exit 1
+  fi
+  git show "$local_sha:README.md" | grep -q "version-$head-blue" || { echo "pre-push: set the README version badge to $head" >&2; exit 1; }
+done
