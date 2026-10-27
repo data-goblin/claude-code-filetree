@@ -1,4 +1,4 @@
-import { type BuiltinToolResults, type EngineInterface, type Register, type RenderElement, type Timer, update } from 'claude-code'
+import { type EngineInterface, type Register, type RenderElement, type Timer, update } from 'claude-code'
 import { herdrError, herdrOpenCommand, herdrPane, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, type Target, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
 import { CACHE_KEEP, cacheName, CLEAN, coderFor, EXIT_FAILED, EXIT_LOCKED, EXIT_MISSING, fitCells, PNG_DIRECT_BYTES, PNG_DIRECT_PIXELS, pictureKind, pngSize, POLICY, POSTER } from './peek'
@@ -202,7 +202,7 @@ async function cwdOf($: EngineInterface): Promise<string> {
 }
 
 function clean(segs: Seg[]): Seg[] {
-  for (const seg of segs) for (const k of Object.keys(seg) as (keyof Seg)[]) if (seg[k] === undefined) delete seg[k]
+  for (const seg of segs) for (const [k, v] of Object.entries(seg)) if (v === undefined) Reflect.deleteProperty(seg, k)
   return segs
 }
 
@@ -718,7 +718,7 @@ async function followCwd($: EngineInterface): Promise<boolean> {
 type Pending = { actions: GitAction[]; ids: number[]; command: string; head: string }
 type Job = { actions: GitAction[]; since: Since; initRepo: boolean; readOnly: boolean }
 type Background = { p: Pending | null; job: Job; reads: string[] }
-type GitOperation = NonNullable<BuiltinToolResults['Bash']['gitOperation']>
+type GitOperation = { commit?: { sha: string }; push: boolean; branch?: { action: string }; pr?: { action: string } }
 type Outcome = { state: 'done' | 'failed'; label: string; detail: string }
 
 const PROOF: Record<string, (op: GitOperation) => boolean> = {
@@ -728,6 +728,41 @@ const PROOF: Record<string, (op: GitOperation) => boolean> = {
   'pr create': op => op.pr?.action === 'created',
   'pr merge': op => op.pr?.action === 'merged',
   'pr comment': op => op.pr?.action === 'commented',
+}
+
+function actionOf(v: unknown): { action: string } | undefined {
+  return has(v, 'action') && typeof v.action === 'string' ? { action: v.action } : undefined
+}
+
+function gitOperationOf(v: unknown): GitOperation | undefined {
+  if (typeof v !== 'object' || v === null) return undefined
+  return {
+    commit: has(v, 'commit') && has(v.commit, 'sha') && typeof v.commit.sha === 'string' ? { sha: v.commit.sha } : undefined,
+    push: has(v, 'push') && Boolean(v.push),
+    branch: has(v, 'branch') ? actionOf(v.branch) : undefined,
+    pr: has(v, 'pr') ? actionOf(v.pr) : undefined,
+  }
+}
+
+function bashOutputOf(v: unknown): { stdout: string; backgroundTaskId: string; gitOperation: GitOperation | undefined } {
+  return {
+    stdout: has(v, 'stdout') && typeof v.stdout === 'string' ? v.stdout : '',
+    backgroundTaskId: has(v, 'backgroundTaskId') && typeof v.backgroundTaskId === 'string' ? v.backgroundTaskId : '',
+    gitOperation: has(v, 'gitOperation') ? gitOperationOf(v.gitOperation) : undefined,
+  }
+}
+
+function headerMessage(data: unknown): { over: unknown; press: unknown } {
+  return { over: has(data, 'over') ? data.over : undefined, press: has(data, 'press') ? data.press : undefined }
+}
+
+function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: unknown } {
+  return { key: has(data, 'key') ? data.key : undefined, over: has(data, 'over') ? data.over : undefined, scrollTo: has(data, 'scrollTo') ? data.scrollTo : undefined }
+}
+
+function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
+  const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
+  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
 }
 
 async function startGit($: EngineInterface, actions: GitAction[]): Promise<number[]> {
@@ -1130,8 +1165,20 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   previewed = await readPreview($, path)
 }
 
+function has<K extends string>(v: unknown, key: K): v is Record<K, unknown> {
+  return typeof v === 'object' && v !== null && key in v
+}
+
+function messageOf(err: unknown): string {
+  return String((has(err, 'message') ? err.message : undefined) ?? err)
+}
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x: unknown): x is string => typeof x === 'string') : []
+}
+
 function unlessAborted(err: unknown): null {
-  if (/aborted/.test(String((err as Error)?.message ?? err))) throw err
+  if (/aborted/.test(messageOf(err))) throw err
   return null
 }
 
@@ -1174,7 +1221,7 @@ async function readPreview($: EngineInterface, path: string, page = 1): Promise<
     }
   } catch (err) {
     unlessAborted(err)
-    note = `could not read: ${String((err as Error)?.message ?? err).split('\n')[0]}`
+    note = `could not read: ${messageOf(err).split('\n')[0]}`
   }
   const total = text.length
   let lines = text.slice(0, PREVIEW_CHARS).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').split('\n')
@@ -1271,7 +1318,7 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
     }
     return size ? { state: 'ready', file, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) } : { state: 'failed', note: 'could not read the picture size' }
   } catch (err) {
-    return { state: 'failed', note: String((err as Error)?.message ?? err).split('\n')[0] ?? 'could not decode' }
+    return { state: 'failed', note: messageOf(err).split('\n')[0] ?? 'could not decode' }
   }
 }
 
@@ -1439,7 +1486,7 @@ async function runScan($: EngineInterface, scan: Scan, seeded: boolean): Promise
     }
   } catch (err) {
     if (scan.stopped) return
-    if (/aborted/.test(String((err as Error)?.message ?? err))) {
+    if (/aborted/.test(messageOf(err))) {
       const key = `${scan.loc ? 'loc:' : ''}${scan.dir}`
       if (scans.get(key) === scan) scans.delete(key)
       void $.ui.invalidate('ui.render')
@@ -1589,7 +1636,7 @@ async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
 
-function directPreview(elements: any, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
+function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
   const { Box, Text, Markdown, Code } = elements
   if ('segments' in win) {
     return (
@@ -1865,7 +1912,7 @@ export const register: Register = (on, options) => {
       ageTick = showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
       gitPoll?.cancel()
       gitStamp = null
-      gitPoll = $.clock.every(GIT_POLL_MS, () => void followCwd($).then(moved => moved || gitChanged($)).then(() => watchTree($)))
+      gitPoll = $.clock.every(GIT_POLL_MS, () => void followCwd($).then(moved => (moved ? undefined : gitChanged($))).then(() => watchTree($)))
       await shown
     })()
     return next(e)
@@ -1897,9 +1944,10 @@ export const register: Register = (on, options) => {
   })
 
   on('tool.call', async ($, e, next) => {
-    const shell = e.tool === 'Bash' || e.tool === 'PowerShell'
+    const tool: string = e.tool
+    const shell = tool === 'Bash' || tool === 'PowerShell'
     if (e.tool !== 'Edit' && e.tool !== 'Write' && e.tool !== 'NotebookEdit' && !shell) return next(e)
-    const command = e.tool === 'Bash' || e.tool === 'PowerShell' ? e.command : ''
+    const command = shell && has(e, 'command') && typeof e.command === 'string' ? e.command : ''
     const cwd = shell ? await cwdOf($) : ''
     const actions = gitActions(command)
     const quiet = !actions.length && readOnly(command)
@@ -1924,8 +1972,8 @@ export const register: Register = (on, options) => {
       return result
     }
     if (shell) {
-      const out: Partial<BuiltinToolResults['Bash']> = !result.isError && result.result && typeof result.result === 'object' ? (result.result as Partial<BuiltinToolResults['Bash']>) : {}
-      const reads = showReads ? readTargets(command, cwd, typeof out.stdout === 'string' ? out.stdout : '', home) : []
+      const out = bashOutputOf(result.isError ? undefined : result.result)
+      const reads = showReads ? readTargets(command, cwd, out.stdout, home) : []
       const job: Job = { actions: [], since, initRepo: actions.some(a => a.init), readOnly: quiet || result.isReadOnly === true }
       if (out.backgroundTaskId) background.set(out.backgroundTaskId, { p: pending, job, reads })
       else void (async () => {
@@ -1954,12 +2002,12 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  for (const tool of ['Grep', 'Glob'] as const)
+  for (const tool of [/^Grep$/, /^Glob$/])
     on('tool.call', { tool }, async ($, e, next) => {
       const result = await next(e)
       if (result.deny || result.isError || !showReads) return result
-      const names = (result.result as Partial<BuiltinToolResults['Grep']> | undefined)?.filenames
-      if (!Array.isArray(names) || names.length === 0) return result
+      const names = strings(has(result.result, 'filenames') ? result.result.filenames : undefined)
+      if (names.length === 0) return result
       const cwd = await cwdOf($)
       void touched($, names.map(f => resolve(cwd, posix(f), home)), 'purple', true)
       return result
@@ -1968,7 +2016,7 @@ export const register: Register = (on, options) => {
   on('ui.message', async ($, e, next) => {
     if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
       const id = e.element.slice('button-'.length)
-      const data = e.data as { over?: unknown; press?: unknown }
+      const data = headerMessage(e.data)
       if (data.press) await pressHeader($, id)
       else if (data.over === true || hovered === id) {
         hovered = data.over === true ? id : ''
@@ -1977,7 +2025,7 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (e.requestId === PANE && e.element === 'peek' && e.data && typeof e.data === 'object') {
-      const data = e.data as { key?: unknown; over?: unknown; scrollTo?: unknown }
+      const data = peekMessage(e.data)
       if (typeof data.over === 'boolean') overPeek = data.over
       else if (typeof data.scrollTo === 'number') {
         const last = Math.max(0, (peeked?.text.split('\n').length ?? 1) - peekRows)
@@ -1991,12 +2039,12 @@ export const register: Register = (on, options) => {
       }
       return {}
     }
-    if (e.requestId === PANE && e.element === 'treemap' && e.data && typeof (e.data as { tab?: unknown }).tab === 'string') {
-      await pickTile($, (e.data as { tab: string }).tab)
+    if (e.requestId === PANE && e.element === 'treemap' && has(e.data, 'tab') && typeof e.data.tab === 'string') {
+      await pickTile($, e.data.tab)
       return {}
     }
     if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap') || !e.data || typeof e.data !== 'object') return next(e)
-    const data = e.data as { press?: unknown; key?: unknown; ctrl?: unknown; shift?: unknown; scrollTo?: unknown; copy?: unknown }
+    const data = rowsMessage(e.data)
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
@@ -2420,7 +2468,7 @@ export const register: Register = (on, options) => {
         const pct = (bytes: number) => { const p = total ? Math.round((bytes / total) * 100) : 0; return bytes && !p ? '<1%' : `${p}%` }
         const accent = colorOf(theme.accent, termColors, light)
         const ink = colorOf(theme.fg, termColors, light)
-        const paper = termColors.bg ?? (theme.bg ? colorOf(theme.bg, termColors, light) : light ? [255, 255, 255] as Rgb : [24, 24, 24] as Rgb)
+        const paper = termColors.bg ?? (theme.bg ? colorOf(theme.bg, termColors, light) : light ? ([255, 255, 255] satisfies Rgb) : ([24, 24, 24] satisfies Rgb))
         const muted = colorOf(theme.muted || 'ansi256(8)', termColors, light)
         const hex = (c: Rgb) => `#${c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`
         const inks = [ink, paper, colorOf('ansi256(15)', termColors, light), colorOf('ansi256(0)', termColors, light)]
@@ -2476,11 +2524,10 @@ export const register: Register = (on, options) => {
             under.set(tile, seen)
             return { fill: seen, alpha: 1, ink: box ? box.ink : readable(seen, 1, ink, paper), bold: true, rank: lift ? (picked ? 2 : 1) : 0, dim }
           }
-          const looks = boxes.map(pixelLook)
-          const key = JSON.stringify([fit, ink, boxes.map((b, i) => [b.path, b.x0, b.y0, b.x1, b.y1, sized(b), looks[i]])])
+          const looked = boxes.map(tile => ({ tile, look: pixelLook(tile) }))
+          const key = JSON.stringify([fit, ink, looked.map(({ tile: b, look }) => [b.path, b.x0, b.y0, b.x1, b.y1, sized(b), look])])
           if (mapImage?.key !== key) {
-            const byTile = new Map(boxes.map((b, i) => [b, looks[i] as PixelLook]))
-            mapImage = { key, png: png(paint(boxes, fit.width, fit.height, ch, b => byTile.get(b) as PixelLook, sized), fit.width, fit.height).toBase64() }
+            mapImage = { key, png: png(paint(looked, fit.width, fit.height, ch, sized), fit.width, fit.height).toBase64() }
           }
           const zone: ZoneProps = { columns: cols, rows: peekRows, boxes: boxes.map(b => [b.path, b.x0 / cw, b.y0 / ch, b.x1 / cw, b.y1 / ch]) }
           if (!imageChecked) {

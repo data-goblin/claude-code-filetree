@@ -176,8 +176,8 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   )
   const drawn: RenderElement[] = []
   let size = 0
-  for (let i = 0; i < props.rows.length; i++) {
-    const el = rowEl(props.rows[i] as RowSpec, i)
+  for (const [i, spec] of props.rows.entries()) {
+    const el = rowEl(spec, i)
     let cost = 1_000
     try {
       cost = JSON.stringify(el).length
