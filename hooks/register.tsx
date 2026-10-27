@@ -1,4 +1,4 @@
-import { type EngineInterface, type Register, type RenderElement, type Timer, update } from 'claude-code'
+import { type EngineInterface, type HookStream, type ProcessSpawnResult, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
 import { herdrError, herdrOpenCommand, herdrPane, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, type Target, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
 import { CACHE_KEEP, cacheName, CLEAN, coderFor, EXIT_FAILED, EXIT_LOCKED, EXIT_MISSING, fitCells, PNG_DIRECT_BYTES, PNG_DIRECT_PIXELS, pictureKind, pngSize, POLICY, POSTER } from './peek'
@@ -305,7 +305,7 @@ async function watchTree($: EngineInterface): Promise<void> {
   watcher = null
   if (!dirs.length || (await osName($)) !== 'linux') return
   const stream = $.process.spawn({ argv: ['inotifywait', '-mq', '-e', 'create,delete,moved_to,moved_from,close_write', '--format', '%w%f', '--', ...dirs] })
-  const own = { key, stop: () => void stream.return(undefined as never).catch(() => undefined) }
+  const own = { key, stop: () => stopStream(stream) }
   watcher = own
   let rest = ''
   try {
@@ -832,7 +832,7 @@ function taskEnds(text: string): [string, string][] {
   return [...text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)].flatMap(m => {
     const id = /<task-id>([^<]*)<\/task-id>/.exec(m[1] ?? '')?.[1]?.trim()
     const status = /<status>([^<]*)<\/status>/.exec(m[1] ?? '')?.[1]?.trim()
-    return id && status ? [[id, status] as [string, string]] : []
+    return id && status ? [[id, status]] : []
   })
 }
 
@@ -912,10 +912,10 @@ async function sync($: EngineInterface, force = false): Promise<void> {
   if (t.top) await refreshGit($)
 }
 
-async function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: string): Promise<void> {
+async function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
   const t = await get($)
   const text = !absolute && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id
-  const done = await $.ui.copy({ text, ...(surface ? { surface: surface as 'terminal' } : {}) })
+  const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
   $.ui.toast(done.isCopied ? `Copied ${text}` : 'Could not copy the path')
 }
 
@@ -1165,6 +1165,10 @@ async function loadPreview($: EngineInterface, path: string): Promise<void> {
   previewed = await readPreview($, path)
 }
 
+function stopStream(stream: HookStream<unknown, ProcessSpawnResult>): void {
+  void stream.return({ code: null, signal: null }).catch(() => undefined)
+}
+
 function has<K extends string>(v: unknown, key: K): v is Record<K, unknown> {
   return typeof v === 'object' && v !== null && key in v
 }
@@ -1238,7 +1242,7 @@ async function loadDiff($: EngineInterface, path: string, folder: boolean): Prom
   const base = born ? 'HEAD' : await git($, cwd, ['hash-object', '-t', 'tree', '--stdin'], 10_000, '').then(r => r.stdout.trim(), () => '')
   if (!base) return false
   const tracked = await git($, cwd, ['diff', base, '--no-color', '--no-ext-diff', '--src-prefix=a/', '--dst-prefix=b/', '--', path]).then(r => r.stdout, () => '')
-  const others = await git($, cwd, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', path]).then(r => r.stdout.split('\0').filter(Boolean), () => [] as string[])
+  const others = await git($, cwd, ['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', path]).then(r => r.stdout.split('\0').filter(Boolean), (): string[] => [])
   const top = (await get($)).top || cwd
   const files = splitPatch(tracked.slice(0, PREVIEW_CHARS))
   for (const rel of others.slice(0, 50)) {
@@ -1331,7 +1335,7 @@ function forget($: EngineInterface, path: string): void {
 async function spawnRun($: EngineInterface, job: PictureJob, argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
   const stream = $.process.spawn({ argv })
   let stopped = false
-  current = { job, stop: () => { stopped = true; void stream.return(undefined as never).catch(() => undefined) } }
+  current = { job, stop: () => { stopped = true; stopStream(stream) } }
   let stdout = ''
   let stderr = ''
   let exitCode = 1
@@ -1438,7 +1442,7 @@ async function runScan($: EngineInterface, scan: Scan, seeded: boolean): Promise
     if (scan.loc) {
       if ((await osName($)) === 'win32') throw new Error('no find')
       const stream = $.process.spawn({ argv: locArgv(scan.dir, pruneArgs((await get($)).root)) })
-      scan.stop = () => void stream.return(undefined as never).catch(() => undefined)
+      scan.stop = () => stopStream(stream)
       let text = ''
       let drawn = 0
       for await (const chunk of stream) {
@@ -1466,7 +1470,7 @@ async function runScan($: EngineInterface, scan: Scan, seeded: boolean): Promise
       }
     } else {
       const stream = $.process.spawn({ argv: ['du', '-akxH', '-d', '2', '--', scan.dir] })
-      scan.stop = () => void stream.return(undefined as never).catch(() => undefined)
+      scan.stop = () => stopStream(stream)
       let text = ''
       let drawn = 0
       for await (const chunk of stream) {
@@ -1780,7 +1784,7 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
   return parseGhostty([own, ...read, ...args.filter(a => a.startsWith('--'))].join('\n'))
 }
 
-async function navigate($: EngineInterface, key: string, shift = false, surface?: string): Promise<void> {
+async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   const t = await get($)
   const rows = visibleRows(t)
   const at = rows.findIndex(r => r.node.id === t.cursor)
@@ -2637,8 +2641,8 @@ export const register: Register = (on, options) => {
     }
     const keys = allKeys.filter(k => picked.has(k.key))
     const hidden: [string, () => void][] = [
-      ...(['j', 'k', 'h', 'l'] as const).map(k => [k, () => void navigate($, k).then(park)] as [string, () => void]),
-      ...allKeys.filter(k => k.key.length === 1 && k.key !== '?' && !picked.has(k.key)).map(k => [k.key, k.act] as [string, () => void]),
+      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
+      ...allKeys.filter(k => k.key.length === 1 && k.key !== '?' && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
     ]
 
     return (
