@@ -1589,6 +1589,24 @@ async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
 
+// The desktop draws the whole file straight from the pane: the same text through a Client drew nothing there.
+function directPreview(elements: any, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
+  const { Box, Text, Markdown, Code } = elements
+  if ('segments' in win) {
+    return (
+      <Box flexDirection="column">
+        {win.segments.map((g, i) => (
+          <Box key={`seg-${i}`} flexDirection="column">
+            {g.title ? <Text bold color={accent || undefined}>{g.title}</Text> : null}
+            {g.source ? <Code source={g.source} path={g.title || path} format="diff" wrap="truncate-end" /> : null}
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+  return markdown ? <Markdown text={win.text} /> : <Code source={win.text} path={path} startLine={win.top + 1} wrap="truncate-end" />
+}
+
 function previewLines(text: string, top: number, rows: number, markdown: boolean): { text: string; top: number } {
   const lines = text.split('\n')
   const from = Math.max(0, Math.min(top, lines.length - 1))
@@ -2150,11 +2168,13 @@ export const register: Register = (on, options) => {
             {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text {...mutedText}>{p.note}</Text> : null}
-          <Client
-            key="rows"
-            module="./rows.tsx"
-            props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
-          />
+          {nativeScroll ? directPreview(elements, win, t.preview, markdown, theme.accent) : (
+            <Client
+              key="rows"
+              module="./rows.tsx"
+              props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+            />
+          )}
         </Box>
       )
     }

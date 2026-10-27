@@ -1166,6 +1166,26 @@ test('open with preview on desktop: the whole file is drawn and the wheel goes t
   await ui.unmount()
 })
 
+test('open with preview on desktop: the file is drawn by the pane itself, with no Client between', { timeoutMs: 20_000, options: { open: 'preview' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.md', 'file'], ['a.ts', 'file']] }, files: { [`${root}/a.md`]: '# Title\n\nSome prose.', [`${root}/a.ts`]: 'const a = 1' } }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props })
+  for (const file of ['a.md', 'a.ts']) {
+    await ui.post({ press: `${root}/${file}` }, { in: 'rows' })
+    await ui.post({ press: `${root}/${file}` }, { in: 'rows' })
+    await clock.settle()
+    const shown = JSON.stringify(await ui.drawn())
+    expect(shown).toContain(file === 'a.md' ? '"type":"Markdown"' : '"type":"Code"')
+    expect(shown).not.toContain('"key":"rows"')
+    await ui.press({ key: 'back' })
+    await clock.settle()
+  }
+  await ui.unmount()
+})
+
 test('an older directory listing never overwrites a newer one', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/scratch'
