@@ -20,3 +20,4 @@
 
 - Run tests with `claude plugin test .`, never `bun test`: `claude-code/testing` only exists inside that harness, so bun fails to resolve it
 - Every PR raises the version in `.claude-plugin/plugin.json` and the README badge; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
+- After a PR merges, sign a `v<version>` tag on the merge commit and publish the GitHub release from it; CI cannot sign tags, so this stays a manual step
