@@ -21,7 +21,8 @@ function luminance([r, g, b]: Rgb): number {
 }
 
 export function over(under: Rgb, fill: Rgb, alpha: number): Rgb {
-  return fill.map((v, i) => v * alpha + (under[i] ?? 0) * (1 - alpha)) as Rgb
+  const mix = (i: 0 | 1 | 2) => fill[i] * alpha + under[i] * (1 - alpha)
+  return [mix(0), mix(1), mix(2)]
 }
 
 export function ratio(a: Rgb, b: Rgb): number {
@@ -72,7 +73,7 @@ export const glyphScale = (ch: number) => Math.max(1, Math.floor((ch * 0.8) / FO
 
 export const textHeight = (ch: number) => FONT_H * glyphScale(ch)
 
-export function paint(tiles: Tile[], width: number, height: number, ch: number, look: (t: Tile) => PixelLook, label: (t: Tile) => string): Uint8Array {
+export function paint(looked: { tile: Tile; look: PixelLook }[], width: number, height: number, ch: number, label: (t: Tile) => string): Uint8Array {
   const px = new Uint32Array(width * height)
   const put = (x0: number, y0: number, x1: number, y1: number, [r, g, b]: Rgb, a: number) => {
     const ax = Math.max(0, Math.floor(x0))
@@ -121,10 +122,8 @@ export function paint(tiles: Tile[], width: number, height: number, ch: number, 
       cx += gw
     }
   }
-  const looks = new Map(tiles.map(t => [t, look(t)]))
-  const order = [...tiles].sort((a, b) => a.depth - b.depth)
-  for (const t of order) {
-    const lk = looks.get(t) as PixelLook
+  const order = [...looked].sort((a, b) => a.tile.depth - b.tile.depth)
+  for (const { tile: t, look: lk } of order) {
     const f = fillOf(t, inset)
     put(f.x0, f.y0, f.x1, f.y1, lk.fill, lk.alpha)
     const room = Math.floor((f.x1 - f.x0 - 2 * gap) / gw)

@@ -13,6 +13,7 @@ export const ADD_COLOR = 'ansi256(2)'
 export const DEL_COLOR = 'ansi256(1)'
 
 const THEME_KEYS = ['fg', 'bg', 'accent', 'muted', 'urgent', 'selection'] as const
+const isThemeKey = (key: string): key is (typeof THEME_KEYS)[number] => THEME_KEYS.some(k => k === key)
 const GIT_KEYS: Record<string, string[]> = { added: ['A', '?'], modified: ['M', 'T'], renamed: ['R', 'C'] }
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i
 
@@ -27,7 +28,7 @@ export function parsePalette(text: unknown): Palette {
       continue
     }
     const color = value.trim().toLowerCase().replace(/^#(.)(.)(.)$/, '#$1$1$2$2$3$3')
-    if ((THEME_KEYS as readonly string[]).includes(key)) out.theme[key as (typeof THEME_KEYS)[number]] = color
+    if (isThemeKey(key)) out.theme[key] = color
     else if (key in GIT_KEYS) for (const status of GIT_KEYS[key] ?? []) out.git[status] = color
     else if (key === 'add' || key === 'del' || key === 'hover') out[key] = color
     else out.unknown.push(pair)
