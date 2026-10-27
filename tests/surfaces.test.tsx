@@ -821,7 +821,7 @@ test('open with unset: tmux and editor variables do not replace the default app'
   await ui.unmount()
 })
 
-for (const [visual, editor, chosen] of [['vim', 'nano', 'vim'], ['', 'nano', 'nano'], ['', '', 'vi']]) {
+for (const [visual, editor, chosen] of [['vim', 'nano', 'vim'], ['', 'nano', 'nano'], ['', '', 'vi']] as const) {
   test(`open with editor: VISUAL=${visual}, EDITOR=${editor} chooses ${chosen}`, { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
     const ran: Ran = []
     const root = '/home/k/proj'
@@ -842,7 +842,7 @@ for (const [surface, os] of [['terminal', 'darwin'], ['desktop', 'darwin'], ['te
   test(`open with editor in an unsupported environment: ${surface} on ${os} requests a toast without opening a file`, { timeoutMs: 20_000, options: { open: 'editor' } }, async ($, on) => {
     const ran: Ran = []
     const root = os === 'win32' ? 'C:/Users/k/proj' : '/Users/k/proj'
-    const env = os === 'win32' ? { OS: 'Windows_NT', TMUX: '/tmp/tmux-501/default,1,0', HERDR_ENV: '1', EDITOR: 'vim' } : { HOME: '/Users/k', EDITOR: 'vim' }
+    const env: Record<string, string> = os === 'win32' ? { OS: 'Windows_NT', TMUX: '/tmp/tmux-501/default,1,0', HERDR_ENV: '1', EDITOR: 'vim' } : { HOME: '/Users/k', EDITOR: 'vim' }
     const clock = world(on, { os, env, cwd: root, top: '', dirs: { [root]: [['a.md', 'file']] }, status: '', numstat: '' }, ran)
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
@@ -1224,13 +1224,13 @@ test('a listing error keeps the cached rows and says so', { timeoutMs: 20_000 },
 })
 
 test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', async () => {
-  const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, loaded })
+  const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, size: 0, loaded })
   const file = (id: string) => ({ ...dir(id, false), kind: 'file' as const })
   const nodes = [dir('/r/a', true), dir('/r/b', true), file('/r/a/x'), dir('/r/b/y', true), file('/r/b/y/z')]
   const out = replaceChildren(nodes, new Map([
-    ['/r/a', toNodes('/r/a', [{ name: 'w', kind: 'file', mtimeMs: 0, isLink: false }])],
+    ['/r/a', toNodes('/r/a', [{ name: 'w', kind: 'file', size: 0, mtimeMs: 0, isLink: false }])],
     ['/r/b', []],
-    ['/r/b/y', toNodes('/r/b/y', [{ name: 'z', kind: 'file', mtimeMs: 0, isLink: false }])],
+    ['/r/b/y', toNodes('/r/b/y', [{ name: 'z', kind: 'file', size: 0, mtimeMs: 0, isLink: false }])],
   ]))
   expect(out.map(n => n.id).sort()).toEqual(['/r/a', '/r/a/w', '/r/b'])
   expect(out.find(n => n.id === '/r/b')?.loaded).toBe(true)
