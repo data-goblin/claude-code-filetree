@@ -1,0 +1,26 @@
+name: version-bump
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Version is above the base branch and matches the README badge
+        run: |
+          base=$(git show "origin/$GITHUB_BASE_REF:.claude-plugin/plugin.json" | jq -r .version)
+          head=$(jq -r .version .claude-plugin/plugin.json)
+          echo "base $base, head $head"
+          if [ "$head" = "$base" ] || [ "$(printf '%s\n%s\n' "$base" "$head" | sort -V | tail -n1)" != "$head" ]; then
+            echo "::error file=.claude-plugin/plugin.json::bump the version above $base"
+            exit 1
+          fi
+          grep -q "version-$head-blue" README.md || { echo "::error file=README.md::set the version badge to $head"; exit 1; }
