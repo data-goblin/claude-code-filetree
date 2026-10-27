@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
