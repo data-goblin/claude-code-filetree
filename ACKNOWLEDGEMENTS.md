@@ -36,3 +36,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Install error on an older Claude Code: [@Sako404](https://github.com/Sako404) ([#18](https://github.com/data-goblin/claude-code-filetree/issues/18))
 - Glyphs auto picked Nerd icons on macOS without a Nerd Font: [@pridapablo](https://github.com/pridapablo) ([#19](https://github.com/data-goblin/claude-code-filetree/issues/19))
 - Classic hooks skipped on Team and Enterprise accounts: [@QuentinSuckling](https://github.com/QuentinSuckling) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
+- Plain refresh glyph drew as a box in macOS Terminal: [@hamin-apple](https://github.com/hamin-apple) ([#37](https://github.com/data-goblin/claude-code-filetree/issues/37))

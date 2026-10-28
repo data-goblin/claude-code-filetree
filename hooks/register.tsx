@@ -60,12 +60,13 @@ const ACTIVITY_TTL_MS = 45_000
 const GIT_POLL_MS = 2000
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
-  '[ -n "$f" ] || f=$(ls "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd* 2>/dev/null | head -n1); ' +
+  '[ -n "$f" ] || for g in "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd*; do [ -f "$g" ] && LC_ALL=C grep -aqE "Nerd Fonts (3\\.([2-9]|[1-9][0-9])|[4-9]|[1-9][0-9]+)\\." "$g" && { f=$g; break; }; done; ' +
   '[ -n "$f" ] || { echo missing; exit 0; }; m=$(stat -c %Z "$f" 2>/dev/null || stat -f %c "$f"); p=$PPID; ' +
   'while [ -n "$p" ] && [ "$p" -gt 1 ]; do c=$(ps -o comm= -p "$p" 2>/dev/null); c=$(basename "$c" 2>/dev/null | tr -d " "); case "$c" in ' +
   'ghostty|kitty|alacritty|Alacritty|foot|footclient|wezterm-gui|konsole|gnome-terminal-|xterm|urxvt|st|Terminal|iTerm2) ' +
   'e=$(ps -o etime= -p "$p" 2>/dev/null | awk -F\'[-:]\' \'{n=NF; s=$n+60*$(n-1); if (n>2) s+=3600*$(n-2); if (n>3) s+=86400*$(n-3); print s}\'); [ -n "$e" ] && [ $(( $(date +%s) - e )) -lt "$m" ] && echo stale || echo ok; exit 0;; esac; ' +
   'p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " "); done; echo ok'
+const NERD_PROBE = 'f04eb ebff ebf6 ec01'
 const PRUNE = ['.git', 'node_modules', 'target', '.venv', '__pycache__', 'dist', '.next']
 const HOME_PRUNE = ['Library', 'AppData', '.Trash']
 const SIZE_TIMEOUT_MS = 15_000
@@ -1899,7 +1900,7 @@ export const register: Register = (on, options) => {
         }
         try {
           const remote = Boolean((await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')))
-          noNerd = !remote && (windows || (await fontState($, 'f04eb')) !== 'ok')
+          noNerd = !remote && (windows || (await fontState($, NERD_PROBE)) !== 'ok')
         } catch {
           noNerd = true
         }
@@ -2279,7 +2280,7 @@ export const register: Register = (on, options) => {
       ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection' }] : []),
       { id: 'up', label: unicode ? '△' : '\u{ebff}', dim: true, hint: 'parent folder' },
       { id: 'cwd', label: unicode ? '◎' : '\u{eb06}', dim: !follow, hint: 'follow the cwd' },
-      { id: 'refresh', label: unicode ? '⮌' : '\u{eb37}', dim: true, hint: 'reload tree and git' },
+      { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: true, hint: 'reload tree and git' },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{f0b95}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files' },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates' },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all' },

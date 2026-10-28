@@ -29,7 +29,7 @@
     "glyphs": {
       "type": "string",
       "title": "Glyphs",
-      "description": "Icon set: auto uses Nerd Font icons when one is installed here, except in the desktop app; plain uses Unicode only; text is plain with the header buttons as words (up, cwd, sync, dots, size, fold, split, clear), falling back to plain glyphs when the pane is too narrow",
+      "description": "Icon set: auto uses Nerd Font icons when Nerd Fonts 3.2 or newer is installed here, except in the desktop app, and plain Unicode otherwise; plain uses Unicode only; text is plain with the header buttons as words (up, cwd, sync, dots, size, fold, split, clear), falling back to plain glyphs when the pane is too narrow",
       "default": "auto",
       "options": [
         "auto",

@@ -150,6 +150,7 @@ optional:
   soffice:                Word and office pages
   pandoc, pdftotext:      document text in tmux, herdr and other terminals
   tmux or herdr:          an editor or diff tool in a new pane
+  Nerd Fonts 3.2+:        icons for Glyphs auto, which draws plain Unicode without one or with an older one
 pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 ```
 
