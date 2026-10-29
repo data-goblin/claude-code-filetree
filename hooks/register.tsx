@@ -2644,6 +2644,7 @@ export const register: Register = (on, options) => {
     const hidden: [string, () => void][] = [
       ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
       ...allKeys.filter(k => k.key.length === 1 && k.key !== '?' && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
+      ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
 
     return (
