@@ -146,6 +146,7 @@ let lastRoot = ''
 let columnDefault: Column = 'date'
 let showAge = false
 let showHints = true
+let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
@@ -1864,6 +1865,7 @@ export const register: Register = (on, options) => {
   columnDefault = options?.column === 'size' || options?.column === 'loc' ? options.column : 'date'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
+  focusOnOpen = options?.focus !== 'off'
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
   shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
@@ -1931,7 +1933,8 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
     const given = (e.args ?? '').trim()
-    if (!given && (await $.ui.panes().catch(() => [])).some(p => p.id === PANE && p.isShown)) {
+    const mine = given ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
+    if (mine?.isShown) {
       noDock = true
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: 'File tree closed.' }
@@ -1944,7 +1947,8 @@ export const register: Register = (on, options) => {
     const cwd = await cwdOf($)
     follow = !arg
     const root = arg ? resolve(cwd, arg, home) : cwd
-    await reset($, root, true)
+    // With Focus on open off, a bare /filetree leaves the keyboard in the prompt so the same key hides it again
+    await reset($, root, focusOnOpen || given !== '' || mine !== undefined)
     return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
   })
 
