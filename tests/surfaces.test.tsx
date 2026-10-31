@@ -873,6 +873,23 @@ test('in the desktop app /filetree opens the pane without the terminal layout ch
   expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
 })
 
+test('focus on open off: a bare /filetree opens the tree without taking the keyboard, /filetree open still takes it', { timeoutMs: 20_000, options: { focus: 'off' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  await $.session.start({ cwd: root, surface: null, isInteractive: false })
+  await clock.settle()
+  const before = opens.length
+  await $.command.run({ command: 'filetree', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } })
+  await clock.settle()
+  expect(opens.length).toBeGreaterThan(before)
+  expect(opens.at(-1)).not.toHaveProperty('focus')
+  await $.command.run({ command: 'filetree', args: 'open', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } })
+  await clock.settle()
+  expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
+})
+
 const shimmer = (name: string, tone: string) => `"t":${JSON.stringify(name)},"sh":"${tone}"`
 const fullscreen = (args: string) => ({ command: 'filetree', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } }) satisfies CommandRunInput
 
