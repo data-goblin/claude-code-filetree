@@ -2690,7 +2690,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
-      { id: 'autocollapse', label: unicode ? '⊖' : '\u{eaf5}', dim: !autoCollapseOn(t), hint: "Collapse folders Claude opened when it's done", icon: 'fold' as const },
+      { id: 'autocollapse', label: unicode ? '⊖' : '\u{eaf5}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
@@ -2706,6 +2706,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }
     const toolGap = toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
+    const tipText = desk ? '' : (buttons.find(b => b.id === hovered)?.hint ?? '')
 
     const sizePad = desk ? '\u2007' : ' '
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
@@ -3227,7 +3228,6 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
               </Button>
             </Box>
             <Box flexGrow={1} />
-            {hint(buttons, header.length + 2)}
             <Box flexDirection="row" gap={toolGap}>
               {toolButtons.map(button)}
               <Text> </Text>
@@ -3294,7 +3294,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
         )}
         <Box flexGrow={1} />
         {splitAt === 'bottom' ? split : null}
-        {(footer || latest || shortcutsShown || shortcutsSetting === 'auto') && (
+        {(footer || latest || tipText || shortcutsShown || shortcutsSetting === 'auto') && (
           <Box flexDirection="row" height={1} overflow="hidden">
             {keys.length ? (
               <Box flexDirection="row" flexShrink={0} gap={2}>
@@ -3320,8 +3320,13 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
             ) : null}
             <Box flexGrow={1} />
             {latest && chip(latest)}
-            {footerName ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
-            {footerName ? (
+            {tipText ? (
+              <Box flexShrink={1} marginLeft={2}>
+                <Text {...mutedText} wrap="truncate-end">{tipText}</Text>
+              </Box>
+            ) : null}
+            {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
+            {footerName && !tipText ? (
               <Box flexShrink={1}>
                 <Text {...mutedText} wrap="truncate-start">{footerName}</Text>
               </Box>
