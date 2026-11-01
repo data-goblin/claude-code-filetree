@@ -186,6 +186,7 @@ let sizeEpoch = 0
 let sizeActive = 0
 let timeActive = 0
 let timeQueue: [string, number][] = []
+const timing = new Set<string>()
 const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
 type Column = FileTree['column']
@@ -689,6 +690,7 @@ function pumpTimes($: EngineInterface): void {
     const [dir, stamp] = timeQueue.shift() ?? ['', 0]
     const epoch = sizeEpoch
     timeActive += 1
+    timing.add(dir)
     void (async () => {
       const t = await get($)
       const newest = await newestIn($, dir, pruneArgs(t.root))
@@ -701,6 +703,8 @@ function pumpTimes($: EngineInterface): void {
       })
       .finally(() => {
         timeActive -= 1
+        timing.delete(dir)
+        if (epoch !== sizeEpoch) void $.ui.invalidate('ui.render')
         pumpTimes($)
       })
   }
@@ -709,7 +713,7 @@ function pumpTimes($: EngineInterface): void {
 function wantTimes($: EngineInterface, dirs: FileNode[]): void {
   for (const n of dirs) {
     const known = dirTimes.get(n.id)
-    if ((known && known[0] === n.mtime) || timeQueue.some(([d]) => d === n.id)) continue
+    if ((known && known[0] === n.mtime) || timing.has(n.id) || timeQueue.some(([d]) => d === n.id)) continue
     timeQueue.push([n.id, n.mtime])
   }
   pumpTimes($)
