@@ -44,6 +44,7 @@ import {
   toNodes,
   underAny,
   visibleRows,
+  type Row,
 } from './tree'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
@@ -168,6 +169,7 @@ let hintUntil = 0
 let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
+let sortHeader = true
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
 let shortcutsTimer = 0
@@ -750,8 +752,8 @@ function openDirs(t: FileTree): string[] {
 
 function keepTop(cur: FileTree, expanded: string[]): Partial<FileTree> {
   if (followClaude) return { scroll: null }
-  const top = visibleRows(cur)[cur.scroll ?? view.from]?.node.id
-  const at = top ? visibleRows({ ...cur, expanded }).findIndex(r => r.node.id === top) : -1
+  const top = rowsOf(cur)[cur.scroll ?? view.from]?.node.id
+  const at = top ? rowsOf({ ...cur, expanded }).findIndex(r => r.node.id === top) : -1
   return at < 0 ? {} : { scroll: at }
 }
 
@@ -1207,7 +1209,8 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!match) return []
   const index = await indexPaths($, t)
   const hits: string[] = []
-  for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if (match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
+  const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
+  for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
   await revealPaths($, hits)
   const shown = await get($)
@@ -1215,6 +1218,42 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const stale = [...new Set(hits.filter(p => !ids.has(p)).map(dirname))].filter(d => inside(shown.root, d))
   if (stale.length) await loadDirs($, stale)
   return hits
+}
+
+const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
+function metricOf(t: FileTree, n: FileNode): number {
+  if (t.column === 'loc') return locCache.get(n.id) ?? -1
+  if (t.column === 'size') return n.kind === 'dir' ? (t.dirSizes[n.id] ?? -1) : n.size
+  return n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime
+}
+function gitOf(t: FileTree, n: FileNode): [number, number] {
+  const d = t.diff[n.id]
+  const c = t.counts[n.id]
+  const rank = n.kind === 'dir' ? (c ? c[0] + c[1] + c[2] : 0) : (GIT_RANK[t.git[n.id] ?? ''] ?? 0)
+  return [d ? d[0] + d[1] : 0, rank]
+}
+function rowsOf(t: FileTree): Row[] {
+  if (!t.sortCol) return visibleRows(t)
+  const sign = t.sortDir === 'asc' ? 1 : -1
+  const order = t.sortCol === 'name'
+    ? (a: FileNode, b: FileNode) => sign * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    : t.sortCol === 'git'
+    ? (a: FileNode, b: FileNode) => {
+        const [x, y] = [gitOf(t, a), gitOf(t, b)]
+        return sign * (x[0] - y[0] || x[1] - y[1])
+      }
+    : (a: FileNode, b: FileNode) => sign * (metricOf(t, a) - metricOf(t, b))
+  return visibleRows(t, order)
+}
+
+async function sortBy($: EngineInterface, col: 'name' | 'git' | 'metric'): Promise<void> {
+  await patch($, cur => (cur.sortCol !== col ? { sortCol: col, sortDir: 'desc' } : cur.sortDir === 'desc' ? { sortDir: 'asc' } : { sortCol: '', sortDir: 'desc' }))
+}
+
+async function scopeSearch($: EngineInterface, scope: string): Promise<void> {
+  await patch($, () => ({ searchScope: scope }))
+  const t = await get($)
+  if (t.query.trim()) await search($, t.query)
 }
 
 async function searchFlag($: EngineInterface, flag: 'searchCase' | 'searchRegex'): Promise<void> {
@@ -1900,7 +1939,7 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   const t = await get($)
-  const rows = visibleRows(t)
+  const rows = rowsOf(t)
   const at = rows.findIndex(r => r.node.id === t.cursor)
   const cur = rows[at]?.node
   const onRoot = Boolean(t.root) && t.cursor === t.root
@@ -1924,7 +1963,15 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
   else if (key === '?') toggleShortcuts($)
-  else if (key === 's') $.clock.after(50, () => focusPane($, t.root, 'q'))
+  else if (key === 'S' || (key === 's' && shift)) {
+    const dir = cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root
+    await scopeSearch($, dir === t.root ? '' : dir)
+    $.clock.after(50, () => focusPane($, t.root, 'q'))
+  } else if (key === 's') $.clock.after(50, () => focusPane($, t.root, 'q'))
+  else if (key === 'backspace' && t.searchScope && !t.query) await scopeSearch($, '')
+  else if (key === 'n') await sortBy($, 'name')
+  else if (key === 'g') await sortBy($, 'git')
+  else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
   else if (cur && key === 'd') await diffFile($, cur.id)
@@ -1976,6 +2023,10 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
   else if (previewActs.has(id) && id !== 'external') previewActs.get(id)?.()
+  else if (id === 'scope') await scopeSearch($, '')
+  else if (id === 'sort-name') await sortBy($, 'name')
+  else if (id === 'sort-git') await sortBy($, 'git')
+  else if (id === 'sort-metric') await sortBy($, 'metric')
   else if (id === 'case') await searchFlag($, 'searchCase')
   else if (id === 'regex') await searchFlag($, 'searchRegex')
 }
@@ -2001,6 +2052,7 @@ export const register: Register = (on, options) => {
   focusOnOpen = options?.focus !== 'off'
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
+  sortHeader = options?.headers !== 'off'
   shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
   shortcutsShown = shortcutsSetting === 'always'
   treemapSetting = options?.treemap === 'image' || options?.treemap === 'cells' || options?.treemap === 'off' ? options.treemap : 'auto'
@@ -2470,7 +2522,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const ignored = new Set(t.ignored)
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
-    const rows = visibleRows(t)
+    const rows = rowsOf(t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
     const chrome = 1 + (searchGap ? 2 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (footer || latest || shortcutsShown || shortcutsSetting === 'auto' ? 1 : 0)
@@ -2621,6 +2673,54 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
+    const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
+    const scopeChip = () => !scopeName ? null : desk ? (
+      <Box key="scope-chip" position="relative" flexShrink={0} flexDirection="row" alignItems="center" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}>
+        <Text color={accentInk}>{`in ${scopeName}`}</Text>
+        <Text color={glow(mutedInk, 'scope')} hover={{ color: lighten(mutedInk) }}>{' ×'}</Text>
+        <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+          <Client key="button-scope" module="./button.tsx" props={{ id: 'scope', label: '', dim: false } satisfies ButtonProps} width="100%" height="100%" />
+        </Box>
+      </Box>
+    ) : (
+      <Button key="scope-chip" plain label={`in ${scopeName} ×`} onPress={() => void scopeSearch($, '')}>
+        <Text color={theme.accent}>{`in ${scopeName}`}</Text>
+        <Text dimColor>{' ×'}</Text>
+      </Button>
+    )
+    const onQuery = (v: string) => void (v === '' && t.query === '' && t.searchScope ? scopeSearch($, '') : search($, v))
+    const sortCell = (col: 'name' | 'git' | 'metric', label: string) => {
+      const active = t.sortCol === col
+      const mark = active ? (t.sortDir === 'desc' ? ' ▾' : ' ▴') : ''
+      const color = active ? accentInk : mutedInk
+      return desk ? (
+        <Box key={`sort-${col}`} position="relative" flexShrink={0} flexDirection="row" alignItems="center">
+          <Text color={glow(color, `sort-${col}`)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>
+          {mark ? <Text color={mutedInk}>{mark}</Text> : null}
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key={`button-sort-${col}`} module="./button.tsx" props={{ id: `sort-${col}`, label: '', dim: !active } satisfies ButtonProps} width="100%" height="100%" />
+          </Box>
+        </Box>
+      ) : (
+        <Button key={`sort-${col}`} plain label={label + mark} onPress={() => void sortBy($, col)}>
+          <Text {...(active ? { color: theme.accent } : { dimColor: true })}>{label}</Text>
+          {mark ? <Text dimColor>{mark}</Text> : null}
+        </Button>
+      )
+    }
+    const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
+    const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
+    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : 'Modified'
+    const headerRow = () => (
+      <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
+        {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
+        {sortCell('name', 'Name')}
+        <Box flexGrow={1} />
+        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, 6)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', 'Git')}</Box> : null}
+        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('metric', metricLabel)}</Box> : null}
+        <Box width={2} flexShrink={0} />
+      </Box>
+    )
     const tailCols = (cells: Partial<Record<Col, Seg>>, key: string, only?: readonly Col[]) => COLS.filter(c => widths[c]).map(c => {
       const seg = only && !only.includes(c) ? undefined : cells[c]
       return (
@@ -2946,6 +3046,10 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       { key: 'o', label: 'open', act: () => void navigate($, 'return') },
       { key: 'd', label: 'diff', act: () => void navigate($, 'd') },
       { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
+      { key: 'S', label: 'search here', act: () => void navigate($, 'S', false, e.surface) },
+      { key: 'n', label: 'sort name', act: () => void navigate($, 'n', false, e.surface).then(park) },
+      { key: 'g', label: 'sort git', act: () => void navigate($, 'g', false, e.surface).then(park) },
+      { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
@@ -2956,7 +3060,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'p', 'y', 'c', 'r']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'S', 'p', 'y', 'c', 'r', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
@@ -2968,7 +3072,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const keys = allKeys.filter(k => picked.has(k.key))
     const hidden: [string, () => void][] = [
       ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
-      ...allKeys.filter(k => k.key.length === 1 && k.key !== '?' && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
+      ...allKeys.filter(k => /^[a-z]$/.test(k.key) && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
 
@@ -3016,12 +3120,13 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
         {desk && Svg ? (
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
             <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
+            {scopeChip()}
             <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column">
               <Input
                 key="q"
                 placeholder="Search files..."
                 value={t.query}
-                onInput={(v: string) => void search($, v)}
+                onInput={onQuery}
                 onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
               />
             </Box>
@@ -3034,13 +3139,14 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
+            {scopeChip()}{scopeName ? <Text> </Text> : null}
             <Box flexGrow={1}>
               <Input
                 key="q"
                 placeholder="search"
                 submitLabel="go"
                 value={t.query}
-                onInput={(v: string) => void search($, v)}
+                onInput={onQuery}
                 onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
               />
             </Box>
@@ -3052,7 +3158,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
             </Box>
           </Box>
         )}
-        {searchGap ? <Text key="gap-below"> </Text> : null}
+        {sortHeader ? headerRow() : searchGap ? <Text key="gap-below"> </Text> : null}
         {desk ? deskTree() : (
           <Client
             key="rows"
@@ -3072,7 +3178,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
                   ? <Button key="nav-page" plain dimColor label={`[ ]: ${k.label}`} onPress={k.act}><Text color={theme.accent}>[ ]</Text>{`: ${k.label}`}</Button>
                   : k.key === '?'
                   ? <Button key="nav-help" plain dimColor label={`?: ${k.label}`} onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>{`: ${k.label}`}</Button>
-                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={k.key} label={k.label} onPress={k.act} />)}
+                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={/^[a-z]$/.test(k.key) ? k.key : undefined} label={/^[a-z]$/.test(k.key) ? k.label : `${k.key}: ${k.label}`} onPress={k.act} />)}
               </Box>
             ) : shortcutsSetting === 'auto' ? (
               desk && Svg ? (

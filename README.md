@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.6.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -53,7 +53,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Features
 
-- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression
+- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, and sortable Name, Git and value column headers
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
@@ -100,7 +100,9 @@ j / k:        move down / up; k on the first row selects the root
 h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
+S:            search inside the folder under the cursor (Backspace on an empty query or × drops it)
 c / r:        search: match case / regular expression (Aa / .* in the search row)
+n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
 p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
@@ -126,6 +128,7 @@ Focus on open:    on | off
 Right column:     date | age | size | loc
 Hints:            on | off
 Search spacing:   on | off
+Column headers:   on | off
 Shortcut row:     auto | always | off
 Open with:        empty | editor | preview | a command with {path} and {dir}
 Binary files:     Open with | default app

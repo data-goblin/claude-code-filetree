@@ -37,6 +37,9 @@ export type FileTree = {
   query: string
   searchCase: boolean
   searchRegex: boolean
+  searchScope: string
+  sortCol: '' | 'name' | 'git' | 'metric'
+  sortDir: 'desc' | 'asc'
   showHidden: boolean
   column: 'date' | 'size' | 'loc'
   dirSizes: Record<string, number>

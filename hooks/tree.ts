@@ -25,6 +25,9 @@ export function emptyTree(root: string): FileTree {
     query: '',
     searchCase: false,
     searchRegex: false,
+    searchScope: '',
+    sortCol: '',
+    sortDir: 'desc',
     showHidden: true,
     column: 'date',
     dirSizes: {},
@@ -296,7 +299,7 @@ export function matcher(query: string, cased: boolean, regex: boolean): ((text: 
   return text => text.toLowerCase().includes(lower)
 }
 
-export function visibleRows(t: FileTree): Row[] {
+export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => number): Row[] {
   const kids = new Map<string, FileNode[]>()
   for (const n of t.nodes) {
     if (!t.showHidden && n.hidden) continue
@@ -304,11 +307,14 @@ export function visibleRows(t: FileTree): Row[] {
     if (list) list.push(n)
     else kids.set(n.parent, [n])
   }
+  if (order) for (const list of kids.values()) list.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || order(a, b))
+  const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
   const match = matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
   let keep: Set<string> | null = null
   if (match) {
     keep = new Set()
     for (const n of t.nodes) {
+      if (scope && !n.id.startsWith(scope)) continue
       if (!match(relative(t.root, n.id))) continue
       keep.add(n.id)
       for (const a of ancestorsOf(n.id, t.root)) keep.add(a)

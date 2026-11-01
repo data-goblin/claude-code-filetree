@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -84,6 +84,16 @@
       "type": "string",
       "title": "Hints",
       "description": "on: outside a git repo, a line under the header says git status starts after git init. off: the line is hidden and the tree gets the row.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
+    "headers": {
+      "type": "string",
+      "title": "Column headers",
+      "description": "on: a Name, Git and value header row under the search bar; click one to sort desc, asc, then off. off: hide it.",
       "default": "on",
       "options": [
         "on",
