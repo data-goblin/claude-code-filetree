@@ -6,6 +6,7 @@ import type { ZoneProps } from '../hooks/zone'
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
+import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
@@ -482,7 +483,7 @@ test('macOS app: every header button and the search box work on the desktop surf
   await ui.unmount()
 })
 
-test('hovering a header button says what it does: left of the buttons on desktop, in the footer in the terminal so the header never moves', { timeoutMs: 20_000 }, async ($, on) => {
+test('hovering a header button says what it does in the footer on both surfaces, so the header never moves', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/Users/k/proj'
   const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root, dirs: { [root]: [['.env', 'file'], ['a.ts', 'file']] }, status: '## main\0', numstat: '' }, ran)
@@ -503,7 +504,7 @@ test('hovering a header button says what it does: left of the buttons on desktop
     await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-hidden' })
     await clock.settle()
     expect(await texts(ui)).toMatch(/"hide hidden files ?"/)
-    expect(JSON.stringify(await ui.drawn())).toMatch(surface === 'terminal' ? /"color":"ansi256\(4\)","wrap":"truncate-end"\},"children":\["hide hidden files"\]/ : /"color":"#4b8ef0","wrap":"truncate-end"\},"children":\["hide hidden files "\]/)
+    expect(JSON.stringify(await ui.drawn())).toMatch(surface === 'terminal' ? /"color":"ansi256\(4\)","wrap":"truncate-end"\},"children":\["hide hidden files"\]/ : /"color":"#4b8ef0","wrap":"truncate-end"\},"children":\["hide hidden files"\]/)
     await (surface === 'desktop' ? tap(ui, 'hidden') : ui.press({ key: 'hidden' }))
     await clock.settle()
     expect(await texts(ui)).toMatch(/"show hidden files ?"/)
@@ -3422,3 +3423,32 @@ test('jump mode types through its own focused field, arrows reach it through the
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`${root}/tests/hooks-e2e/x.ts`])
   await ui.unmount()
 })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: every toolbar button shows a non-empty hint on hover, and collapse-all and auto-collapse use different icons`, { timeoutMs: 20_000, options: { glyphs: 'nerd' } }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, ICON_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const ids = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'autocollapse', ...(surface === 'terminal' ? ['split'] : [])]
+    for (const id of ids) {
+      const before = await texts(ui)
+      await ui.pointer({ type: 'enter', x: 0, y: 0, in: `button-${id}` })
+      await clock.settle()
+      const after = JSON.stringify(await ui.drawn())
+      const tip = /"wrap":"truncate-end"\},"children":\["([^"]+)"\]/.exec(after.slice(after.lastIndexOf('"wrap":"truncate-end"') - 40))?.[1] ?? ''
+      expect([id, tip.trim().length > 0]).toEqual([id, true])
+      expect(before).not.toBe(await texts(ui))
+      await ui.pointer({ type: 'leave', x: 0, y: 0, in: `button-${id}` })
+      await clock.settle()
+    }
+    const shown = JSON.stringify(await ui.drawn())
+    if (surface === 'terminal') {
+      const label = (id: string) => /"label":"([^"]*)"/.exec(shown.slice(shown.indexOf(`"key":"button-${id}"`)))?.[1]
+      expect(label('collapse')).not.toBe(label('autocollapse'))
+    } else expect(ICONS.fold).not.toBe(ICONS.collapse)
+    await ui.unmount()
+  })
+}

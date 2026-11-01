@@ -16,7 +16,7 @@ export const ICONS = {
   'folder-up': `${FOLDER}M12 10v6M9 13l3-3 3 3`,
   'root-folder': `${FOLDER}M12 11a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5`,
   'folder-up-line': `${FOLDER}M12 17v-6M9 13.5l3-3 3 3`,
-  fold: 'M12 2v6M9 5l3 3 3-3M12 22v-6M9 19l3-3 3 3M4 12h16',
+  fold: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2',
   'folder-git': `${FOLDER}M12 11a2 2 0 1 0 0 4 2 2 0 1 0 0-4M8 13h2M14 13h2`,
   file: FILE,
   'file-text': `${FILE}M8 13h8M8 17h5`,

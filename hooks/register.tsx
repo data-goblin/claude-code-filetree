@@ -2946,7 +2946,7 @@ export const register: Register = (on, options) => {
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
-      { id: 'autocollapse', label: unicode ? '⊖' : '\u{eaf5}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
+      { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
@@ -2963,8 +2963,8 @@ export const register: Register = (on, options) => {
     }
     const toolGap = desk ? 0 : toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
     const tipButton = buttons.find(b => b.id === hovered)
-    const tipText = desk ? '' : (tipButton?.hint ?? '')
-    const tipProps = tipButton && !tipButton.dim ? { color: theme.accent } : theme.fg ? { color: theme.fg } : {}
+    const tipText = tipButton?.hint ?? ''
+    const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: ink(theme.fg, DESK.fg) } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
@@ -3499,7 +3499,6 @@ export const register: Register = (on, options) => {
               </Button>
             </Box>
             <Box flexGrow={1} />
-            {hint(toolButtons, header.length + 4)}
             <Box flexDirection="row" alignItems="center" flexShrink={0}>
               {toolButtons.map(button)}
             </Box>
