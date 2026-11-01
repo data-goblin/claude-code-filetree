@@ -65,6 +65,7 @@ const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
 const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
 type Col = (typeof COLS)[number]
 const HINT_MS = 5_000
+const TOGGLES = ['cwd', 'hidden', 'size', 'split']
 const SPIN_MS = 400
 const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
@@ -673,7 +674,8 @@ async function newestIn($: EngineInterface, dir: string, prune: string[]): Promi
     }
     return newest
   }
-  const run = await $.process.run(['sh', '-c', NEWEST_SH, 'sh', dir, os === 'darwin' ? '-f%m' : '-c%Y', ...prune], { timeoutMs: SIZE_TIMEOUT_MS })
+  const shallow = PRUNE.includes(dir.split('/').pop() ?? '')
+  const run = await $.process.run(['sh', '-c', NEWEST_SH, 'sh', dir, os === 'darwin' ? '-f%m' : '-c%Y', ...(shallow ? ['-maxdepth', '1'] : prune)], { timeoutMs: SIZE_TIMEOUT_MS })
   const secs = Number(run.stdout.trim().split(/\s/)[0] || NaN)
   return Number.isFinite(secs) ? secs * 1000 : 0
 }
@@ -2341,7 +2343,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
           <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: '', dim: b.dim } satisfies ButtonProps} width="100%" height="100%" />
         </Box>
       </Box>
-    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
+    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : {}) } satisfies ButtonProps} />
     const hint = (buttons: { id: string; label: string; hint: string }[], title: number) => {
       const text = buttons.find(b => b.id === hovered)?.hint
       if (!text) return null
@@ -2632,10 +2634,10 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       const n = p.n
       const icon = nodeIcon(n, r.open, p.isRepo)
       const tone = tones[p.tone]
-      const iconInk = p.lit ? (p.isDim ? (tone?.dim[2] ?? accentInk) : (tone?.solid ?? accentInk)) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
+      const iconInk = p.lit ? (tone?.solid ?? accentInk) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
-        ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, dim: p.isDim, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
+        ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
         : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>

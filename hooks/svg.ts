@@ -9,6 +9,7 @@ export const ICONS = {
   'chevron-right': 'm9 18 6-6-6-6',
   'chevron-down': 'm6 9 6 6 6-6',
   folder: FOLDER,
+  'folder-line': FOLDER,
   'folder-open': 'm6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2',
   'folder-up': `${FOLDER}M12 10v6M9 13l3-3 3 3`,
   'folder-git': `${FOLDER}M12 11a2 2 0 1 0 0 4 2 2 0 1 0 0-4M8 13h2M14 13h2`,
@@ -113,7 +114,7 @@ const EXT_GROUPS: [IconName, string][] = [
 const EXTS: Record<string, IconName> = Object.fromEntries(EXT_GROUPS.flatMap(([icon, list]) => list.split(' ').map(ext => [ext, icon])))
 
 export function nodeIcon(n: FileNode, open: boolean, isRepo: boolean): IconName {
-  if (n.kind === 'dir') return isRepo ? 'folder-git' : open ? 'folder-open' : 'folder'
+  if (n.kind === 'dir') return isRepo ? 'folder-git' : n.hidden ? 'folder-line' : 'folder'
   if (n.kind === 'link') return 'file-link'
   const lower = n.name.toLowerCase()
   const named = NAMES[lower]
