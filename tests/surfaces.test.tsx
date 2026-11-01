@@ -42,6 +42,7 @@ type World = {
   font?: string
   newest?: (dir: string) => string
   findDelayMs?: number
+  newestDelay?: number
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -107,7 +108,10 @@ function world(on: On, w: World, ran: Ran) {
     if (exit) return { value: { exitCode: exit[0], stdout: '', stderr: exit[1], isStdoutTruncated: false, isStderrTruncated: false } }
     const out = w.stdout?.[argv.slice(0, 3).join(' ')]
     if (out !== undefined) return ok(out)
-    if (w.newest && argv[0] === 'sh' && (argv[2] ?? '').includes('awk -v d=')) return ok(w.newest(argv[4] ?? ''))
+    if (w.newest && argv[0] === 'sh' && (argv[2] ?? '').includes('awk -v d=')) {
+      if (w.newestDelay) await clock.sleep(w.newestDelay)
+      return ok(w.newest(argv[4] ?? ''))
+    }
     if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
     if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
     if (argv[0] === 'find' && w.find !== undefined) {
@@ -3244,5 +3248,27 @@ test('z with zoxide installed merges its scored folders, including ones outside 
   await clock.settle()
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/other/hooks', `${root}/hooks`])
   expect(ran.filter(a => a[0] === 'zoxide').length).toBe(1)
+  await ui.unmount()
+})
+
+test('a folder date scan cut short by a write is redone, so the date still appears', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    ...ICON_WORLD(root),
+    dirs: { [root]: [['src', 'dir'], ['README.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    newest: dir => (dir === `${root}/src` ? `1700000600 ${root}/src\n` : ''),
+    newestDelay: 1000,
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.advance(200)
+  await $.tool.call({ tool: 'Write', file_path: `${root}/README.md`, content: 'x' })
+  await clock.advance(3000)
+  await clock.settle()
+  await clock.advance(3000)
+  await clock.settle()
+  const src = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src`)
+  expect(src?.right.map(x => x.t).join('')).toContain('2023-11-14 23:23')
   await ui.unmount()
 })

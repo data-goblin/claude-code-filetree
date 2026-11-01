@@ -661,6 +661,10 @@ function pumpLoc($: EngineInterface): void {
       .finally(() => {
         locBusy.delete(key)
         locActive -= 1
+        if (epoch !== sizeEpoch) {
+          if (!(deep ? locCache.has(dir) : locListed.has(dir)) && !locQueue.some(([d, k]) => d === dir && k === deep)) locQueue.push([dir, deep])
+          void $.ui.invalidate('ui.render')
+        }
         pumpLoc($)
       })
   }
@@ -736,6 +740,10 @@ function pumpTimes($: EngineInterface): void {
       .finally(() => {
         timeActive -= 1
         timing.delete(dir)
+        if (epoch !== sizeEpoch) {
+          if (!dirTimes.has(dir) && !timeQueue.some(([d]) => d === dir)) timeQueue.push([dir, 0])
+          void $.ui.invalidate('ui.render')
+        }
         pumpTimes($)
       })
   }
