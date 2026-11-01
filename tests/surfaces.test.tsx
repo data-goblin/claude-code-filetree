@@ -37,6 +37,7 @@ type World = {
   unborn?: boolean
   diffTree?: string[]
   poster?: (argv: string[]) => string
+  font?: string
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -102,6 +103,7 @@ function world(on: On, w: World, ran: Ran) {
     if (exit) return { value: { exitCode: exit[0], stdout: '', stderr: exit[1], isStdoutTruncated: false, isStderrTruncated: false } }
     const out = w.stdout?.[argv.slice(0, 3).join(' ')]
     if (out !== undefined) return ok(out)
+    if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
     if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
     if (argv[0] === 'find' && w.find !== undefined) return ok(w.find)
     if (argv[0] === 'du') {
@@ -2785,7 +2787,7 @@ test('terminal regression: plain glyphs stay the Unicode set for terminals witho
     const props = clientProps(tree, `button-${id}`)
     return has(props, 'label') ? props.label : undefined
   })
-  expect(labels).toEqual(['△', '◎', '↻', '⊙', '◫', '⊟', '⊡'])
+  expect(labels).toEqual(['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'])
   expect(JSON.stringify(tree)).toContain('"⌕ "')
   expect(treeRows(tree).rows.find(r => r.id === `${root}/src`)?.left.map(s => s.t)).toEqual(['', '▸ ', '■ ', 'src'])
   await ui.unmount()
@@ -2844,3 +2846,32 @@ test('outside a repo the git line says No git repo', { timeoutMs: 20_000 }, asyn
   expect(JSON.stringify(await ui.drawn())).toContain('No git repo')
   await ui.unmount()
 })
+
+const GLYPH_SETS: [string, Record<string, string>, string, string[], string, string, string][] = [
+  ['nerd', { glyphs: 'nerd' }, 'ok', ['\u{eaa1}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'], '\u{ea6d} ', '\u{e5ff} ', '\u{f0354} '],
+  ['auto without a Nerd Font', {}, 'missing', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
+  ['plain', { glyphs: 'plain' }, 'ok', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
+  ['text', { glyphs: 'text' }, 'ok', ['up', 'cwd', 'sync', 'dots', 'size', 'fold', 'split'], '', '■ ', '∙ '],
+]
+for (const [name, options, font, labels, lens, dirGlyph, fileGlyph] of GLYPH_SETS) {
+  test(`terminal regression: the ${name} glyph set draws single-cell toolbar, search and tree glyphs`, { timeoutMs: 20_000, options }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, { ...ICON_WORLD(root), font }, [])
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
+    await clock.settle()
+    const tree = await ui.drawn()
+    const drawn = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'split'].map(id => {
+      const props = clientProps(tree, `button-${id}`)
+      return has(props, 'label') ? props.label : undefined
+    })
+    expect(drawn).toEqual(labels)
+    if (name !== 'text') for (const l of labels) expect([...l].length).toBe(1)
+    if (lens) expect(JSON.stringify(tree)).toContain(JSON.stringify(lens))
+    const rows = treeRows(tree).rows
+    expect(rows.find(r => r.id === `${root}/src`)?.left.map(s => s.t).slice(1, 3)).toEqual(['▸ ', dirGlyph])
+    expect(rows.find(r => r.id === `${root}/README.md`)?.left.map(s => s.t)[2]).toBe(fileGlyph)
+    await ui.unmount()
+  })
+}
