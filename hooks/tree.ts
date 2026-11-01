@@ -23,6 +23,8 @@ export function emptyTree(root: string): FileTree {
     cursor: '',
     selected: '',
     query: '',
+    searchCase: false,
+    searchRegex: false,
     showHidden: true,
     column: 'date',
     dirSizes: {},
@@ -268,6 +270,32 @@ export function relative(root: string, path: string): string {
   return path === root ? '' : path.slice(root.endsWith('/') ? root.length : root.length + 1)
 }
 
+export function badPattern(query: string, regex: boolean): boolean {
+  if (!regex || !query.trim()) return false
+  try {
+    new RegExp(query.trim())
+    return false
+  } catch {
+    return true
+  }
+}
+
+export function matcher(query: string, cased: boolean, regex: boolean): ((text: string) => boolean) | null {
+  const q = query.trim()
+  if (!q) return null
+  if (regex) {
+    try {
+      const re = new RegExp(q, cased ? '' : 'i')
+      return text => re.test(text)
+    } catch {
+      return () => false
+    }
+  }
+  if (cased) return text => text.includes(q)
+  const lower = q.toLowerCase()
+  return text => text.toLowerCase().includes(lower)
+}
+
 export function visibleRows(t: FileTree): Row[] {
   const kids = new Map<string, FileNode[]>()
   for (const n of t.nodes) {
@@ -276,12 +304,12 @@ export function visibleRows(t: FileTree): Row[] {
     if (list) list.push(n)
     else kids.set(n.parent, [n])
   }
-  const q = t.query.trim().toLowerCase()
+  const match = matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
   let keep: Set<string> | null = null
-  if (q) {
+  if (match) {
     keep = new Set()
     for (const n of t.nodes) {
-      if (!relative(t.root, n.id).toLowerCase().includes(q)) continue
+      if (!match(relative(t.root, n.id))) continue
       keep.add(n.id)
       for (const a of ancestorsOf(n.id, t.root)) keep.add(a)
     }
@@ -318,6 +346,14 @@ export function age(ms: number, now: number): string {
   if (s > 0 && s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`
   const d = new Date(ms)
   return Math.abs(s) < 365 * 86_400 ? `${MONTHS[d.getMonth()]} ${d.getDate()}` : String(d.getFullYear())
+}
+
+export function humanSize(bytes: number, pad: string): string {
+  if (bytes < 0) return '?'
+  if (bytes < 1024) return `${bytes} B${pad}`
+  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`
+  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`
+  return `${(bytes / 1_073_741_824).toFixed(1)} GB`
 }
 
 export function formatSize(bytes: number): string {

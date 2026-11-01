@@ -35,6 +35,8 @@ export type FileTree = {
   cursor: string
   selected: string
   query: string
+  searchCase: boolean
+  searchRegex: boolean
   showHidden: boolean
   column: 'date' | 'size' | 'loc'
   dirSizes: Record<string, number>

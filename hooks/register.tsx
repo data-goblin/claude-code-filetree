@@ -9,9 +9,11 @@ import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { counted, formatLoc, locArgv, locUsage, parseLoc, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
-import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, textHeight } from './pixmap'
+import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
+import type { HitProps } from './hit'
+import { activityIcon, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
 import {
@@ -22,10 +24,13 @@ import {
   dirname,
   emptyTree,
   formatSize,
+  humanSize,
+  badPattern,
   inside,
   isAbsolute,
   join,
   mapper,
+  matcher,
   parseGit,
   parseNumstat,
   posix,
@@ -54,6 +59,14 @@ const DOUBLE_MS = 450
 const SHORTCUTS_MS = 10_000
 const FIND_LIMIT = 200
 const ROWS_BUDGET = 80_000
+const DESK_ROWS = 400
+const NAME_MIN = 10
+const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
+const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
+type Col = (typeof COLS)[number]
+const HINT_MS = 5_000
+const SPIN_MS = 400
+const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
@@ -146,6 +159,11 @@ let lastRoot = ''
 let columnDefault: Column = 'date'
 let showAge = false
 let showHints = true
+let hintRoot = ''
+let reloading = 0
+let previewActs = new Map<string, () => void>()
+let reloadSpin = 0
+let hintUntil = 0
 let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
@@ -161,6 +179,9 @@ let termColors: TermColors = { palette: {} }
 let mapImage: { key: string; png: string } | null = null
 let sizeEpoch = 0
 let sizeActive = 0
+let timeActive = 0
+let timeQueue: [string, number][] = []
+const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
 type Column = FileTree['column']
 const locCache = new Map<string, number>()
@@ -206,6 +227,10 @@ async function cwdOf($: EngineInterface): Promise<string> {
 function clean(segs: Seg[]): Seg[] {
   for (const seg of segs) for (const [k, v] of Object.entries(seg)) if (v === undefined) Reflect.deleteProperty(seg, k)
   return segs
+}
+
+function toHex(c: Rgb): string {
+  return `#${c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`
 }
 
 function faint(hex: string): string {
@@ -417,10 +442,11 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   blink?.cancel()
   blink = null
   lastRoot = root
+  hintRoot = ''
   searchIndex = null
   sizeEpoch += 1
   sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split }))
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex) }))
   const title = `Files: ${root.split('/').pop() || root}`
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
@@ -593,8 +619,14 @@ function pumpLoc($: EngineInterface): void {
     const key = `${deep ? 'd' : 's'}${dir}`
     locBusy.add(key)
     locActive += 1
+    const giveUp = () => {
+      if (epoch !== sizeEpoch) return
+      if (deep && !locCache.has(dir)) locCache.set(dir, -1)
+      locListed.add(dir)
+      void $.ui.invalidate('ui.render')
+    }
     void (async () => {
-      if ((await osName($)) === 'win32') return
+      if ((await osName($)) === 'win32') return giveUp()
       const t = await get($)
       const argv = locArgv(dir, pruneArgs(t.root))
       const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', dir, '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
@@ -602,7 +634,7 @@ function pumpLoc($: EngineInterface): void {
       takeLoc(parseLoc(run.stdout), dir, deep)
       void $.ui.invalidate('ui.render')
     })()
-      .catch(() => undefined)
+      .catch(giveUp)
       .finally(() => {
         locBusy.delete(key)
         locActive -= 1
@@ -619,6 +651,64 @@ function wantLoc($: EngineInterface, dirs: string[], deep: boolean): void {
   pumpLoc($)
 }
 
+const NEWEST_SH = 'd=$1; s=$2; shift 2; find "$d" "$@" -type f -exec stat $s {} + 2>/dev/null | sort -n | tail -n 1'
+
+async function newestIn($: EngineInterface, dir: string, prune: string[]): Promise<number> {
+  const os = await osName($)
+  if (os === 'win32') {
+    let newest = 0
+    let seen = 0
+    let level = [dir]
+    while (level.length) {
+      const next: string[] = []
+      for (const d of level) {
+        const entries = await $.fs.list(d).catch(() => [])
+        for (const e of entries) {
+          if (++seen > SIZE_WALK_LIMIT) return newest
+          if (e.kind === 'dir' && !e.isLink && !PRUNE.includes(e.name)) next.push(join(d, e.name))
+          else if (e.kind === 'file') newest = Math.max(newest, e.mtimeMs)
+        }
+      }
+      level = next
+    }
+    return newest
+  }
+  const run = await $.process.run(['sh', '-c', NEWEST_SH, 'sh', dir, os === 'darwin' ? '-f%m' : '-c%Y', ...prune], { timeoutMs: SIZE_TIMEOUT_MS })
+  const secs = Number(run.stdout.trim().split(/\s/)[0] || NaN)
+  return Number.isFinite(secs) ? secs * 1000 : 0
+}
+
+function pumpTimes($: EngineInterface): void {
+  while (timeActive < SIZE_JOBS && timeQueue.length) {
+    const [dir, stamp] = timeQueue.shift() ?? ['', 0]
+    const epoch = sizeEpoch
+    timeActive += 1
+    void (async () => {
+      const t = await get($)
+      const newest = await newestIn($, dir, pruneArgs(t.root))
+      if (epoch !== sizeEpoch) return
+      dirTimes.set(dir, [stamp, newest])
+      void $.ui.invalidate('ui.render')
+    })()
+      .catch(() => {
+        if (epoch === sizeEpoch) dirTimes.set(dir, [stamp, 0])
+      })
+      .finally(() => {
+        timeActive -= 1
+        pumpTimes($)
+      })
+  }
+}
+
+function wantTimes($: EngineInterface, dirs: FileNode[]): void {
+  for (const n of dirs) {
+    const known = dirTimes.get(n.id)
+    if ((known && known[0] === n.mtime) || timeQueue.some(([d]) => d === n.id)) continue
+    timeQueue.push([n.id, n.mtime])
+  }
+  pumpTimes($)
+}
+
 function wantSizes($: EngineInterface, dirs: string[]): void {
   for (const dir of dirs) if (!sizing.has(dir) && !sizeQueue.includes(dir)) sizeQueue.push(dir)
   pumpSizes($)
@@ -628,13 +718,16 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
   sizeEpoch += 1
   sizeQueue = []
   locQueue = []
+  timeQueue = []
   if (!paths) {
     locCache.clear()
     locListed.clear()
+    dirTimes.clear()
   }
   for (const p of paths ?? []) {
     locCache.delete(p)
     locListed.delete(p)
+    for (let d = p, prev = ''; d !== prev; prev = d, d = dirname(d)) dirTimes.delete(d)
     for (let d = dirname(p), prev = p; d !== prev; prev = d, d = dirname(d)) {
       locCache.delete(d)
       locListed.delete(d)
@@ -1088,7 +1181,7 @@ async function listAll($: EngineInterface, t: FileTree): Promise<string[] | null
   }
 }
 
-type Indexed = { paths: string[]; lower: string[] }
+type Indexed = { paths: string[]; rel: string[] }
 
 function indexPaths($: EngineInterface, t: FileTree): Promise<Indexed> {
   if (searchIndex?.root !== t.root) {
@@ -1096,7 +1189,7 @@ function indexPaths($: EngineInterface, t: FileTree): Promise<Indexed> {
       root: t.root,
       paths: listAll($, t).then(paths => {
         if (paths === null && searchIndex === index) searchIndex = null
-        return { paths: paths ?? [], lower: (paths ?? []).map(p => relative(t.root, p).toLowerCase()) }
+        return { paths: paths ?? [], rel: (paths ?? []).map(p => relative(t.root, p)) }
       }),
     }
     searchIndex = index
@@ -1107,12 +1200,12 @@ function indexPaths($: EngineInterface, t: FileTree): Promise<Indexed> {
 async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!(await get($)).query.trim()) searchIndex = null
   await patch($, () => ({ query }))
-  const q = query.trim().toLowerCase()
-  if (!q) return []
   const t = await get($)
+  const match = matcher(query, Boolean(t.searchCase), Boolean(t.searchRegex))
+  if (!match) return []
   const index = await indexPaths($, t)
   const hits: string[] = []
-  for (let i = 0; i < index.lower.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if (index.lower[i]?.includes(q)) hits.push(index.paths[i] ?? '')
+  for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if (match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
   await revealPaths($, hits)
   const shown = await get($)
@@ -1120,6 +1213,12 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const stale = [...new Set(hits.filter(p => !ids.has(p)).map(dirname))].filter(d => inside(shown.root, d))
   if (stale.length) await loadDirs($, stale)
   return hits
+}
+
+async function searchFlag($: EngineInterface, flag: 'searchCase' | 'searchRegex'): Promise<void> {
+  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : { searchRegex: !cur.searchRegex }))
+  const t = await get($)
+  if (t.query.trim()) await search($, t.query)
 }
 
 async function jump($: EngineInterface, query: string): Promise<void> {
@@ -1642,6 +1741,17 @@ async function scrollPreview($: EngineInterface, by: number): Promise<void> {
   if (top !== t.previewTop) await patch($, () => ({ previewTop: top }))
 }
 
+function diffCounts(source: string): [number, number] {
+  let add = 0
+  let del = 0
+  for (const line of source.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---')) continue
+    if (line.startsWith('+')) add++
+    else if (line.startsWith('-')) del++
+  }
+  return [add, del]
+}
+
 function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
   const { Box, Text, Markdown, Code } = elements
   if ('segments' in win) {
@@ -1813,6 +1923,8 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
   else if (key === 'end') await move(rows.length)
   else if (key === '?') toggleShortcuts($)
   else if (key === 's') $.clock.after(50, () => focusPane($, t.root, 'q'))
+  else if (key === 'c') await searchFlag($, 'searchCase')
+  else if (key === 'r') await searchFlag($, 'searchRegex')
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
@@ -1832,19 +1944,38 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
     follow = true
     await reset($, await cwdOf($))
   } else if (id === 'refresh') {
-    searchIndex = null
-    for (const scan of scans.values()) scan.stale = true
-    await staleSizes($)
-    await loadDirs($, [t.root, ...t.expanded])
-    await detectRepo($)
-    await refreshGit($)
-    if (t.query.trim()) await search($, t.query)
+    const spin = ++reloading
+    const began = await $.clock.now()
+    void $.ui.invalidate('ui.render')
+    try {
+      searchIndex = null
+      for (const scan of scans.values()) scan.stale = true
+      await staleSizes($)
+      await loadDirs($, [t.root, ...t.expanded])
+      await detectRepo($)
+      await refreshGit($)
+      if (t.query.trim()) await search($, t.query)
+    } finally {
+      const took = (await $.clock.now()) - began
+      const left = Math.max(1, Math.ceil(took / SPIN_MS)) * SPIN_MS - took
+      const settle = () => {
+        if (spin !== reloading) return
+        reloading = 0
+        reloadSpin += 1
+        void $.ui.invalidate('ui.render')
+      }
+      if (left > 0) $.clock.after(left, settle)
+      else settle()
+    }
   } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
   else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : 'date' }))
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (previewActs.has(id) && id !== 'external') previewActs.get(id)?.()
+  else if (id === 'case') await searchFlag($, 'searchCase')
+  else if (id === 'regex') await searchFlag($, 'searchRegex')
 }
 
 async function selectRoot($: EngineInterface): Promise<void> {
@@ -2051,7 +2182,7 @@ export const register: Register = (on, options) => {
       await pickTile($, e.data.tab)
       return {}
     }
-    if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap') || !e.data || typeof e.data !== 'object') return next(e)
+    if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap' && !e.element.startsWith('hit:')) || !e.data || typeof e.data !== 'object') return next(e)
     const data = rowsMessage(e.data)
     void sync($)
     const t = await get($)
@@ -2166,18 +2297,51 @@ export const register: Register = (on, options) => {
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
     const { Box, Text, Button, Input, Client } = elements
+    const Svg = 'Svg' in elements ? elements.Svg : undefined
+    const desk = e.surface === 'desktop' && Boolean(Svg)
     const Image = 'Image' in elements ? elements.Image : undefined
     const t = await get($)
     const light = e.surface !== 'desktop' && lightTerminal
     const theme: Theme = { ...DEFAULT_THEME, ...palette.theme }
     const tones = light ? LIGHT_TONES : TONES
     const mutedText = theme.muted ? { color: theme.muted } : { dimColor: true }
-    const gitColors = { ...GIT_COLOR, ...palette.git }
+    const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
     const rowColors = { activeBg: theme.selection, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
     nativeScroll = e.surface === 'desktop'
-    const button = (b: ButtonProps) => <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
+    const accentInk = ink(theme.accent, DESK.accent)
+    const mutedInk = ink(theme.muted, DESK.muted)
+    const dc = (c: string | undefined) => (desk && c ? ink(c, c) : c)
+    const tint = (c: string | undefined) => (c === '' ? { dimColor: true } : c === undefined ? {} : { color: desk ? ink(c, c) : c })
+    const bgRgb = rgbOf(theme.bg)
+    const searchBg = bgRgb ? toHex(over(bgRgb, rgbOf(theme.fg) ?? (light ? [0, 0, 0] : [255, 255, 255]), 0.07)) : light ? 'ansi256(254)' : 'ansi256(236)'
+const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
+    const toggle = (id: 'case' | 'regex', label: string, active: boolean, bad: boolean) => {
+      const color = bad ? ink(theme.urgent, DESK.urgent) : active ? accentInk : mutedInk
+      return desk ? (
+        <Box key={`tool-${id}`} position="relative" flexShrink={0} flexDirection="row" alignItems="center">
+          <Text color={glow(color, id)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key={`button-${id}`} module="./button.tsx" props={{ id, label: '', dim: !active } satisfies ButtonProps} width="100%" height="100%" />
+          </Box>
+        </Box>
+      ) : (
+        <Button key={`search-${id}`} plain label={label} onPress={() => void searchFlag($, id === 'case' ? 'searchCase' : 'searchRegex')}>
+          <Text {...(bad ? { color: theme.urgent } : active ? { color: theme.accent } : { dimColor: true })}>{label}</Text>
+        </Button>
+      )
+    }
+    const deskSel = palette.theme.selection ?? DESK.selection
+    const deskHover = palette.hover ?? DESK.hover
+    const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
+      <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
+        <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
+        <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+          <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: '', dim: b.dim } satisfies ButtonProps} width="100%" height="100%" />
+        </Box>
+      </Box>
+    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim } satisfies ButtonProps} />
     const hint = (buttons: { id: string; label: string; hint: string }[], title: number) => {
       const text = buttons.find(b => b.id === hovered)?.hint
       if (!text) return null
@@ -2195,6 +2359,69 @@ export const register: Register = (on, options) => {
       previewLine = win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const external = { id: 'external', label: glyphSetting === 'text' ? 'open' : unicode ? '↗' : '\u{eb14}', dim: true, hint: 'open in default app' }
+      if (desk && Svg) {
+        const step = p?.diff ? (p.diff.some(l => l.kind === '@') ? 'file' : 'hunk') : ''
+        const toTree = t.nodes.find(n => n.id === t.preview)?.kind === 'dir'
+        const edits = editWithSetting || inTmux || inHerdr
+        const acts: { id: string; key: string; icon: IconName; hint: string; run: () => Promise<void> }[] = [
+          { id: 'pv-k', key: 'k', icon: 'arrow-up', hint: step ? `previous ${step}` : 'up a line', run: () => (step ? jumpDiff($, -1) : scrollPreview($, -1)) },
+          { id: 'pv-j', key: 'j', icon: 'arrow-down', hint: step ? `next ${step}` : 'down a line', run: () => (step ? jumpDiff($, 1) : scrollPreview($, 1)) },
+          { id: 'pv-b', key: 'b', icon: 'page-up', hint: 'page up', run: () => scrollPreview($, 2 - previewRows) },
+          { id: 'pv-f', key: 'f', icon: 'page-down', hint: 'page down', run: () => scrollPreview($, previewRows - 2) },
+          { id: 'pv-d', key: 'd', icon: p?.diff ? (toTree ? 'folder' : 'file') : 'diff', hint: p?.diff ? (toTree ? 'back to the tree' : 'back to the file') : 'diff against HEAD', run: () => diffFile($, t.preview) },
+          ...(edits ? [{ id: 'pv-e', key: 'e', icon: 'pencil' as const, hint: `edit at line ${previewLine}`, run: () => editPreview($, t.preview) }] : []),
+          { id: 'external', key: '', icon: 'external-link', hint: 'open in default app', run: () => pressHeader($, 'external') },
+        ]
+        previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
+        const { Code } = elements
+        const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
+        return (
+          <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+            <Box key="pv-head" flexDirection="row" alignItems="center">
+              <Box key="pv-back" flexDirection="row" alignItems="center" flexShrink={0}>
+                <Svg key="pv-back-icon" source={rowSvg(0, null, 'chevron-left', mutedInk, DESK.muted, 0)} alt="back to files" width={STEP_PX * 2} height={ROW_PX} />
+                <Button key="back" plain dimColor hover={{ dimColor: false }} hotkey="h" autoFocus={edits ? undefined : true} label="Files" onPress={() => void closePreview($)} />
+              </Box>
+              <Text {...mutedText}>{' / '}</Text>
+              <Box flexShrink={1} flexGrow={1} overflow="hidden">
+                <Text weight="semibold" wrap="truncate-start">{name}</Text>
+              </Box>
+              {hint(tools, 12 + name.length)}
+              <Box flexDirection="row" alignItems="center" flexShrink={0}>{tools.map(button)}</Box>
+            </Box>
+            {p?.note ? (
+              <Box key="pv-note" flexDirection="row" marginLeft={4} marginBottom={1}>
+                <Text {...mutedText} size="footnote">{p.note}</Text>
+              </Box>
+            ) : null}
+            {'segments' in win ? (
+              <Box key="pv-files" flexDirection="column">
+                {win.segments.map((g, i) => {
+                  const node: FileNode = { id: g.title, parent: '', name: g.title.split('/').pop() ?? g.title, kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true }
+                  const counts = p?.diff ? diffCounts(g.source) : [0, 0]
+                  return (
+                    <Box key={`pv-seg-${i}`} flexDirection="column" marginBottom={1}>
+                      {g.title ? (
+                        <Box key={`pv-seg-head-${i}`} flexDirection="row" alignItems="center">
+                          <Svg key={`pv-seg-icon-${i}`} source={rowSvg(0, null, nodeIcon(node, false, false), mutedInk)} alt={`file ${g.title}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                          <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{g.title}</Text></Box>
+                          {counts[0] ? <Text color={dc(addColor)} tabular>{` +${counts[0]}`}</Text> : null}
+                          {counts[1] ? <Text color={dc(delColor)} tabular>{` -${counts[1]}`}</Text> : null}
+                          <Box width={2} flexShrink={0} />
+                        </Box>
+                      ) : null}
+                      {g.source ? <Code key={`pv-seg-code-${i}`} source={g.source} path={g.title || t.preview} format="diff" wrap="truncate-end" /> : null}
+                    </Box>
+                  )
+                })}
+              </Box>
+            ) : directPreview(elements, win, t.preview, markdown, theme.accent)}
+            <Box key="pv-hotkeys" height={0} overflow="hidden" flexDirection="row">
+              {acts.filter(a => a.key).map(a => <Button key={`pv-hk-${a.key}`} plain hotkey={a.key} label={a.key} onPress={() => previewActs.get(a.id)?.()} />)}
+            </Box>
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">
@@ -2227,6 +2454,13 @@ export const register: Register = (on, options) => {
       )
     }
     const now = await $.clock.now()
+    if (t.top) hintRoot = ''
+    else if (showHints && hintRoot !== t.root) {
+      hintRoot = t.root
+      hintUntil = now + HINT_MS
+      $.clock.after(HINT_MS, () => void $.ui.invalidate('ui.render'))
+    }
+    const hintOn = now < hintUntil
     const live = (await activities($)).filter(a => now - a.at < (a.state === 'running' ? RUNNING_MAX_MS : ACTIVITY_TTL_MS))
     const latest = [...live].reverse().find(a => a.state === 'running') ?? live[live.length - 1]
     const bright = new Set(t.flashOn ? t.flash : [])
@@ -2263,6 +2497,7 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
+    if (t.column === 'date') wantTimes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'loc') {
       const seen = [...pinned, ...shown].map(r => r.node)
@@ -2280,14 +2515,14 @@ export const register: Register = (on, options) => {
     }
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
-      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection' }] : []),
-      { id: 'up', label: unicode ? '△' : '\u{ebff}', dim: true, hint: 'parent folder' },
-      { id: 'cwd', label: unicode ? '◎' : '\u{eb06}', dim: !follow, hint: 'follow the cwd' },
-      { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: true, hint: 'reload tree and git' },
-      { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{f0b95}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files' },
-      { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates' },
-      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all' },
-      ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : splitAt === 'top' ? '\u{ebf6}' : '\u{ec01}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview' }]),
+      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
+      { id: 'up', label: unicode ? '△' : '\u{f19f0}', dim: true, hint: 'parent folder', icon: 'folder-up' as const },
+      { id: 'cwd', label: unicode ? '◎' : '\u{ebf8}', dim: !follow, hint: 'Go to cwd', icon: 'crosshair' as const },
+      { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
+      { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
+      { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
+      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
+      ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : splitAt === 'top' ? '\u{ebf6}' : '\u{ebf2}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
     const wordWidth = wordButtons.reduce((w, b) => w + b.label.length + 1, 1)
@@ -2295,19 +2530,10 @@ export const register: Register = (on, options) => {
     const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
 
-    const rowSpec = (r: (typeof rows)[number]): RowSpec => {
-      const n = r.node
-      const own = t.git[n.id]
-      const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
-      const isIgnored = !status && underAny(n.id, ignored, t.root)
-      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (gitColors[status] ?? theme.muted) : undefined
-      const isBright = bright.has(n.id)
-      const isDim = !isBright && dimmed.has(n.id)
-      const tone = t.flashTones[n.id] ?? 'orange'
-      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
-      const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
+    const sizePad = desk ? '\u2007' : ' '
+    const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
       const loc = t.diff[n.id]
-      const meta = t.column === 'loc'
+      const metric = t.column === 'loc'
         ? n.kind === 'dir'
           ? locCache.has(n.id)
             ? (locCache.get(n.id) ?? 0) > 0 ? formatLoc(locCache.get(n.id) ?? 0) : ''
@@ -2320,23 +2546,59 @@ export const register: Register = (on, options) => {
         : t.column === 'size'
         ? n.kind === 'dir'
           ? n.id in t.dirSizes
-            ? formatSize(t.dirSizes[n.id] ?? -1)
+            ? humanSize(t.dirSizes[n.id] ?? -1, sizePad)
             : '…'
           : n.kind === 'file' || (n.kind === 'link' && n.size > 0)
-            ? formatSize(n.size)
+            ? humanSize(n.size, sizePad)
             : ''
-        : loc
-          ? ''
-          : n.kind === 'file'
-            ? showAge
-              ? age(n.mtime, now)
-              : stamp(n.mtime)
-            : ''
-      const locText = loc ? `${loc[0] ? ` +${loc[0]}` : ''}${loc[1] ? ` -${loc[1]}` : ''}` : ''
-      const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
-      const badge = dirCounts.length ? '' : status ? ` ${status}` : isIgnored ? (unicode ? ' ⊘' : ' \u{f05e}') : '  '
-      const countsText = dirCounts.map(c => c.t).join('')
-      const cols = Math.max(4, width - r.depth * 2 - 6 - (meta ? meta.length + 1 : 0) - locText.length - badge.length - countsText.length)
+        : n.kind === 'file' || n.kind === 'dir'
+          ? (when => (when ? (showAge ? age(when, now) : stamp(when)) : ''))(n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime)
+          : ''
+      const counts = n.kind === 'dir' ? t.counts[n.id] : undefined
+      const cells: Partial<Record<Col, Seg>> = {}
+      if (loc && loc[0] > 0) cells['+'] = { t: `+${loc[0]}`, c: addColor }
+      if (loc && loc[1] > 0) cells['-'] = { t: `-${loc[1]}`, c: delColor }
+      if (counts && counts[0] > 0) cells['?'] = { t: `?:${counts[0]}`, c: gitColors['?'] ?? addColor }
+      if (counts && counts[1] > 0) cells.M = { t: `M:${counts[1]}`, c: gitColors.M ?? 'ansi256(3)' }
+      if (counts && counts[2] > 0) cells.D = { t: `D:${counts[2]}`, c: theme.urgent }
+      if (metric) cells.metric = { t: metric, c: theme.muted }
+      return cells
+    }
+    const tailRows = desk ? shown.slice(0, DESK_ROWS) : [...pinned, ...shown]
+    const allCells = tailRows.map(r => cellsOf(r.node))
+    const branchCells: Partial<Record<Col, Seg>> = {}
+    if (totals[0] > 0) branchCells['+'] = { t: `+${totals[0]}`, c: addColor }
+    if (totals[1] > 0) branchCells['-'] = { t: `-${totals[1]}`, c: delColor }
+    const rootC = t.top ? t.counts[t.root] : undefined
+    if (rootC && rootC[0] > 0) branchCells['?'] = { t: `?:${rootC[0]}`, c: gitColors['?'] ?? addColor }
+    if (rootC && rootC[1] > 0) branchCells.M = { t: `M:${rootC[1]}`, c: gitColors.M ?? 'ansi256(3)' }
+    if (rootC && rootC[2] > 0) branchCells.D = { t: `D:${rootC[2]}`, c: theme.urgent }
+    const widths: Partial<Record<Col, number>> = {}
+    for (const cells of desk ? [...allCells, branchCells] : allCells) for (const c of COLS) {
+      const cell = cells[c]
+      if (cell) widths[c] = Math.max(widths[c] ?? 0, [...cell.t].length)
+    }
+    const maxDepth = tailRows.reduce((m, r) => Math.max(m, r.depth), 0)
+    const tailSum = () => COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
+    if (width - 6 - maxDepth * 2 - tailSum() - 2 < NAME_MIN) delete widths.metric
+    if (width - 6 - maxDepth * 2 - tailSum() - 2 < NAME_MIN) for (const c of GIT_COLS) delete widths[c]
+    const tailCells = tailSum()
+    const rowParts = (r: (typeof rows)[number]) => {
+      const n = r.node
+      const own = t.git[n.id]
+      const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
+      const isIgnored = !status && underAny(n.id, ignored, t.root)
+      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (gitColors[status] ?? theme.muted) : undefined
+      const isBright = bright.has(n.id)
+      const isDim = !isBright && dimmed.has(n.id)
+      const tone = t.flashTones[n.id] ?? 'orange'
+      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
+      const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
+      const cells = cellsOf(n)
+      if (cells.metric && gitColor && !isIgnored) cells.metric = { ...cells.metric, c: gitColor }
+      const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
+      const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? (unicode ? ' ⊘' : ' \u{f05e}') : '  '
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
@@ -2348,13 +2610,46 @@ export const register: Register = (on, options) => {
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
         lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
       ]
-      const right: Seg[] = []
-      if (meta) right.push({ t: ` ${meta}`, c: theme.muted })
-      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, c: addColor })
-      if (loc && loc[1] > 0) right.push({ t: ` -${loc[1]}`, c: delColor })
-      right.push(...dirCounts)
-      if (badge) right.push({ t: badge, c: status ? gitColor : theme.muted, b: true })
-      return { id: n.id, left: clean(left), right: clean(right) }
+      const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
+        const cell = cells[c]
+        const pad = ' ' + (cell?.t ?? '').padStart(widths[c] ?? 0)
+        return cell ? { t: pad, c: cell.c } : { t: pad }
+      })
+      right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo }
+    }
+    const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
+    const tailCols = (cells: Partial<Record<Col, Seg>>, key: string, only?: readonly Col[]) => COLS.filter(c => widths[c]).map(c => {
+      const seg = only && !only.includes(c) ? undefined : cells[c]
+      return (
+        <Box key={`${key}-${c}`} width={(widths[c] ?? 0) + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+          {seg ? <Text {...tint(seg.c)} tabular>{seg.t}</Text> : null}
+        </Box>
+      )
+    })
+    const deskRow = (p: ReturnType<typeof rowParts>) => {
+      const r = p.r
+      const n = p.n
+      const icon = nodeIcon(n, r.open, p.isRepo)
+      const tone = tones[p.tone]
+      const iconInk = p.lit ? (p.isDim ? (tone?.dim[2] ?? accentInk) : (tone?.solid ?? accentInk)) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
+      const strike = p.status === 'D' && n.kind !== 'dir'
+      const name = p.lit
+        ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, dim: p.isDim, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
+        : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
+      return (
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
+          {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+          <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
+          {tailCols(p.cells, `tail:${n.id}`)}
+          <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
+            {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
+          </Box>
+          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+            <Client key={`hit:${n.id}`} module="./hit.tsx" props={{ id: n.id } satisfies HitProps} width="100%" height="100%" />
+          </Box>
+        </Box>
+      )
     }
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
@@ -2369,6 +2664,21 @@ export const register: Register = (on, options) => {
       const cut = specs.findIndex(r => (size += JSON.stringify(r).length + 1) > ROWS_BUDGET)
       if (cut >= 0) specs.splice(cut, specs.length - cut, note(`  … ${specs.length - cut} more rows, collapse folders or use search`))
     }
+    const deskParts: ReturnType<typeof rowParts>[] = []
+    if (desk) {
+      let size = 0
+      for (const [i, r] of shown.entries()) {
+        size += r.node.name.length + DESK_ROW_CHARS
+        if (size > ROWS_BUDGET || i >= DESK_ROWS) break
+        deskParts.push(rowParts(r))
+      }
+    }
+    const deskTree = () => {
+      const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
+      for (const p of deskParts) out.push(deskRow(p))
+      if (deskParts.length < shown.length) out.push(<Text key="more" {...mutedText}>{`  … ${shown.length - deskParts.length} more rows, collapse folders or use search`}</Text>)
+      return <Box key="tree" flexDirection="column">{out}</Box>
+    }
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
       !nativeScroll && rows.length > shown.length + pinned.length
@@ -2382,9 +2692,11 @@ export const register: Register = (on, options) => {
       const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
       const label = b.head
       return (
-        <Box flexDirection="row" height={1} overflow="hidden">
-          <Box flexDirection="row" flexShrink={0}>
-            <Text color={isFlash ? (tones[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
+        <Box flexDirection="row" height={desk ? undefined : 1} overflow="hidden" alignItems={desk ? 'center' : undefined}>
+          <Box flexDirection="row" flexShrink={0} alignItems={desk ? 'center' : undefined}>
+            {desk && Svg
+              ? <Svg key="branch-icon" source={rowSvg(0, null, 'git-branch', isFlash ? (tones[tone]?.solid ?? accentInk) : accentInk)} alt="git branch" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+              : <Text color={isFlash ? (tones[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>}
             <Text bold color={isFlash ? (tones[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
               {label}
             </Text>
@@ -2400,13 +2712,16 @@ export const register: Register = (on, options) => {
           )}
           <Box flexGrow={1} />
           <Box flexDirection="row" flexShrink={0}>
-            {totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
-            {totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
-            {rootCounts.map(c => (
+            {desk && rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 ? <Text {...mutedText}>clean</Text> : null}
+            {desk ? tailCols(branchCells, 'branch', GIT_COLS) : null}
+            {!desk && totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
+            {!desk && totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
+            {desk ? null : rootCounts.map(c => (
               <Text color={c.c}>{c.t}</Text>
             ))}
-            {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text {...mutedText}> clean</Text>}
+            {!desk && rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text {...mutedText}> clean</Text>}
           </Box>
+          {desk ? <Box key="branch-tail" width={2} flexShrink={0} /> : null}
         </Box>
       )
     }
@@ -2417,8 +2732,11 @@ export const register: Register = (on, options) => {
       const icon = unicode ? a.plain : a.nerd
       const hash = a.state === 'done' && a.kind === 'git commit' ? a.detail.split(' ')[0] ?? '' : ''
       return (
-        <Box flexDirection="row" marginLeft={2}>
-          <Text color={color}>{icon + ' '}</Text>
+        <Box flexDirection="row" marginLeft={2} alignItems={desk ? 'center' : undefined}>
+          {desk && Svg
+            ? <Svg key={`chip-${a.id}`} source={iconSvg(activityIcon(a.plain), color, 14)} alt={a.kind} width={14} height={14} />
+            : <Text color={color}>{icon + ' '}</Text>}
+          {desk ? <Text> </Text> : null}
           <Text bold={a.state === 'running'} color={color}>
             {a.state === 'running' ? `${a.label}…` : a.label}
           </Text>
@@ -2628,13 +2946,15 @@ export const register: Register = (on, options) => {
       { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
+      { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
       ...(shortcutsSetting === 'auto' ? [{ key: '?', label: 'hide', act: () => undefined }] : []),
     ]
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'p', 'y']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'p', 'y', 'c', 'r']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
@@ -2652,44 +2972,92 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
-        <Box flexDirection="row">
-          <Box flexDirection="row" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? rowColors.activeBg || undefined : undefined}>
-            <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
-              <Text color={theme.accent}>{`${rootGlyph} `}</Text>
-              <Text bold color={theme.accent}>{header}</Text>
-            </Button>
+        {desk && Svg ? (
+          <Box key="head" flexDirection="row" alignItems="center">
+            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
+              <Svg key="root-icon" source={rowSvg(0, 'open', t.top === t.root ? 'folder-git' : 'folder-open', accentInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+                <Text bold>{header}</Text>
+              </Button>
+            </Box>
+            <Box flexGrow={1} />
+            {hint(buttons, header.length + 4)}
+            <Box flexDirection="row" alignItems="center" flexShrink={0}>
+              {buttons.map(button)}
+            </Box>
           </Box>
-          <Box flexGrow={1} />
-          {hint(buttons, header.length + 2)}
-          <Box flexDirection="row" gap={1}>
-            {buttons.map(button)}
-            <Text> </Text>
+        ) : (
+          <Box flexDirection="row">
+            <Box flexDirection="row" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? rowColors.activeBg || undefined : undefined}>
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+                <Text color={theme.accent}>{`${rootGlyph} `}</Text>
+                <Text bold color={theme.accent}>{header}</Text>
+              </Button>
+            </Box>
+            <Box flexGrow={1} />
+            {hint(buttons, header.length + 2)}
+            <Box flexDirection="row" gap={1}>
+              {buttons.map(button)}
+              <Text> </Text>
+            </Box>
           </Box>
-        </Box>
+        )}
         {splitAt === 'top' ? split : null}
         {branchRow()}
-        {!t.top && showHints && <Text {...mutedText}>{unicode ? '± ' : '\u{e702} '}no git repo, git status starts after git init</Text>}
-        {searchGap ? <Text key="gap-above"> </Text> : null}
-        <Box flexDirection="row">
-          {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-          <Box flexGrow={1}>
-            <Input
-              key="q"
-              placeholder="search"
-              submitLabel="jump"
-              value={t.query}
-              onInput={(v: string) => void search($, v)}
-              onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
-            />
+        {!t.top && showHints && (!hintOn ? (desk && Svg ? <Svg key="git-hint" source={rowSvg(0, null, null, mutedInk)} alt="git status" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text key="git-hint">{' '}</Text>) : desk && Svg ? (
+          <Box key="git-hint" flexDirection="row" alignItems="center">
+            <Svg key="git-hint-icon" source={rowSvg(0, null, 'git-branch', mutedInk)} alt="no git repo" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+            <Text {...mutedText}>No git repo</Text>
           </Box>
-          {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
-        </Box>
+        ) : <Text key="git-hint" {...mutedText}>{unicode ? '± ' : '\u{ea68} '}No git repo</Text>)}
+        {searchGap ? <Text key="gap-above"> </Text> : null}
+        {desk && Svg ? (
+          <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
+            <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
+            <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column">
+              <Input
+                key="q"
+                placeholder="Search files..."
+                value={t.query}
+                onInput={(v: string) => void search($, v)}
+                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+              />
+            </Box>
+            {t.query ? <Button key="clear" plain dimColor label="×" onPress={() => void search($, '')} /> : null}
+            <Box flexShrink={0} flexDirection="row" gap={2} marginLeft={1} marginRight={1}>
+              {toggle('case', 'Aa', Boolean(t.searchCase), false)}
+              {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+            </Box>
+          </Box>
+        ) : (
+          <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
+            {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
+            <Box flexGrow={1}>
+              <Input
+                key="q"
+                placeholder="search"
+                submitLabel="go"
+                value={t.query}
+                onInput={(v: string) => void search($, v)}
+                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+              />
+            </Box>
+            {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
+            <Box flexShrink={0} flexDirection="row" gap={1} marginLeft={1}>
+              {toggle('case', 'Aa', Boolean(t.searchCase), false)}
+              {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+              <Text> </Text>
+            </Box>
+          </Box>
+        )}
         {searchGap ? <Text key="gap-below"> </Text> : null}
-        <Client
-          key="rows"
-          module="./rows.tsx"
-          props={{ rows: specs, active: t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
-        />
+        {desk ? deskTree() : (
+          <Client
+            key="rows"
+            module="./rows.tsx"
+            props={{ rows: specs, active: t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+          />
+        )}
         <Box flexGrow={1} />
         {splitAt === 'bottom' ? split : null}
         {(footer || latest || shortcutsShown || shortcutsSetting === 'auto') && (
@@ -2705,9 +3073,16 @@ export const register: Register = (on, options) => {
                   : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={k.key} label={k.label} onPress={k.act} />)}
               </Box>
             ) : shortcutsSetting === 'auto' ? (
-              <Box flexShrink={0}>
-                <Button key="nav-help" plain dimColor label="?: shortcuts" onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>: shortcuts</Button>
-              </Box>
+              desk && Svg ? (
+                <Box key="keys" flexShrink={0} flexDirection="row" alignItems="center">
+                  <Svg key="keys-icon" source={rowSvg(0, null, 'keyboard', mutedInk)} alt="keyboard shortcuts" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                  <Button key="nav-help" plain dimColor hover={{ dimColor: false }} label="Shortcuts" onPress={() => { toggleShortcuts($); park() }} />
+                </Box>
+              ) : (
+                <Box flexShrink={0}>
+                  <Button key="nav-help" plain dimColor label="?: shortcuts" onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>: shortcuts</Button>
+                </Box>
+              )
             ) : null}
             <Box flexGrow={1} />
             {latest && chip(latest)}

@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.5.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -53,18 +53,18 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Features
 
-- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders
+- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
 - The selected file goes to Claude as context, and `@path` in a prompt reveals that file
-- Right column cycles date, size and lines of code from the header button
+- Right column cycles date, size and lines of code from the header button, with git counts in their own columns beside it; a folder's date is its newest file
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
 - `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name
 - Open files in their default app, an editor in a tmux or herdr pane, or any command
 - Changes made outside Claude show at once on Linux through `inotifywait`
-- Draws in the terminal's own palette, with Nerd Font, plain or text glyphs
+- Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
 
   <img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
 
@@ -100,6 +100,7 @@ j / k:        move down / up; k on the first row selects the root
 h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
+c / r:        search: match case / regular expression (Aa / .* in the search row)
 p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
