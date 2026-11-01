@@ -7,7 +7,7 @@ import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
-import { age, ancestorsOf, badPattern, formatSize, replaceChildren, toNodes } from '../hooks/tree'
+import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
   os: 'darwin' | 'linux' | 'win32'
@@ -2785,7 +2785,7 @@ test('terminal regression: Nerd Font glyphs are the agreed codepoints, plain gly
   expect(src?.right.map(s => s.t)).toEqual([' +3', ' -1', ' M:1', ' '.repeat(17), '  '])
   const readme = rows.find(r => r.id === `${root}/README.md`)
   expect(readme?.left.map(s => s.t)).toEqual(['', '  ', '\u{f0354} ', 'README.md'])
-  expect(readme?.right.map(s => s.t)).toEqual(['   ', '   ', '    ', ' 2023-11-14 23:13', '  '])
+  expect(readme?.right.map(s => s.t)).toEqual(['   ', '   ', '    ', ` ${stamp(1_700_000_000_000)}`, '  '])
   await ui.unmount()
 })
 
@@ -3078,8 +3078,8 @@ test('folder dates come from one walk per folder that also dates every folder be
   expect(walks()).toEqual([`${root}/src`])
   const date = (id: string) => treeRows(tree).rows.find(r => r.id === id)?.right.map(x => x.t).join('').trim()
   const tree = await ui.drawn()
-  expect(date(`${root}/src/lib`)).toBe('2023-11-14 23:18')
-  expect(date(`${root}/src`)).toContain('2023-11-14 23:23')
+  expect(date(`${root}/src/lib`)).toBe(stamp(1_700_000_300_000))
+  expect(date(`${root}/src`)).toContain(stamp(1_700_000_600_000))
   await ui.unmount()
 })
 
@@ -3269,7 +3269,7 @@ test('a folder date scan cut short by a write is redone, so the date still appea
   await clock.advance(3000)
   await clock.settle()
   const src = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src`)
-  expect(src?.right.map(x => x.t).join('')).toContain('2023-11-14 23:23')
+  expect(src?.right.map(x => x.t).join('')).toContain(stamp(1_700_000_600_000))
   await ui.unmount()
 })
 
