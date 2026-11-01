@@ -13,6 +13,8 @@ export const ICONS = {
   'folder-open': 'm6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2',
   'folder-up': `${FOLDER}M12 10v6M9 13l3-3 3 3`,
   'root-folder': `${FOLDER}M12 11a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5`,
+  'folder-up-line': `${FOLDER}M12 17v-6M9 13.5l3-3 3 3`,
+  fold: 'M12 2v6M9 5l3 3 3-3M12 22v-6M9 19l3-3 3 3M4 12h16',
   'folder-git': `${FOLDER}M12 11a2 2 0 1 0 0 4 2 2 0 1 0 0-4M8 13h2M14 13h2`,
   file: FILE,
   'file-text': `${FILE}M8 13h8M8 17h5`,

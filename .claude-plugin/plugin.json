@@ -90,6 +90,16 @@
         "off"
       ]
     },
+    "collapse": {
+      "type": "string",
+      "title": "Auto-collapse",
+      "description": "on: folders the tree opened to show Claude's reads and writes close again once that activity fades, unless you opened or moved into them. off: they stay open. The toolbar toggle and the a key flip it.",
+      "default": "off",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "headers": {
       "type": "string",
       "title": "Column headers",

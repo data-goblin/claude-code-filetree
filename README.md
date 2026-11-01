@@ -102,6 +102,7 @@ o, Enter:     open a file or toggle a folder
 s:            focus search
 S:            search inside the folder under the cursor (Backspace on an empty query or × drops it)
 c / r:        search: match case / regular expression (Aa / .* in the search row)
+a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
 p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
@@ -129,6 +130,7 @@ Right column:     date | age | size | loc
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off
+Auto-collapse:    off | on
 Shortcut row:     auto | always | off
 Open with:        empty | editor | preview | a command with {path} and {dir}
 Binary files:     Open with | default app

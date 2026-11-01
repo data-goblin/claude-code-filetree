@@ -101,7 +101,7 @@ let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
-const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', split: 'split', unselect: 'clear' }
+const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
 let openWithSetting = ''
 let binariesInDefaultApp = false
 let editWithSetting = ''
@@ -170,6 +170,8 @@ let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
+let autoCollapseDefault = false
+const autoOpened = new Map<string, { until: number; cursor: string }>()
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
 let shortcutsTimer = 0
@@ -1145,10 +1147,46 @@ async function touched($: EngineInterface, paths: string[], tone: string, show: 
 async function reveal($: EngineInterface, paths: string[]): Promise<void> {
   if (await followCwd($)) return
   await revealPaths($, paths)
+  const now = await $.clock.now()
+  const was = new Set((await get($)).expanded)
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of paths) for (const a of ancestorsOf(p, cur.root)) open.add(a)
     return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
+  })
+  const t = await get($)
+  const fresh = t.expanded.filter(d => !was.has(d) || autoOpened.has(d))
+  if (!fresh.length) return
+  for (const d of fresh) autoOpened.set(d, { until: now + ACTIVITY_TTL_MS, cursor: t.cursor })
+  $.clock.after(ACTIVITY_TTL_MS + 50, () => void autoCollapse($))
+}
+
+function autoCollapseOn(t: FileTree): boolean {
+  return t.autoCollapse ?? autoCollapseDefault
+}
+
+async function autoCollapse($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  const t = await get($)
+  if (!autoCollapseOn(t)) {
+    autoOpened.clear()
+    return
+  }
+  const shut: string[] = []
+  for (const [dir, mark] of autoOpened) {
+    if (mark.until > now) continue
+    autoOpened.delete(dir)
+    if (t.cursor !== mark.cursor && (t.cursor === dir || inside(dir, t.cursor))) continue
+    shut.push(dir)
+  }
+  if (!shut.length) return
+  const gone = new Set(shut)
+  await patch($, cur => {
+    const keep = cur.expanded.filter(d => !gone.has(d))
+    const hidden = cur.cursor && shut.some(d => inside(d, cur.cursor) && cur.cursor !== d)
+    const top = shut.filter(d => !shut.some(o => o !== d && inside(o, d)))
+    const to = hidden ? (top.find(d => inside(d, cur.cursor)) ?? cur.cursor) : cur.cursor
+    return { expanded: keep, cursor: to, selected: hidden ? to : cur.selected }
   })
 }
 
@@ -1880,6 +1918,7 @@ async function quickLook($: EngineInterface, path: string): Promise<void> {
 }
 
 async function toggle($: EngineInterface, n: FileNode): Promise<void> {
+  autoOpened.delete(n.id)
   if (n.kind === 'dir' && !(await get($)).expanded.includes(n.id)) await loadDirs($, [n.id])
   await patch($, t => {
     const open = new Set(t.expanded)
@@ -1969,6 +2008,7 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
     $.clock.after(50, () => focusPane($, t.root, 'q'))
   } else if (key === 's') $.clock.after(50, () => focusPane($, t.root, 'q'))
   else if (key === 'backspace' && t.searchScope && !t.query) await scopeSearch($, '')
+  else if (key === 'a') await pressHeader($, 'autocollapse')
   else if (key === 'n') await sortBy($, 'name')
   else if (key === 'g') await sortBy($, 'git')
   else if (key === 'm') await sortBy($, 'metric')
@@ -2022,6 +2062,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (id === 'autocollapse') await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
   else if (previewActs.has(id) && id !== 'external') previewActs.get(id)?.()
   else if (id === 'scope') await scopeSearch($, '')
   else if (id === 'sort-name') await sortBy($, 'name')
@@ -2053,6 +2094,7 @@ export const register: Register = (on, options) => {
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
   sortHeader = options?.headers !== 'off'
+  autoCollapseDefault = options?.collapse === 'on'
   shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
   shortcutsShown = shortcutsSetting === 'always'
   treemapSetting = options?.treemap === 'image' || options?.treemap === 'cells' || options?.treemap === 'off' ? options.treemap : 'auto'
@@ -2570,12 +2612,13 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
       ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
-      { id: 'up', label: unicode ? '↑' : '\u{eaa1}', dim: true, hint: 'parent folder', icon: 'arrow-up' as const },
+      { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'Go to cwd', icon: 'root-folder' as const },
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
+      { id: 'autocollapse', label: unicode ? '⊖' : '\u{eaf5}', dim: !autoCollapseOn(t), hint: "Collapse folders Claude opened when it's done", icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
@@ -3047,6 +3090,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       { key: 'd', label: 'diff', act: () => void navigate($, 'd') },
       { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
       { key: 'S', label: 'search here', act: () => void navigate($, 'S', false, e.surface) },
+      { key: 'a', label: 'auto-collapse', act: () => void navigate($, 'a', false, e.surface).then(park) },
       { key: 'n', label: 'sort name', act: () => void navigate($, 'n', false, e.surface).then(park) },
       { key: 'g', label: 'sort git', act: () => void navigate($, 'g', false, e.surface).then(park) },
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
@@ -3060,7 +3104,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'S', 'p', 'y', 'c', 'r', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'S', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4

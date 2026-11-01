@@ -2761,7 +2761,7 @@ test('terminal regression: Nerd Font glyphs are the agreed codepoints, plain gly
     const props = clientProps(tree, `button-${id}`)
     return has(props, 'label') ? props.label : undefined
   })
-  expect(labels).toEqual(['\u{eaa1}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'])
+  expect(labels).toEqual(['\u{f19f3}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'])
   const shown = JSON.stringify(tree)
   expect(shown).toContain('"\u{ea6d} "')
   expect(shown).toContain('"submitLabel":"go"')
@@ -2848,7 +2848,7 @@ test('outside a repo the git line says No git repo', { timeoutMs: 20_000 }, asyn
 })
 
 const GLYPH_SETS: [string, Record<string, string>, string, string[], string, string, string][] = [
-  ['nerd', { glyphs: 'nerd' }, 'ok', ['\u{eaa1}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'], '\u{ea6d} ', '\u{e5ff} ', '\u{f0354} '],
+  ['nerd', { glyphs: 'nerd' }, 'ok', ['\u{f19f3}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'], '\u{ea6d} ', '\u{e5ff} ', '\u{f0354} '],
   ['auto without a Nerd Font', {}, 'missing', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
   ['plain', { glyphs: 'plain' }, 'ok', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
   ['text', { glyphs: 'text' }, 'ok', ['up', 'cwd', 'sync', 'dots', 'size', 'fold', 'split'], '', '■ ', '∙ '],
