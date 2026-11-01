@@ -39,6 +39,7 @@ type World = {
   poster?: (argv: string[]) => string
   font?: string
   newest?: (dir: string) => string
+  findDelayMs?: number
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -107,7 +108,10 @@ function world(on: On, w: World, ran: Ran) {
     if (w.newest && argv[0] === 'sh' && (argv[2] ?? '').includes('awk -v d=')) return ok(w.newest(argv[4] ?? ''))
     if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
     if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
-    if (argv[0] === 'find' && w.find !== undefined) return ok(w.find)
+    if (argv[0] === 'find' && w.find !== undefined) {
+      if (w.findDelayMs) await new Promise(r => setTimeout(r, w.findDelayMs))
+      return ok(w.find)
+    }
     if (argv[0] === 'du') {
       const delay = w.duDelays?.shift()
       if (delay) await clock.sleep(delay)
@@ -3077,3 +3081,21 @@ test('regex search checks the pattern shape: nested or alternated repeats and ba
   for (const p of ['(foo|bar)\\.ts$', 'a+b', '[a-z]+\\d{2}', '(ab)+', '[(]+']) expect(badPattern(p, true)).toBe(false)
 })
 
+test('a slow index does not eat the regex time budget: the sole match at the end is still found', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/scratch'
+  const files = Array.from({ length: 100 }, (_, i) => `${root}/f${String(i).padStart(2, '0')}.txt`)
+  files[99] = `${root}/target.md`
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: files.map(f => [f.slice(root.length + 1), 'file'] as [string, 'file']) }, status: '', numstat: '', find: files.join('\0') + '\0', findDelayMs: 120 }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await clock.settle()
+  await ui.input({ key: 'q', text: 'targ.t\\.md$', kind: 'change' })
+  await clock.settle()
+  await new Promise(r => setTimeout(r, 200))
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`${root}/target.md`])
+  await ui.unmount()
+})

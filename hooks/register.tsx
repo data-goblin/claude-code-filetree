@@ -1313,13 +1313,15 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!(await get($)).query.trim()) searchIndex = null
   await patch($, () => ({ query }))
   const t = await get($)
+  if (!query.trim()) return []
+  const index = await indexPaths($, t)
   const match = matcher(query, Boolean(t.searchCase), Boolean(t.searchRegex))
   if (!match) return []
-  const index = await indexPaths($, t)
   const hits: string[] = []
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
   for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
+  if (match.partial) void $.ui.toast(`filetree: regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
   await revealPaths($, hits)
   const shown = await get($)
   const ids = new Set(shown.nodes.map(n => n.id))
