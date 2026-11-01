@@ -191,6 +191,7 @@ let sizeActive = 0
 let timeActive = 0
 let timeQueue: [string, number][] = []
 const timing = new Set<string>()
+const timeFailed = new Set<string>()
 const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
 type Column = FileTree['column']
@@ -367,9 +368,9 @@ async function watched($: EngineInterface): Promise<void> {
   const t = await get($)
   const open = new Set([t.root, ...openDirs(t)])
   const dirs = [...new Set(paths.map(p => dirname(p)).filter(d => open.has(d)))]
+  await staleSizes($, paths)
   if (!dirs.length) return
   markStale($, paths)
-  await staleSizes($, paths)
   await loadDirs($, dirs)
   if (t.top) await refreshGit($)
 }
@@ -453,6 +454,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   blink = null
   clearAutoCollapse()
   dirTimes.clear()
+  timeFailed.clear()
   timeQueue = []
   lastRoot = root
   hintRoot = ''
@@ -664,54 +666,68 @@ function wantLoc($: EngineInterface, dirs: string[], deep: boolean): void {
   pumpLoc($)
 }
 
-const NEWEST_SH = 'd=$1; s=$2; shift 2; find "$d" "$@" -type f -exec stat $s {} + 2>/dev/null | sort -n | tail -n 1'
+const NEWEST_SH = 'd=$1; s=$2; shift 2; find "$d" "$@" -type f -exec stat "$s" {} + 2>/dev/null | awk -v d="$d" \'{ t = $1 + 0; p = substr($0, index($0, " ") + 1); while (1) { i = match(p, /\\/[^\\/]*$/); if (!i) break; p = substr(p, 1, i - 1); if (length(p) < length(d)) break; if (t > m[p]) m[p] = t; if (p == d) break } } END { for (k in m) print m[k], k }\''
 
-async function newestIn($: EngineInterface, dir: string, prune: string[]): Promise<number> {
+async function newestUnder($: EngineInterface, dir: string, prune: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>([[dir, 0]])
+  const fold = (file: string, ms: number) => {
+    for (let d = dirname(file); d.length >= dir.length; d = dirname(d)) {
+      if ((out.get(d) ?? 0) < ms) out.set(d, ms)
+      if (d === dir) break
+    }
+  }
   const os = await osName($)
   if (os === 'win32') {
-    let newest = 0
     let seen = 0
     let level = [dir]
     while (level.length) {
       const next: string[] = []
       for (const d of level) {
-        const entries = await $.fs.list(d).catch(() => [])
+        const entries = await $.fs.list(d)
+        out.set(d, out.get(d) ?? 0)
         for (const e of entries) {
-          if (++seen > SIZE_WALK_LIMIT) return newest
+          if (++seen > SIZE_WALK_LIMIT) throw new Error('walk limit')
           if (e.kind === 'dir' && !e.isLink && !PRUNE.includes(e.name)) next.push(join(d, e.name))
-          else if (e.kind === 'file') newest = Math.max(newest, e.mtimeMs)
+          else if (e.kind === 'file') fold(join(d, e.name), e.mtimeMs)
         }
       }
       level = next
     }
-    return newest
+    return out
   }
   const shallow = PRUNE.includes(dir.split('/').pop() ?? '')
-  const run = await $.process.run(['sh', '-c', NEWEST_SH, 'sh', dir, os === 'darwin' ? '-f%m' : '-c%Y', ...(shallow ? ['-maxdepth', '1'] : prune)], { timeoutMs: SIZE_TIMEOUT_MS })
-  const secs = Number(run.stdout.trim().split(/\s/)[0] || NaN)
-  return Number.isFinite(secs) ? secs * 1000 : 0
+  const run = await $.process.run(['sh', '-c', NEWEST_SH, 'sh', dir, os === 'darwin' ? '-f%m %N' : '-c%Y %n', ...(shallow ? ['-maxdepth', '1'] : prune)], { timeoutMs: SIZE_TIMEOUT_MS })
+  if (run.exitCode !== 0) throw new Error(run.stderr || 'find failed')
+  for (const line of run.stdout.split('\n')) {
+    const at = line.indexOf(' ')
+    const secs = Number(line.slice(0, at))
+    if (at > 0 && Number.isFinite(secs)) out.set(line.slice(at + 1), secs * 1000)
+  }
+  return out
 }
 
 function pumpTimes($: EngineInterface): void {
   while (timeActive < SIZE_JOBS && timeQueue.length) {
-    const [dir, stamp] = timeQueue.shift() ?? ['', 0]
+    const [dir] = timeQueue.shift() ?? ['', 0]
+    if (dirTimes.has(dir) || [...timing].some(w => inside(w, dir))) continue
     const epoch = sizeEpoch
     timeActive += 1
     timing.add(dir)
     void (async () => {
       const t = await get($)
-      const newest = await newestIn($, dir, pruneArgs(t.root))
+      const found = await newestUnder($, dir, pruneArgs(t.root))
       if (epoch !== sizeEpoch) return
-      dirTimes.set(dir, [stamp, newest])
+      for (const [d, ms] of found) dirTimes.set(d, [0, ms])
       void $.ui.invalidate('ui.render')
     })()
       .catch(() => {
-        if (epoch === sizeEpoch) dirTimes.set(dir, [stamp, 0])
+        if (epoch !== sizeEpoch) return
+        timeFailed.add(dir)
+        void $.ui.invalidate('ui.render')
       })
       .finally(() => {
         timeActive -= 1
         timing.delete(dir)
-        if (epoch !== sizeEpoch) void $.ui.invalidate('ui.render')
         pumpTimes($)
       })
   }
@@ -719,10 +735,10 @@ function pumpTimes($: EngineInterface): void {
 
 function wantTimes($: EngineInterface, dirs: FileNode[]): void {
   for (const n of dirs) {
-    const known = dirTimes.get(n.id)
-    if ((known && known[0] === n.mtime) || timing.has(n.id) || timeQueue.some(([d]) => d === n.id)) continue
-    timeQueue.push([n.id, n.mtime])
+    if (dirTimes.has(n.id) || timeFailed.has(n.id) || timing.has(n.id) || timeQueue.some(([d]) => d === n.id)) continue
+    timeQueue.push([n.id, 0])
   }
+  timeQueue.sort(([a], [b]) => a.length - b.length)
   pumpTimes($)
 }
 
@@ -740,11 +756,16 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     locCache.clear()
     locListed.clear()
     dirTimes.clear()
+    timeFailed.clear()
   }
   for (const p of paths ?? []) {
     locCache.delete(p)
     locListed.delete(p)
-    for (let d = p, prev = ''; d !== prev; prev = d, d = dirname(d)) dirTimes.delete(d)
+    for (let d = p, prev = ''; d !== prev; prev = d, d = dirname(d)) {
+      dirTimes.delete(d)
+      timeFailed.delete(d)
+    }
+    for (const d of [...dirTimes.keys()]) if (inside(p, d)) dirTimes.delete(d)
     for (let d = dirname(p), prev = p; d !== prev; prev = d, d = dirname(d)) {
       locCache.delete(d)
       locListed.delete(d)
@@ -2735,7 +2756,8 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
-    if (t.column === 'date') wantTimes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir').map(r => r.node))
+    const drawn = nativeScroll ? shown.slice(0, DESK_ROWS) : shown
+    if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'loc') {
       const seen = [...pinned, ...shown].map(r => r.node)

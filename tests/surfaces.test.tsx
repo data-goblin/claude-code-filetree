@@ -38,6 +38,7 @@ type World = {
   diffTree?: string[]
   poster?: (argv: string[]) => string
   font?: string
+  newest?: (dir: string) => string
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -103,6 +104,7 @@ function world(on: On, w: World, ran: Ran) {
     if (exit) return { value: { exitCode: exit[0], stdout: '', stderr: exit[1], isStdoutTruncated: false, isStderrTruncated: false } }
     const out = w.stdout?.[argv.slice(0, 3).join(' ')]
     if (out !== undefined) return ok(out)
+    if (w.newest && argv[0] === 'sh' && (argv[2] ?? '').includes('awk -v d=')) return ok(w.newest(argv[4] ?? ''))
     if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
     if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
     if (argv[0] === 'find' && w.find !== undefined) return ok(w.find)
@@ -3044,5 +3046,28 @@ test('m sorts each level by the value column once every value on that level is k
   await clock.settle()
   const ids = treeRows(await ui.drawn()).rows.map(r => r.id.slice(root.length + 1))
   expect(ids).toEqual(['src', 'logo.png', '.gitignore', 'README.md'])
+  await ui.unmount()
+})
+
+test('folder dates come from one walk per folder that also dates every folder below it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    ...ICON_WORLD(root),
+    dirs: { [root]: [['src', 'dir'], ['README.md', 'file']], [`${root}/src`]: [['lib', 'dir'], ['a.ts', 'file']], [`${root}/src/lib`]: [['b.ts', 'file']] },
+    newest: dir => dir === `${root}/src` ? `${1_700_000_600} ${root}/src\n${1_700_000_300} ${root}/src/lib\n` : '',
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/src` }, { in: 'rows' })
+  await clock.settle()
+  const walks = () => ran.filter(a => a[0] === 'sh' && (a[2] ?? '').includes('awk -v d=')).map(a => a[4])
+  expect(walks()).toEqual([`${root}/src`])
+  const date = (id: string) => treeRows(tree).rows.find(r => r.id === id)?.right.map(x => x.t).join('').trim()
+  const tree = await ui.drawn()
+  expect(date(`${root}/src/lib`)).toBe('2023-11-14 23:18')
+  expect(date(`${root}/src`)).toContain('2023-11-14 23:23')
   await ui.unmount()
 })
