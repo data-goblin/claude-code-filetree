@@ -2048,9 +2048,12 @@ async function scrollPreview($: EngineInterface, by: number): Promise<void> {
 function diffCounts(source: string): [number, number] {
   let add = 0
   let del = 0
+  let inHunk = false
   for (const line of source.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---')) continue
-    if (line.startsWith('+')) add++
+    if (line.startsWith('diff --git ')) inHunk = false
+    else if (line.startsWith('@@')) inHunk = true
+    else if (!inHunk) continue
+    else if (line.startsWith('+')) add++
     else if (line.startsWith('-')) del++
   }
   return [add, del]
@@ -2656,14 +2659,17 @@ export const register: Register = (on, options) => {
       const rows: { kind: ' ' | '+' | '-' | '@'; text: string; old: number; new: number }[] = []
       let old = 0
       let cur = 0
+      let inHunk = false
       for (const line of source.split('\n')) {
         const head = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
         if (head) {
           old = Number(head[1])
           cur = Number(head[2])
+          inHunk = true
           rows.push({ kind: '@', text: line, old, new: cur })
           continue
         }
+        if (!inHunk) continue
         const kind = line[0]
         if (kind === '+') rows.push({ kind, text: line.slice(1), old: 0, new: cur++ })
         else if (kind === '-') rows.push({ kind, text: line.slice(1), old: old++, new: 0 })

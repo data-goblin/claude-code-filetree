@@ -3306,3 +3306,23 @@ test('desktop jump mode keeps a keyboard zone with no matches, so Backspace and 
   expect(shown).toContain('"hotkey":"z"')
   await ui.unmount()
 })
+
+test('desktop folder diff counts and draws ++x and --x content lines as added and removed, not as file headers', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.c', 'file']] }, status: '## main\0 M src/a.c\0', numstat: '1\t1\tsrc/a.c\0', files: { '/home/k/proj/src/a.c': 'int x;\n++counter;\n' }, patch: 'diff --git a/src/a.c b/src/a.c\nindex 1..2 100644\n--- a/src/a.c\n+++ b/src/a.c\n@@ -1,2 +1,2 @@\n int x;\n---counter;\n+++counter;\n' }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/src` }, { in: `hit:${root}/src` })
+  await clock.settle()
+  await ui.post({ key: 'd' }, { in: `hit:${root}/src` })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('"children":[" +1"]')
+  expect(shown).toContain('"children":[" -1"]')
+  expect(shown).toContain('"children":["++counter;"]')
+  expect(shown).toContain('"children":["--counter;"]')
+  expect(shown).toMatch(/"children":\["-"\][\s\S]*"children":\["--counter;"\][\s\S]*"children":\["\+"\][\s\S]*"children":\["\+\+counter;"\]/)
+  await ui.unmount()
+})
