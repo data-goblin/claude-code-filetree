@@ -3094,6 +3094,15 @@ test('regex search runs on a linear-time matcher: pathological patterns finish f
   expect(time('^a+a+a+a+a+a+a+a+$', 'a'.repeat(120) + '!')).toBeLessThan(50)
   expect(time('((a+))+$', 'a'.repeat(40) + '!')).toBeLessThan(50)
   for (const p of ['(foo|bar)+', '(a+)?', '[a-z]+\\d{2}', '(foo|bar)\\.ts$', '(?:x|y){2,4}']) expect(badPattern(p, true)).toBe(false)
+  for (const p of ['(((){1000}){1000}){1000}', '((a{0}){100}){100}', '(?:){50}', '((a{50}){50}){50}', 'a{101}', 'a{2,101}']) {
+    const began = performance.now()
+    const test = compileRegex(p, false)
+    test?.('a'.repeat(200))
+    expect(performance.now() - began).toBeLessThan(50)
+  }
+  for (const p of ['(((){1000}){1000}){1000}', '((a{50}){50}){50}', 'a{101}', 'a{2,101}']) expect(badPattern(p, true)).toBe(true)
+  expect(compileRegex('((a{0}){100}){100}b', false)?.('xb')).toBe(true)
+  expect(compileRegex('(?:){50}c', false)?.('c')).toBe(true)
   for (const p of ['(x)\\1', '(?=a)', '(?!a)', '(?<=a)b', '\\bword', 'a{2,1}', 'x'.repeat(201)]) expect(badPattern(p, true)).toBe(true)
 })
 

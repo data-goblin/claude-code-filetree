@@ -15,7 +15,8 @@ type Op =
   | { op: 'match' }
 
 export const MAX_PROGRAM = 2000
-const MAX_REPEAT = 1000
+const MAX_REPEAT = 100
+const MAX_WORK = 20000
 
 class Unsupported extends Error {}
 
@@ -159,7 +160,11 @@ function compile(node: Node): Op[] {
     prog.push(op)
     return prog.length - 1
   }
+  let work = 0
+  const empty = (n: Node): boolean => n.t === 'cat' ? n.a.every(empty) : n.t === 'alt' ? n.a.every(empty) : n.t === 'rep' ? n.max === 0 || empty(n.n) : false
   const gen = (n: Node): void => {
+    if (++work > MAX_WORK) throw new Unsupported('too complex')
+    if (n.t === 'rep' && (n.max === 0 || (empty(n.n) && n.n.t !== 'bol' && n.n.t !== 'eol'))) return
     if (n.t === 'char') emit({ op: 'char', test: n.test })
     else if (n.t === 'bol') emit({ op: 'bol' })
     else if (n.t === 'eol') emit({ op: 'eol' })
