@@ -66,6 +66,7 @@ const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
 const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
 type Col = (typeof COLS)[number]
+const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
 const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse']
 const SPIN_MS = 400
@@ -2573,7 +2574,7 @@ export const register: Register = (on, options) => {
       const text = over?.hint
       if (!text) return null
       const tint = over && !over.dim ? accentInk : ink(theme.fg, DESK.fg)
-      const room = e.props.bodyColumns - title - buttons.reduce((w, b) => w + b.label.length + (e.surface === 'desktop' ? 2 : 1), 0) - 2
+      const room = e.props.bodyColumns - title - buttons.reduce((w, b) => w + (desk ? DESK_ICON_COLS : b.label.length + 1), 0) - 2
       return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
     }
     if (t.preview) {
@@ -2759,13 +2760,13 @@ export const register: Register = (on, options) => {
     const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
     const toolRoom = e.props.bodyColumns - header.length - 4
-    const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + [...b.label].length, 0) + gap * Math.max(0, list.length - 1) + 1
+    const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + (desk ? DESK_ICON_COLS : [...b.label].length), 0) + gap * Math.max(0, list.length - 1) + 1
     let toolButtons = buttons
     for (const drop of ['autocollapse', 'size', 'collapse', 'refresh']) {
       if (toolWidth(toolButtons, 1) <= toolRoom) break
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }
-    const toolGap = toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
+    const toolGap = desk ? 0 : toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
     const tipButton = buttons.find(b => b.id === hovered)
     const tipText = desk ? '' : (tipButton?.hint ?? '')
     const tipProps = tipButton && !tipButton.dim ? { color: theme.accent } : theme.fg ? { color: theme.fg } : {}
@@ -3276,9 +3277,9 @@ export const register: Register = (on, options) => {
               </Button>
             </Box>
             <Box flexGrow={1} />
-            {hint(buttons, header.length + 4)}
+            {hint(toolButtons, header.length + 4)}
             <Box flexDirection="row" alignItems="center" flexShrink={0}>
-              {buttons.map(button)}
+              {toolButtons.map(button)}
             </Box>
           </Box>
         ) : (

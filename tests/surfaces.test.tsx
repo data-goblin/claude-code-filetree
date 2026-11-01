@@ -2998,3 +2998,16 @@ test('desktop: a diff draws native rows with old and new line numbers, +/- marke
   expect(shown).toMatch(/"children":\["2"\][\s\S]*"children":\["-"\][\s\S]*"children":\["2"\][\s\S]*"children":\["\+"\]/)
   await ui.unmount()
 })
+
+test('desktop: a narrow pane drops toolbar buttons in the same order as the terminal', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, ICON_WORLD(root), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(22) })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).not.toContain('"key":"button-autocollapse"')
+  expect(shown).toContain('"key":"button-up"')
+  await ui.unmount()
+})
