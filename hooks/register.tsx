@@ -1947,8 +1947,7 @@ export const register: Register = (on, options) => {
     const cwd = await cwdOf($)
     follow = !arg
     const root = arg ? resolve(cwd, arg, home) : cwd
-    // With Focus on open off, a bare /filetree leaves the keyboard in the prompt so the same key hides it again
-    await reset($, root, focusOnOpen || given !== '' || mine !== undefined)
+    await reset($, root, focusOnOpen || given !== '' || mine?.isPlaced === true)
     return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
   })
 

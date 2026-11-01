@@ -890,6 +890,36 @@ test('focus on open off: a bare /filetree opens the tree without taking the keyb
   expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
 })
 
+test('focus on open off: a bare /filetree toggles the tree and reopens it after a close without taking the keyboard', { timeoutMs: 20_000, options: { focus: 'off' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  const start = opens.length
+  let closedAt = -1
+  const shown = () => opens.length > start && closedAt !== opens.length
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  on('ui.close', () => {
+    closedAt = opens.length
+    return { value: undefined }
+  })
+  on('ui.panes', () => ({ value: opens.length > start ? [{ id: 'filetree', title: 'Files', isFocused: false, isShown: shown(), isPlaced: shown() }] : [] }))
+  await $.session.start({ cwd: root, surface: null, isInteractive: false })
+  await clock.settle()
+  const bare = { command: 'filetree', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } } satisfies CommandRunInput
+  expect(shown()).toBe(true)
+  for (let round = 0; round < 2; round++) {
+    expect(JSON.stringify(await $.command.run(bare))).toContain('closed')
+    await clock.settle()
+    expect(shown()).toBe(false)
+    const before = opens.length
+    expect(JSON.stringify(await $.command.run(bare))).toContain('File tree on')
+    await clock.settle()
+    expect(opens.length).toBeGreaterThan(before)
+    expect(shown()).toBe(true)
+    expect(opens.at(-1)).not.toHaveProperty('focus')
+  }
+})
+
 const shimmer = (name: string, tone: string) => `"t":${JSON.stringify(name)},"sh":"${tone}"`
 const fullscreen = (args: string) => ({ command: 'filetree', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } }) satisfies CommandRunInput
 
