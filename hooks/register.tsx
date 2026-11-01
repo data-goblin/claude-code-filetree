@@ -2438,6 +2438,44 @@ export const register: Register = (on, options) => {
     const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
+    const deskDiff = (source: string, key: string) => {
+      const rows: { kind: ' ' | '+' | '-' | '@'; text: string; old: number; new: number }[] = []
+      let old = 0
+      let cur = 0
+      for (const line of source.split('\n')) {
+        const head = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+        if (head) {
+          old = Number(head[1])
+          cur = Number(head[2])
+          rows.push({ kind: '@', text: line, old, new: cur })
+          continue
+        }
+        const kind = line[0]
+        if (kind === '+') rows.push({ kind, text: line.slice(1), old: 0, new: cur++ })
+        else if (kind === '-') rows.push({ kind, text: line.slice(1), old: old++, new: 0 })
+        else if (kind === ' ') rows.push({ kind, text: line.slice(1), old: old++, new: cur++ })
+      }
+      const digits = Math.max(2, ...rows.map(r => String(Math.max(r.old, r.new)).length))
+      const add = ink(addColor, DESK_GIT.A ?? DESK.accent)
+      const del = ink(delColor, DESK.urgent)
+      const tintOf = (kind: string) => (kind === '+' ? DESK.addBg : kind === '-' ? DESK.delBg : undefined)
+      return (
+        <Box key={`${key}-diff`} flexDirection="column">
+          {rows.map((r, j) => r.kind === '@' ? (
+            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" height={ROW_PX} paddingLeft={1} backgroundColor={DESK.hover}>
+              <Text color={mutedInk} size="footnote" tabular wrap="truncate-end">{r.text}</Text>
+            </Box>
+          ) : (
+            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" height={ROW_PX} backgroundColor={tintOf(r.kind)}>
+              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text color={mutedInk} tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
+              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text color={mutedInk} tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
+              <Box width={2} flexShrink={0} flexDirection="row" justifyContent="center"><Text color={r.kind === '+' ? add : r.kind === '-' ? del : mutedInk} mono>{r.kind === ' ' ? '' : r.kind}</Text></Box>
+              <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text mono wrap="truncate-end">{r.text.replace(/\t/g, '  ') || ' '}</Text></Box>
+            </Box>
+          ))}
+        </Box>
+      )
+    }
     const rowColors = { activeBg: theme.selection, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
     nativeScroll = e.surface === 'desktop'
     const accentInk = ink(theme.accent, DESK.accent)
@@ -2540,7 +2578,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
                           <Box width={2} flexShrink={0} />
                         </Box>
                       ) : null}
-                      {g.source ? <Code key={`pv-seg-code-${i}`} source={g.source} path={g.title || t.preview} format="diff" wrap="truncate-end" /> : null}
+                      {g.source ? deskDiff(g.source, `pv-seg-${i}`) : null}
                     </Box>
                   )
                 })}
@@ -2815,6 +2853,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
         </Box>
       )
     })
+
     const deskRow = (p: ReturnType<typeof rowParts>) => {
       const r = p.r
       const n = p.n

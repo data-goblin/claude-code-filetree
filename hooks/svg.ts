@@ -153,6 +153,8 @@ export const DESK = {
   field: '#252525',
   edge: '#333336',
   toolOn: '#2c3442',
+  addBg: '#1d3324',
+  delBg: '#3b2226',
 } as const
 
 const ANSI: Record<number, string> = {
