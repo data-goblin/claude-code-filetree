@@ -3494,3 +3494,29 @@ test('deleted files under an ignored name never come back as ghost rows or in th
   expect(shown).toContain('" D:1"')
   await ui.unmount()
 })
+
+test('jump mode closes when the pane loses the keyboard and never pulls focus back from the prompt', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const focused = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  await focused.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  expect(JSON.stringify(await focused.drawn())).toContain('"key":"jump"')
+  await focused.unmount()
+  const before = opens.length
+  const blurred = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.advance(200)
+  await clock.settle()
+  expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"jump"')
+  expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
+  await blurred.unmount()
+})

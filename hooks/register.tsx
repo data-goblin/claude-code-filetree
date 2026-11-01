@@ -2682,7 +2682,7 @@ export const register: Register = (on, options) => {
     }
     if (zjump.on) {
       if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($, true) : undefined))
+      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($) : undefined))
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
