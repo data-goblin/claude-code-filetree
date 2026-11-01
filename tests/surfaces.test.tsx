@@ -3382,3 +3382,34 @@ for (const [surface, options, want] of [
     await ui.unmount()
   })
 }
+
+test('jump mode types through its own focused field, arrows reach it through the ring sentinels, and Enter re-roots', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['tests', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], [`${root}/tests`]: [['hooks-e2e', 'dir']], [`${root}/tests/hooks-e2e`]: [['x.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0${root}/tests/hooks-e2e/x.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).toMatch(/"type":"Input","props":\{[^}]*"key":"jump"[^}]*"autoFocus":true|"type":"Input","props":\{[^}]*"autoFocus":true[^}]*"key":"jump"/)
+  expect(shown).toContain('"key":"jump-up"')
+  expect(shown).toContain('"key":"jump-down"')
+  expect(shown).not.toContain('"hotkey"')
+  await ui.input({ key: 'jump', text: 'hooks', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`${root}/hooks`, `${root}/tests/hooks-e2e`])
+  await ui.press({ key: 'jump-down' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).active).toBe(`${root}/tests/hooks-e2e`)
+  await ui.input({ key: 'jump', text: 'hooks', kind: 'submit' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`${root}/tests/hooks-e2e/x.ts`])
+  await ui.unmount()
+})

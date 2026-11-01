@@ -176,7 +176,7 @@ let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
-const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0 }
+const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 let autoCollapseDefault = false
@@ -1480,28 +1480,38 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
 
 function jumpOpen($: EngineInterface): void {
   zjump.on = true
+  zjump.held = false
   zjump.query = ''
   zjump.sel = 0
   zjump.rows = []
   void jumpRefresh($)
+  $.clock.after(50, async () => focusPane($, (await get($)).root, 'jump'))
 }
 
-function jumpClose($: EngineInterface): void {
+async function jumpInput($: EngineInterface, value: string): Promise<void> {
+  if (!zjump.on) return
+  zjump.query = value
+  zjump.sel = 0
+  await jumpRefresh($)
+}
+
+function jumpClose($: EngineInterface, refocus = false): void {
   zjump.on = false
   zjump.query = ''
   zjump.rows = []
   zjump.seq += 1
   void $.ui.invalidate('ui.render')
+  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, treeKey()))
 }
 
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
-  jumpClose($)
+  jumpClose($, true)
   follow = false
   await reset($, dir)
 }
 
 async function jumpKey($: EngineInterface, key: string): Promise<void> {
-  if (key === 'escape') jumpClose($)
+  if (key === 'escape') jumpClose($, true)
   else if (key === 'return' || key === 'enter') {
     const dir = zjump.rows[zjump.sel]
     if (dir) await jumpTo($, dir)
@@ -2409,6 +2419,7 @@ export const register: Register = (on, options) => {
     const mine = given ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
     if (mine?.isShown) {
       noDock = true
+      if (zjump.on) jumpClose($)
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: 'File tree closed.' }
     }
@@ -2589,7 +2600,16 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && zjump.on) jumpClose($)
+    return next(e)
+  })
+
   on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (zjump.on && e.origin.kind === 'person' && (e.element === 'jump-up' || e.element === 'jump-down')) {
+      await jumpKey($, e.element === 'jump-up' ? 'up' : 'down')
+      return {}
+    }
     const result = await next(e)
     void sync($)
     return result
@@ -2646,6 +2666,10 @@ export const register: Register = (on, options) => {
       void $.ui.close({ id: PANE }).catch(() => undefined)
       const { Box: Empty } = $.ui.resolve(e)
       return <Empty />
+    }
+    if (zjump.on) {
+      if (e.props.isFocused) zjump.held = true
+      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($, true) : undefined))
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
@@ -3508,7 +3532,11 @@ export const register: Register = (on, options) => {
               <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentInk}>jump</Text></Box>
             ) : scopeChip()}
             <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column">
-              {zjump.on ? <Text key="jump-q" {...(zjump.query ? {} : mutedText)} wrap="truncate-start">{zjump.query || 'folder name…'}</Text> : <Input
+              {zjump.on ? <>
+                <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
+                <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />
+                <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
+              </> : <Input
                 key="q"
                 placeholder="Search files..."
                 value={t.query}
@@ -3527,7 +3555,11 @@ export const register: Register = (on, options) => {
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
             {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : <>{scopeChip()}{scopeName ? <Text> </Text> : null}</>}
             <Box flexGrow={1}>
-              {zjump.on ? <Text key="jump-q" {...(zjump.query ? {} : mutedText)} wrap="truncate-start">{zjump.query || 'folder name…'}</Text> : <Input
+              {zjump.on ? <>
+                <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
+                <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />
+                <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
+              </> : <Input
                 key="q"
                 placeholder="search"
                 submitLabel="go"
