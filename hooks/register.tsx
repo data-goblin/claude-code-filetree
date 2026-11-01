@@ -2116,7 +2116,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
   else if (key === '?') toggleShortcuts($)
-  else if (key === 'S' || (key === 's' && shift)) {
+  else if (key === 'i') {
     const dir = cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root
     await scopeSearch($, dir === t.root ? '' : dir)
     $.clock.after(50, () => focusPane($, t.root, 'q'))
@@ -3268,7 +3268,7 @@ export const register: Register = (on, options) => {
       { key: 'o', label: 'open', act: () => void navigate($, 'return') },
       { key: 'd', label: 'diff', act: () => void navigate($, 'd') },
       { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
-      { key: 'S', label: 'search here', act: () => void navigate($, 'S', false, e.surface) },
+      { key: 'i', label: 'in folder', act: () => void navigate($, 'i', false, e.surface) },
       { key: 'a', label: 'auto-collapse', act: () => void navigate($, 'a', false, e.surface).then(park) },
       { key: 'n', label: 'sort name', act: () => void navigate($, 'n', false, e.surface).then(park) },
       { key: 'g', label: 'sort git', act: () => void navigate($, 'g', false, e.surface).then(park) },
@@ -3283,7 +3283,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'S', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'i', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4

@@ -2885,7 +2885,7 @@ for (const [name, options, font, labels, lens, dirGlyph, fileGlyph] of GLYPH_SET
   })
 }
 
-test('terminal: S scopes search to the folder under the cursor, × drops it, and n cycles the Name header desc, asc, off with folders first', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+test('terminal: i scopes search to the folder under the cursor, × drops it, and n cycles the Name header desc, asc, off with folders first', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const root = '/Users/k/proj'
   const clock = world(on, ICON_WORLD(root), [])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
@@ -2910,7 +2910,8 @@ test('terminal: S scopes search to the folder under the cursor, × drops it, and
   await ui.post({ key: 'home' }, { in: 'rows' })
   await clock.settle()
   expect(treeRows(await ui.drawn()).active).toBe(`${root}/src`)
-  await ui.post({ key: 'S', shift: true }, { in: 'rows' })
+  expect(JSON.stringify(await ui.drawn())).toContain('"hotkey":"i"')
+  await ui.post({ key: 'i' }, { in: 'rows' })
   await clock.settle()
   expect(JSON.stringify(await ui.drawn())).toContain('"label":"in src/ ×"')
   await ui.input({ key: 'q', text: 'a', kind: 'change' })

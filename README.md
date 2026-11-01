@@ -100,7 +100,7 @@ j / k:        move down / up; k on the first row selects the root
 h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
-S:            search inside the folder under the cursor (Backspace on an empty query or × drops it)
+i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
 c / r:        search: match case / regular expression (Aa / .* in the search row)
 a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
