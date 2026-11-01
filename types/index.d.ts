@@ -35,6 +35,12 @@ export type FileTree = {
   cursor: string
   selected: string
   query: string
+  searchCase: boolean
+  searchRegex: boolean
+  searchScope: string
+  autoCollapse?: boolean
+  sortCol: '' | 'name' | 'git' | 'metric'
+  sortDir: 'desc' | 'asc'
   showHidden: boolean
   column: 'date' | 'size' | 'loc'
   dirSizes: Record<string, number>
@@ -71,6 +77,7 @@ declare module 'claude-code' {
       tree: FileTree
       theme: Theme
       activity: Activity[]
+      visits: Record<string, { n: number; at: number }>
     }
   }
 }

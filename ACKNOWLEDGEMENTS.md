@@ -29,6 +29,7 @@ pull request credits them even when the code that shipped was rewritten.
 - A preview key that opens the file in an editor at the line being read: [@mangow314](https://github.com/mangow314) ([#21](https://github.com/data-goblin/claude-code-filetree/issues/21))
 
 - Dropping the classic and prompt.attachment hooks that Team and Enterprise sessions skip: [@Liquidmasl](https://github.com/Liquidmasl) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
+- The report that the Desktop pane drew nothing, which led to the 0.6.0 Desktop redesign: [@vitalized](https://github.com/vitalized) ([#41](https://github.com/data-goblin/claude-code-filetree/issues/41))
 
 ## Bug reports
 

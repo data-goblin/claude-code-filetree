@@ -3,6 +3,7 @@ import { GIT_COLOR } from '../hooks/icons'
 import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
+import { DESK, DESK_GIT, selectionOn } from '../hooks/svg'
 
 type Check = { name: string; color: string; min: number }
 
@@ -47,6 +48,14 @@ function checks(tones: typeof TONES, text: number, dim: number): Check[] {
 const suites = [
   { name: 'dark', backgrounds: DARK_BACKGROUNDS, checks: checks(TONES, TEXT, DIM) },
   { name: 'light', backgrounds: LIGHT_BACKGROUNDS, checks: checks(LIGHT_TONES, AAA, AAA) },
+  {
+    name: 'desktop',
+    backgrounds: { ...DARK_BACKGROUNDS, selection: DESK.selection, hover: DESK.hover, field: DESK.field },
+    checks: [
+      ...(['accent', 'muted', 'fg', 'urgent'] as const).map(k => ({ name: `desk ${k}`, color: DESK[k], min: TEXT })),
+      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git ${k}`, color, min: TEXT })),
+    ],
+  },
 ]
 
 let failed = 0
@@ -96,6 +105,22 @@ for (const [name, hexes] of Object.entries(THEMES)) {
   const ok = label >= LABEL && edge >= EDGE && nest >= EDGE
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} label ${label.toFixed(2)}:1 (needs ${LABEL}), box on background ${edge.toFixed(2)}:1, nested box ${nest.toFixed(2)}:1 (need ${EDGE})`)
+}
+console.log('\ncursor row backgrounds (desktop needs 1.5 on the app backgrounds black and vscode dark, terminal fallback 1.3 everywhere)')
+for (const [name, bg] of Object.entries(DARK_BACKGROUNDS)) {
+  const desk = contrast(DESK.selection, bg)
+  const tui = selectionOn('ansi256(0)', bg, false)
+  const term = contrast(tui, bg)
+  const ok = (name === 'one dark' || desk >= 1.5) && term >= 1.3
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} desktop ${DESK.selection} ${desk.toFixed(2)}:1, terminal ${tui} ${term.toFixed(2)}:1`)
+}
+for (const [name, bg] of Object.entries(LIGHT_BACKGROUNDS)) {
+  const tui = selectionOn('ansi256(0)', bg, true)
+  const term = contrast(tui, bg)
+  const ok = term >= 1.3
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} terminal ${tui} ${term.toFixed(2)}:1`)
 }
 console.log(failed ? `\n${failed} color${failed === 1 ? '' : 's'} below the contrast gate` : '\nevery color passes')
 process.exit(failed ? 1 : 0)

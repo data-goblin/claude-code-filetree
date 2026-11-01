@@ -2,8 +2,8 @@ import type { FileNode } from '../types'
 
 const cp = (n: number) => String.fromCodePoint(n)
 
-export const CHEVRON_OPEN = cp(0xf47c)
-export const CHEVRON_CLOSED = cp(0xf460)
+export const CHEVRON_OPEN = '▾'
+export const CHEVRON_CLOSED = '▸'
 
 const NAMES: Record<string, number> = {
   'agents.md': 0xf0354,

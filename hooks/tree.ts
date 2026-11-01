@@ -1,10 +1,11 @@
 import type { Branch, FileNode, FileTree, Theme } from '../types'
 import { stronger } from './icons'
+import { compileRegex } from './regex'
 
 export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; size: number; isLink: boolean }
 export type Row = { node: FileNode; depth: number; open: boolean }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+export const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 export const DEFAULT_THEME: Theme = {
   fg: '',
@@ -23,6 +24,11 @@ export function emptyTree(root: string): FileTree {
     cursor: '',
     selected: '',
     query: '',
+    searchCase: false,
+    searchRegex: false,
+    searchScope: '',
+    sortCol: '',
+    sortDir: 'desc',
     showHidden: true,
     column: 'date',
     dirSizes: {},
@@ -268,7 +274,46 @@ export function relative(root: string, path: string): string {
   return path === root ? '' : path.slice(root.endsWith('/') ? root.length : root.length + 1)
 }
 
-export function visibleRows(t: FileTree): Row[] {
+const MAX_QUERY = 200
+const MATCH_BUDGET_MS = 40
+
+export function badPattern(query: string, regex: boolean): boolean {
+  const q = query.trim()
+  if (!q) return false
+  if (q.length > MAX_QUERY) return true
+  if (!regex) return false
+  return compileRegex(q, false) === null
+}
+
+export type Matcher = ((text: string) => boolean) & { partial: boolean }
+
+export function matcher(query: string, cased: boolean, regex: boolean): Matcher | null {
+  const q = query.trim()
+  if (!q) return null
+  const make = (test: (text: string) => boolean): Matcher => Object.assign(test, { partial: false })
+  if (badPattern(q, regex)) return make(() => false)
+  if (regex) {
+    const test = compileRegex(q, !cased)
+    if (!test) return make(() => false)
+    let deadline = 0
+    const m: Matcher = make(text => {
+      if (m.partial) return false
+      const now = Date.now()
+      if (!deadline) deadline = now + MATCH_BUDGET_MS
+      else if (now > deadline) {
+        m.partial = true
+        return false
+      }
+      return test(text)
+    })
+    return m
+  }
+  if (cased) return make(text => text.includes(q))
+  const lower = q.toLowerCase()
+  return make(text => text.toLowerCase().includes(lower))
+}
+
+export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => number): Row[] {
   const kids = new Map<string, FileNode[]>()
   for (const n of t.nodes) {
     if (!t.showHidden && n.hidden) continue
@@ -276,12 +321,15 @@ export function visibleRows(t: FileTree): Row[] {
     if (list) list.push(n)
     else kids.set(n.parent, [n])
   }
-  const q = t.query.trim().toLowerCase()
+  if (order) for (const list of kids.values()) list.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || order(a, b))
+  const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
+  const match = matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
   let keep: Set<string> | null = null
-  if (q) {
+  if (match) {
     keep = new Set()
     for (const n of t.nodes) {
-      if (!relative(t.root, n.id).toLowerCase().includes(q)) continue
+      if (scope && !n.id.startsWith(scope)) continue
+      if (!match(relative(t.root, n.id))) continue
       keep.add(n.id)
       for (const a of ancestorsOf(n.id, t.root)) keep.add(a)
     }
@@ -318,6 +366,14 @@ export function age(ms: number, now: number): string {
   if (s > 0 && s < 7 * 86_400) return `${Math.floor(s / 86_400)}d`
   const d = new Date(ms)
   return Math.abs(s) < 365 * 86_400 ? `${MONTHS[d.getMonth()]} ${d.getDate()}` : String(d.getFullYear())
+}
+
+export function humanSize(bytes: number, pad: string): string {
+  if (bytes < 0) return '?'
+  if (bytes < 1024) return `${bytes} B${pad}`
+  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`
+  if (bytes < 1_073_741_824) return `${(bytes / 1_048_576).toFixed(1)} MB`
+  return `${(bytes / 1_073_741_824).toFixed(1)} GB`
 }
 
 export function formatSize(bytes: number): string {
