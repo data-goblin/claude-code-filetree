@@ -2518,13 +2518,13 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
       ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
-      { id: 'up', label: unicode ? '△' : '\u{f19f0}', dim: true, hint: 'parent folder', icon: 'folder-up' as const },
-      { id: 'cwd', label: unicode ? '◎' : '\u{ebf8}', dim: !follow, hint: 'Go to cwd', icon: 'crosshair' as const },
+      { id: 'up', label: unicode ? '△' : '\u{eaa1}', dim: true, hint: 'parent folder', icon: 'arrow-up' as const },
+      { id: 'cwd', label: unicode ? '◎' : '\u{eb46}', dim: !follow, hint: 'Go to cwd', icon: 'root-folder' as const },
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
-      ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : splitAt === 'top' ? '\u{ebf6}' : '\u{ebf2}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
+      ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
     const wordWidth = wordButtons.reduce((w, b) => w + b.label.length + 1, 1)

@@ -2759,7 +2759,7 @@ test('terminal regression: Nerd Font glyphs are the agreed codepoints, plain gly
     const props = clientProps(tree, `button-${id}`)
     return has(props, 'label') ? props.label : undefined
   })
-  expect(labels).toEqual(['\u{f19f0}', '\u{ebf8}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{ebf2}'])
+  expect(labels).toEqual(['\u{eaa1}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'])
   const shown = JSON.stringify(tree)
   expect(shown).toContain('"\u{ea6d} "')
   expect(shown).toContain('"submitLabel":"go"')
