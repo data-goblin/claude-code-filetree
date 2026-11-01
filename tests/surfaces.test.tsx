@@ -3326,3 +3326,35 @@ test('desktop folder diff counts and draws ++x and --x content lines as added an
   expect(shown).toMatch(/"children":\["-"\][\s\S]*"children":\["--counter;"\][\s\S]*"children":\["\+"\][\s\S]*"children":\["\+\+counter;"\]/)
   await ui.unmount()
 })
+
+test('Windows z jump: zoxide backslash paths are normalised, a parent-only fragment does not match, and Enter re-roots inside the drive', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = 'C:/Users/k/proj'
+  const clock = world(on, {
+    os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k' }, cwd: 'C:\\Users\\k\\proj', top: '',
+    dirs: { [root]: [['README.md', 'file']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    status: '', numstat: '',
+    stdout: { 'zoxide query --list': '  9.0 C:\\Users\\k\\proj\\hooks\n  3.0 C:\\Users\\k\\other\\\n' },
+  }, [])
+  await $.session.start({ cwd: 'C:\\Users\\k\\proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  for (const k of 'users') await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  expect(await ids()).toEqual([''])
+  for (let k = 0; k < 5; k++) await ui.post({ key: 'backspace' }, { in: 'rows' })
+  for (const k of 'oth') await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  expect(await ids()).toEqual(['C:/Users/k/other'])
+  for (let k = 0; k < 3; k++) await ui.post({ key: 'backspace' }, { in: 'rows' })
+  for (const k of 'hoo') await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  expect(await ids()).toEqual([`${root}/hooks`])
+  await ui.post({ key: 'return' }, { in: 'rows' })
+  await clock.settle()
+  expect(await ids()).toEqual([`${root}/hooks/a.ts`])
+  await ui.unmount()
+})
+

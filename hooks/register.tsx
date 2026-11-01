@@ -1436,7 +1436,7 @@ async function zoxideRows($: EngineInterface): Promise<Candidate[]> {
   let rows: Candidate[] = []
   try {
     const run = await $.process.run(['zoxide', 'query', '--list', '--score'], { timeoutMs: 3_000 })
-    if (run.exitCode === 0) rows = parseZoxide(run.stdout)
+    if (run.exitCode === 0) rows = parseZoxide(run.stdout).map(c => ({ path: posix(c.path).replace(/([^:])\/+$/, '$1'), score: c.score }))
   } catch {
     rows = []
   }
@@ -1465,7 +1465,7 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
   const [zox, seen, index] = await Promise.all([zoxideRows($), visits($), indexPaths($, t)])
   if (mine !== zjump.seq || !zjump.on) return
   const cands: Candidate[] = [...zox]
-  for (const [path, v] of Object.entries(seen)) cands.push({ path, score: frecency(v, now) })
+  for (const [path, v] of Object.entries(seen)) cands.push({ path: posix(path), score: frecency(v, now) })
   const dirs = new Set<string>([t.root])
   for (const n of t.nodes) if (n.kind === 'dir') dirs.add(n.id)
   for (const p of index.paths) {
