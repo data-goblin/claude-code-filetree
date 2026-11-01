@@ -167,7 +167,7 @@ const ANSI: Record<number, string> = {
 
 export const DESK_GIT: Record<string, string> = {
   A: '#3fb950',
-  '?': '#2ab3a6',
+  '?': '#3fb950',
   R: '#4b8ef0',
   C: '#4b8ef0',
   M: '#d99a1e',

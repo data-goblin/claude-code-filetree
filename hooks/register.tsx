@@ -44,6 +44,7 @@ import {
   toNodes,
   underAny,
   visibleRows,
+  collator,
   type Row,
 } from './tree'
 
@@ -1281,8 +1282,29 @@ function gitOf(t: FileTree, n: FileNode): [number, number] {
   const rank = n.kind === 'dir' ? (c ? c[0] + c[1] + c[2] : 0) : (GIT_RANK[t.git[n.id] ?? ''] ?? 0)
   return [d ? d[0] + d[1] : 0, rank]
 }
-function rowsOf(t: FileTree): Row[] {
-  if (!t.sortCol) return visibleRows(t)
+function ghostsOf(t: FileTree): FileNode[] {
+  const have = new Set(t.nodes.map(n => n.id))
+  const loaded = new Set(t.nodes.filter(n => n.loaded).map(n => n.id))
+  loaded.add(t.root)
+  const out: FileNode[] = []
+  for (const [id, status] of Object.entries(t.git)) {
+    if (status !== 'D' || have.has(id)) continue
+    const parent = dirname(id)
+    if (!loaded.has(parent) || !inside(t.root, id)) continue
+    const name = id.slice(parent.length + 1)
+    out.push({ id, parent, name, kind: 'file', hidden: name.startsWith('.'), mtime: 0, size: 0, loaded: true })
+  }
+  return out
+}
+
+function isGhost(t: FileTree, id: string): boolean {
+  return t.git[id] === 'D' && !t.nodes.some(n => n.id === id)
+}
+
+function rowsOf(base: FileTree): Row[] {
+  const ghosts = ghostsOf(base)
+  const t = ghosts.length ? { ...base, nodes: [...base.nodes, ...ghosts] } : base
+  if (!t.sortCol) return visibleRows(t, ghosts.length ? (a, b) => collator.compare(a.name, b.name) : undefined)
   const sign = t.sortDir === 'asc' ? 1 : -1
   const order = t.sortCol === 'name'
     ? (a: FileNode, b: FileNode) => sign * a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -1951,7 +1973,8 @@ async function press($: EngineInterface, n: FileNode): Promise<void> {
 }
 
 async function openNode($: EngineInterface, n: FileNode): Promise<void> {
-  if (n.kind === 'dir') {
+  if (isGhost(await get($), n.id)) await diffFile($, n.id)
+  else if (n.kind === 'dir') {
     follow = false
     await reset($, n.id)
   } else await openFile($, n.id)
@@ -2772,13 +2795,14 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     }
     const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
     const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
+    const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
     const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : 'Modified'
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
         {sortCell('name', 'Name')}
         <Box flexGrow={1} />
-        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, 6)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', 'Git')}</Box> : null}
+        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', gitLabel)}</Box> : null}
         {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('metric', metricLabel)}</Box> : null}
         <Box width={2} flexShrink={0} />
       </Box>

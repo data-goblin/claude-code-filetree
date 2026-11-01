@@ -4,7 +4,7 @@ import { stronger } from './icons'
 export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; size: number; isLink: boolean }
 export type Row = { node: FileNode; depth: number; open: boolean }
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+export const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 export const DEFAULT_THEME: Theme = {
   fg: '',
