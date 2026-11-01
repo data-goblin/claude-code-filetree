@@ -1,5 +1,6 @@
 import type { Branch, FileNode, FileTree, Theme } from '../types'
 import { stronger } from './icons'
+import { compileRegex } from './regex'
 
 export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; size: number; isLink: boolean }
 export type Row = { node: FileNode; depth: number; open: boolean }
@@ -276,73 +277,12 @@ export function relative(root: string, path: string): string {
 const MAX_QUERY = 200
 const MATCH_BUDGET_MS = 40
 
-export function catastrophic(q: string): boolean {
-  type Group = { quant: boolean; alt: boolean }
-  const stack: Group[] = [{ quant: false, alt: false }]
-  let last: { group: Group | null } | null = null
-  for (let i = 0; i < q.length; i++) {
-    const c = q[i]
-    if (c === '\\') {
-      const n = q[i + 1] ?? ''
-      if (/[1-9]/.test(n) || n === 'k') return true
-      i += 1
-      last = { group: null }
-    } else if (c === '[') {
-      i += 1
-      if (q[i] === '^') i += 1
-      if (q[i] === ']') i += 1
-      while (i < q.length && q[i] !== ']') i += q[i] === '\\' ? 2 : 1
-      last = { group: null }
-    } else if (c === '(') {
-      if (q[i + 1] === '?') {
-        const m = /^\?(?::|=|!|<=|<!|<[A-Za-z_$][\w$]*>)/.exec(q.slice(i + 1))
-        i += m ? m[0].length : 1
-      }
-      stack.push({ quant: false, alt: false })
-      last = null
-    } else if (c === ')') {
-      const g = stack.length > 1 ? stack.pop() : undefined
-      const top = stack[stack.length - 1]
-      if (g && top && g.quant) top.quant = true
-      last = g ? { group: g } : null
-    } else if (c === '|') {
-      const top = stack[stack.length - 1]
-      if (top) top.alt = true
-      last = null
-    } else if (c === '*' || c === '+' || c === '?' || c === '{') {
-      let repeats = c !== '?'
-      if (c === '{') {
-        const m = /^\{(\d+)(,(\d*))?\}/.exec(q.slice(i))
-        if (!m) {
-          last = { group: null }
-          continue
-        }
-        repeats = m[2] !== undefined && (m[3] === '' || Number(m[3]) > 1)
-        i += m[0].length - 1
-      }
-      if (q[i + 1] === '?') i += 1
-      if (!last) continue
-      if (last.group && (last.group.quant || last.group.alt)) return true
-      const top = stack[stack.length - 1]
-      if (top && (repeats || last.group)) top.quant = true
-      last = null
-    } else last = { group: null }
-  }
-  return false
-}
-
 export function badPattern(query: string, regex: boolean): boolean {
   const q = query.trim()
   if (!q) return false
   if (q.length > MAX_QUERY) return true
   if (!regex) return false
-  if (catastrophic(q)) return true
-  try {
-    new RegExp(q)
-    return false
-  } catch {
-    return true
-  }
+  return compileRegex(q, false) === null
 }
 
 export type Matcher = ((text: string) => boolean) & { partial: boolean }
@@ -353,7 +293,8 @@ export function matcher(query: string, cased: boolean, regex: boolean): Matcher 
   const make = (test: (text: string) => boolean): Matcher => Object.assign(test, { partial: false })
   if (badPattern(q, regex)) return make(() => false)
   if (regex) {
-    const re = new RegExp(q, cased ? '' : 'i')
+    const test = compileRegex(q, !cased)
+    if (!test) return make(() => false)
     let deadline = 0
     const m: Matcher = make(text => {
       if (m.partial) return false
@@ -363,7 +304,7 @@ export function matcher(query: string, cased: boolean, regex: boolean): Matcher 
         m.partial = true
         return false
       }
-      return re.test(text.length > 512 ? text.slice(-512) : text)
+      return test(text)
     })
     return m
   }

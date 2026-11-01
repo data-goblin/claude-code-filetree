@@ -5,6 +5,7 @@ import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
+import { compileRegex } from '../hooks/regex'
 import { age, ancestorsOf, badPattern, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -3018,7 +3019,7 @@ test('desktop: a narrow pane drops toolbar buttons in the same order as the term
   await ui.unmount()
 })
 
-test('regex search refuses nested quantifiers and over-long patterns instead of freezing, and marks .* red', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+test('regex search on (a+)+$ finishes at once with no match, and an over-long pattern turns .* red', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const root = '/Users/k/proj'
   const clock = world(on, { ...ICON_WORLD(root), dirs: { [root]: [['aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab', 'file']] } }, [])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
@@ -3032,9 +3033,9 @@ test('regex search refuses nested quantifiers and over-long patterns instead of 
   await clock.settle()
   expect(Date.now() - began).toBeLessThan(2000)
   expect(treeRows(await ui.drawn()).rows.filter(r => r.id)).toEqual([])
-  expect(JSON.stringify(await ui.drawn())).toMatch(/"color":"ansi256\(1\)"\},"children":\["\.\*"\]/)
   await ui.input({ key: 'q', text: 'a'.repeat(201), kind: 'change' })
   await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toMatch(/"color":"ansi256\(1\)"\},"children":\["\.\*"\]/)
   expect(treeRows(await ui.drawn()).rows.filter(r => r.id)).toEqual([])
   await ui.unmount()
 })
@@ -3076,9 +3077,57 @@ test('folder dates come from one walk per folder that also dates every folder be
   await ui.unmount()
 })
 
-test('regex search checks the pattern shape: nested or alternated repeats and backreferences are refused, ordinary patterns pass', () => {
-  for (const p of ['((a+))+$', '(?:(a|a)*)+', '(a*)*', '((ab)+)+', '(a+)+$', '(x)\\1']) expect(badPattern(p, true)).toBe(true)
-  for (const p of ['(foo|bar)\\.ts$', 'a+b', '[a-z]+\\d{2}', '(ab)+', '[(]+']) expect(badPattern(p, true)).toBe(false)
+test('regex search runs on a linear-time matcher: pathological patterns finish fast, supported syntax passes, backreferences and lookaround are refused', () => {
+  const time = (p: string, text: string) => {
+    const test = compileRegex(p, false)
+    expect(test).not.toBeNull()
+    const began = performance.now()
+    expect(test?.(text)).toBe(false)
+    return performance.now() - began
+  }
+  expect(time('^a+a+a+a+a+a+a+a+$', 'a'.repeat(120) + '!')).toBeLessThan(50)
+  expect(time('((a+))+$', 'a'.repeat(40) + '!')).toBeLessThan(50)
+  for (const p of ['(foo|bar)+', '(a+)?', '[a-z]+\\d{2}', '(foo|bar)\\.ts$', '(?:x|y){2,4}']) expect(badPattern(p, true)).toBe(false)
+  for (const p of ['(x)\\1', '(?=a)', '(?!a)', '(?<=a)b', '\\bword', 'a{2,1}', 'x'.repeat(201)]) expect(badPattern(p, true)).toBe(true)
+})
+
+test('the linear-time matcher agrees with RegExp on random patterns over real-looking paths', () => {
+  let seed = 7
+  const rand = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff
+    return seed % n
+  }
+  const pick = <T,>(list: readonly T[]) => list[rand(list.length)] as T
+  const names = ['src', 'hooks', 'tests', 'README', 'index', 'register', 'tree', 'a', 'b1', 'Foo_bar', 'x-y', '.github', 'docs', 'v2', 'Makefile']
+  const exts = ['.ts', '.tsx', '.md', '.json', '', '.test.tsx', '.d.ts', '.png']
+  const paths = Array.from({ length: 300 }, () => Array.from({ length: 1 + rand(4) }, () => pick(names)).join('/') + pick(exts))
+  const atoms = ['a', 's', 'r', 'T', '\\.', '.', '\\d', '\\w', '\\s', '\\W', '[a-z]', '[^/]', '[A-Z0-9_]', '[.-]', '/', 'ts', 'x?', '(src|tests)', '(?:\\.ts|\\.md)', '(e|ee)']
+  const quants = ['', '', '', '*', '+', '?', '{2}', '{1,}', '{0,2}', '*?', '+?']
+  const gen = (depth: number): string => {
+    const parts = Array.from({ length: 1 + rand(3) }, () => {
+      const atom = depth < 2 && rand(4) === 0 ? `(${gen(depth + 1)})` : pick(atoms)
+      return atom + pick(quants)
+    })
+    const body = parts.join('')
+    return depth < 2 && rand(5) === 0 ? `${body}|${gen(depth + 1)}` : body
+  }
+  let checked = 0
+  for (let k = 0; k < 400; k++) {
+    const p = (rand(4) === 0 ? '^' : '') + gen(0) + (rand(4) === 0 ? '$' : '')
+    for (const ci of [false, true]) {
+      const ours = compileRegex(p, ci)
+      if (!ours) {
+        expect(() => new RegExp(p)).toThrow()
+        continue
+      }
+      const native = new RegExp(p, ci ? 'i' : '')
+      for (const path of paths) {
+        expect([p, ci, path, ours(path)]).toEqual([p, ci, path, native.test(path)])
+        checked += 1
+      }
+    }
+  }
+  expect(checked).toBeGreaterThan(50_000)
 })
 
 test('a slow index does not eat the regex time budget: the sole match at the end is still found', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
