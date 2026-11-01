@@ -199,6 +199,8 @@ let timeActive = 0
 let timeQueue: [string, number][] = []
 const timing = new Set<string>()
 const timeFailed = new Set<string>()
+const timeTries = new Map<string, number>()
+const TIME_TRIES = 3
 const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
 type Column = FileTree['column']
@@ -463,6 +465,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   clearAutoCollapse()
   dirTimes.clear()
   timeFailed.clear()
+  timeTries.clear()
   timeQueue = []
   lastRoot = root
   hintRoot = ''
@@ -730,10 +733,17 @@ function pumpTimes($: EngineInterface): void {
       const found = await newestUnder($, dir, pruneArgs(t.root))
       if (epoch !== sizeEpoch) return
       for (const [d, ms] of found) dirTimes.set(d, [0, ms])
+      timeTries.delete(dir)
       void $.ui.invalidate('ui.render')
     })()
       .catch(() => {
         if (epoch !== sizeEpoch) return
+        const tries = (timeTries.get(dir) ?? 0) + 1
+        timeTries.set(dir, tries)
+        if (tries < TIME_TRIES) {
+          if (!timeQueue.some(([d]) => d === dir)) timeQueue.push([dir, 0])
+          return
+        }
         timeFailed.add(dir)
         void $.ui.invalidate('ui.render')
       })
@@ -773,6 +783,7 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     locListed.clear()
     dirTimes.clear()
     timeFailed.clear()
+    timeTries.clear()
   }
   for (const p of paths ?? []) {
     locCache.delete(p)

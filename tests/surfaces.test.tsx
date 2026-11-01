@@ -44,6 +44,7 @@ type World = {
   newest?: (dir: string) => string
   findDelayMs?: number
   newestDelay?: number
+  newestAbortOnce?: string[]
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -110,6 +111,11 @@ function world(on: On, w: World, ran: Ran) {
     const out = w.stdout?.[argv.slice(0, 3).join(' ')]
     if (out !== undefined) return ok(out)
     if (w.newest && argv[0] === 'sh' && (argv[2] ?? '').includes('awk -v d=')) {
+      const at = w.newestAbortOnce?.indexOf(argv[4] ?? '') ?? -1
+      if (at >= 0) {
+        w.newestAbortOnce?.splice(at, 1)
+        throw new Error('$.process.run(sh) aborted')
+      }
       if (w.newestDelay) await clock.sleep(w.newestDelay)
       return ok(w.newest(argv[4] ?? ''))
     }
@@ -3452,3 +3458,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('a folder date walk that the engine aborts is retried, so the date still appears', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    ...ICON_WORLD(root),
+    dirs: { [root]: [['docs', 'dir'], ['README.md', 'file']], [`${root}/docs`]: [['a.md', 'file']] },
+    newest: dir => (dir === `${root}/docs` ? `1700000600 ${root}/docs\n` : ''),
+    newestAbortOnce: [`${root}/docs`],
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await clock.advance(100)
+  await clock.settle()
+  const docs = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/docs`)
+  expect(docs?.right.map(x => x.t).join('')).toContain(stamp(1_700_000_600_000))
+  await ui.unmount()
+})
