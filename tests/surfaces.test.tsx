@@ -2918,7 +2918,7 @@ test('terminal: i scopes search to the folder under the cursor, × drops it, and
   expect(JSON.stringify(await ui.drawn())).toContain('"hotkey":"i"')
   await ui.post({ key: 'i' }, { in: 'rows' })
   await clock.settle()
-  expect(JSON.stringify(await ui.drawn())).toContain('"label":"in src/ ×"')
+  expect(JSON.stringify(await ui.drawn())).toContain('"label":"in src/ × "')
   await ui.input({ key: 'q', text: 'a', kind: 'change' })
   await clock.settle()
   expect(await ids()).toEqual(['src', 'src/a.ts'])
