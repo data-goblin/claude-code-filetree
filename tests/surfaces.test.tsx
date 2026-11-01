@@ -3032,3 +3032,17 @@ test('regex search refuses nested quantifiers and over-long patterns instead of 
   expect(treeRows(await ui.drawn()).rows.filter(r => r.id)).toEqual([])
   await ui.unmount()
 })
+
+test('m sorts each level by the value column once every value on that level is known, newest first, folders first', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, { ...ICON_WORLD(root), mtimes: { [`${root}/README.md`]: 1_700_000_000_000, [`${root}/logo.png`]: 1_700_000_900_000, [`${root}/.gitignore`]: 1_700_000_500_000 } }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'm' }, { in: 'rows' })
+  await clock.settle()
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id.slice(root.length + 1))
+  expect(ids).toEqual(['src', 'logo.png', '.gitignore', 'README.md'])
+  await ui.unmount()
+})

@@ -1313,6 +1313,11 @@ function metricOf(t: FileTree, n: FileNode): number {
   if (t.column === 'size') return n.kind === 'dir' ? (t.dirSizes[n.id] ?? -1) : n.size
   return n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime
 }
+function metricKnown(t: FileTree, n: FileNode): boolean {
+  if (t.column === 'loc') return n.kind === 'link' || locCache.has(n.id) || (n.kind === 'file' && !counted(n.name))
+  if (t.column === 'size') return n.kind !== 'dir' || n.id in t.dirSizes
+  return n.kind !== 'dir' || dirTimes.has(n.id)
+}
 function gitOf(t: FileTree, n: FileNode): [number, number] {
   const d = t.diff[n.id]
   const c = t.counts[n.id]
@@ -1356,7 +1361,11 @@ function rowsOf(base: FileTree): Row[] {
         const [x, y] = [gitOf(t, a), gitOf(t, b)]
         return sign * (x[0] - y[0] || x[1] - y[1])
       }
-    : (a: FileNode, b: FileNode) => sign * (metricOf(t, a) - metricOf(t, b))
+    : (() => {
+        const pending = new Set<string>()
+        for (const n of t.nodes) if (!pending.has(n.parent) && !metricKnown(t, n)) pending.add(n.parent)
+        return (a: FileNode, b: FileNode) => pending.has(a.parent) ? collator.compare(a.name, b.name) : sign * (metricOf(t, a) - metricOf(t, b)) || collator.compare(a.name, b.name)
+      })()
   return visibleRows(t, order)
 }
 
