@@ -77,6 +77,7 @@ declare module 'claude-code' {
       tree: FileTree
       theme: Theme
       activity: Activity[]
+      visits: Record<string, { n: number; at: number }>
     }
   }
 }
