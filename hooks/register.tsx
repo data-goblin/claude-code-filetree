@@ -2484,7 +2484,7 @@ export const register: Register = (on, options) => {
     const tint = (c: string | undefined) => (c === '' ? { dimColor: true } : c === undefined ? {} : { color: desk ? ink(c, c) : c })
     const bgRgb = rgbOf(theme.bg)
     const searchBg = bgRgb ? toHex(over(bgRgb, rgbOf(theme.fg) ?? (light ? [0, 0, 0] : [255, 255, 255]), 0.07)) : light ? 'ansi256(254)' : 'ansi256(236)'
-const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
+    const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
     const toggle = (id: 'case' | 'regex', label: string, active: boolean, bad: boolean) => {
       const color = bad ? ink(theme.urgent, DESK.urgent) : active ? accentInk : mutedInk
       return desk ? (
