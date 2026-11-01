@@ -491,6 +491,7 @@ test('hovering a header button says what it does: left of the buttons on desktop
     await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-hidden' })
     await clock.settle()
     expect(await texts(ui)).toMatch(/"hide hidden files ?"/)
+    expect(JSON.stringify(await ui.drawn())).toMatch(surface === 'terminal' ? /"color":"ansi256\(4\)","wrap":"truncate-end"\},"children":\["hide hidden files"\]/ : /"color":"#4b8ef0","wrap":"truncate-end"\},"children":\["hide hidden files "\]/)
     await (surface === 'desktop' ? tap(ui, 'hidden') : ui.press({ key: 'hidden' }))
     await clock.settle()
     expect(await texts(ui)).toMatch(/"show hidden files ?"/)

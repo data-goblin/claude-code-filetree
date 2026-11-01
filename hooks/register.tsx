@@ -2510,11 +2510,13 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
         </Box>
       </Box>
     ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : {}) } satisfies ButtonProps} />
-    const hint = (buttons: { id: string; label: string; hint: string }[], title: number) => {
-      const text = buttons.find(b => b.id === hovered)?.hint
+    const hint = (buttons: { id: string; label: string; hint: string; dim: boolean }[], title: number) => {
+      const over = buttons.find(b => b.id === hovered)
+      const text = over?.hint
       if (!text) return null
+      const tint = over && !over.dim ? accentInk : ink(theme.fg, DESK.fg)
       const room = e.props.bodyColumns - title - buttons.reduce((w, b) => w + b.label.length + (e.surface === 'desktop' ? 2 : 1), 0) - 2
-      return text.length <= room ? <Text {...mutedText}>{`${text} `}</Text> : null
+      return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
     }
     if (t.preview) {
       if (previewed?.path !== t.preview) await loadPreview($, t.preview)
@@ -2706,7 +2708,9 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }
     const toolGap = toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
-    const tipText = desk ? '' : (buttons.find(b => b.id === hovered)?.hint ?? '')
+    const tipButton = buttons.find(b => b.id === hovered)
+    const tipText = desk ? '' : (tipButton?.hint ?? '')
+    const tipProps = tipButton && !tipButton.dim ? { color: theme.accent } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
@@ -3322,7 +3326,7 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
             {latest && chip(latest)}
             {tipText ? (
               <Box flexShrink={1} marginLeft={2}>
-                <Text {...mutedText} wrap="truncate-end">{tipText}</Text>
+                <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
             {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
