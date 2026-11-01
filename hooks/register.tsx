@@ -66,7 +66,7 @@ const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
 const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
 type Col = (typeof COLS)[number]
 const HINT_MS = 5_000
-const TOGGLES = ['cwd', 'hidden', 'size', 'split']
+const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse']
 const SPIN_MS = 400
 const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
@@ -770,6 +770,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
   const root = (await get($)).root
   blink?.cancel()
   blink = null
+  const was = new Set((await get($)).expanded)
   await patch($, cur => {
     if (cur.root !== root) return {}
     const open = new Set(cur.expanded)
@@ -803,6 +804,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
       ...keepTop(cur, [...open]),
     }
   })
+  await markOpened($, was)
   if (generation !== mine) return
   blink = $.clock.after(FLASH_MS, () => {
     if (generation !== mine) return
@@ -1158,6 +1160,11 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
     for (const p of paths) for (const a of ancestorsOf(p, cur.root)) open.add(a)
     return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
   })
+  await markOpened($, was, now)
+}
+
+async function markOpened($: EngineInterface, was: Set<string>, at?: number): Promise<void> {
+  const now = at ?? (await $.clock.now())
   const t = await get($)
   const fresh = t.expanded.filter(d => !was.has(d) || autoOpened.has(d))
   if (!fresh.length) return
@@ -2630,6 +2637,14 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
     const buttons = glyphSetting === 'text' && e.props.bodyColumns - wordWidth >= 8 ? wordButtons : plainButtons
     const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
+    const toolRoom = e.props.bodyColumns - header.length - 4
+    const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + [...b.label].length, 0) + gap * Math.max(0, list.length - 1) + 1
+    let toolButtons = buttons
+    for (const drop of ['autocollapse', 'size', 'collapse', 'refresh']) {
+      if (toolWidth(toolButtons, 1) <= toolRoom) break
+      toolButtons = toolButtons.filter(b => b.id !== drop)
+    }
+    const toolGap = toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
 
     const sizePad = desk ? '\u2007' : ' '
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
@@ -3150,8 +3165,8 @@ const glow = (color: string, id: string) => (hovered === id ? lighten(color) : c
             </Box>
             <Box flexGrow={1} />
             {hint(buttons, header.length + 2)}
-            <Box flexDirection="row" gap={1}>
-              {buttons.map(button)}
+            <Box flexDirection="row" gap={toolGap}>
+              {toolButtons.map(button)}
               <Text> </Text>
             </Box>
           </Box>
