@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -52,6 +52,16 @@
       "type": "string",
       "title": "Open at start",
       "description": "on: the pane opens when a session starts. off: it stays closed until you run /filetree.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
+    "focus": {
+      "type": "string",
+      "title": "Focus on open",
+      "description": "on: /filetree moves the keyboard into the tree when it opens it. off: the keyboard stays in the prompt, so the same command, or a key bound to it, hides the tree again; /filetree open, /filetree <path> and a tree hidden behind another tab still take the focus.",
       "default": "on",
       "options": [
         "on",
