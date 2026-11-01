@@ -3272,3 +3272,37 @@ test('a folder date scan cut short by a write is redone, so the date still appea
   expect(src?.right.map(x => x.t).join('')).toContain('2023-11-14 23:23')
   await ui.unmount()
 })
+
+test('desktop jump mode keeps a keyboard zone with no matches, so Backspace and Esc still work, and no hotkeys compete for letters', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['README.md', 'file']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: `hit:${root}/hooks` })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"hotkey"')
+  await ui.post({ key: 'q' }, { in: `hit:${root}/hooks` })
+  await clock.settle()
+  let shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('no matching folder')
+  expect(shown).toContain('"key":"hit:jump-none"')
+  await ui.post({ key: 'backspace' }, { in: 'hit:jump-none' })
+  await clock.settle()
+  shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain(`"key":"hit:${root}/hooks"`)
+  await ui.post({ key: 'q' }, { in: `hit:${root}/hooks` })
+  await clock.settle()
+  await ui.post({ key: 'escape' }, { in: 'hit:jump-none' })
+  await clock.settle()
+  shown = JSON.stringify(await ui.drawn())
+  expect(shown).not.toContain('no matching folder')
+  expect(shown).toContain('"hotkey":"z"')
+  await ui.unmount()
+})

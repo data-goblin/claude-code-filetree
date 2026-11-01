@@ -3135,7 +3135,14 @@ export const register: Register = (on, options) => {
                 <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
               </Box>
             </Box>
-          )) : <Text key="jump-none" {...mutedText}>no matching folder</Text>}
+          )) : (
+            <Box key="jump-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+              <Text {...mutedText}>no matching folder</Text>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:jump-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          )}
         </Box>
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
@@ -3434,9 +3441,9 @@ export const register: Register = (on, options) => {
       }
     }
     const keys = allKeys.filter(k => picked.has(k.key))
-    const hidden: [string, () => void][] = [
+    const hidden: [string, () => void][] = zjump.on ? [] : [
       ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
-      ...allKeys.filter(k => /^[a-z]$/.test(k.key) && !picked.has(k.key)).map((k): [string, () => void] => [k.key, () => (zjump.on ? void jumpKey($, k.key) : k.act())]),
+      ...allKeys.filter(k => /^[a-z]$/.test(k.key) && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
 
@@ -3543,7 +3550,7 @@ export const register: Register = (on, options) => {
                   ? <Button key="nav-page" plain dimColor label={`[ ]: ${k.label}`} onPress={k.act}><Text color={theme.accent}>[ ]</Text>{`: ${k.label}`}</Button>
                   : k.key === '?'
                   ? <Button key="nav-help" plain dimColor label={`?: ${k.label}`} onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>{`: ${k.label}`}</Button>
-                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={/^[a-z]$/.test(k.key) ? k.key : undefined} label={/^[a-z]$/.test(k.key) ? k.label : `${k.key}: ${k.label}`} onPress={() => (zjump.on && /^[a-z]$/.test(k.key) ? void jumpKey($, k.key) : k.act())} />)}
+                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={!zjump.on && /^[a-z]$/.test(k.key) ? k.key : undefined} label={/^[a-z]$/.test(k.key) ? k.label : `${k.key}: ${k.label}`} onPress={k.act} />)}
               </Box>
             ) : shortcutsSetting === 'auto' ? (
               desk && Svg ? (
