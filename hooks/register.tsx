@@ -172,7 +172,9 @@ let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
 let autoCollapseDefault = false
-const autoOpened = new Map<string, { until: number; cursor: string }>()
+const autoOpened = new Map<string, number>()
+let collapseTimer: { cancel: () => void } | null = null
+let collapseAt = 0
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
 let shortcutsTimer = 0
@@ -448,6 +450,9 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   generation += 1
   blink?.cancel()
   blink = null
+  clearAutoCollapse()
+  dirTimes.clear()
+  timeQueue = []
   lastRoot = root
   hintRoot = ''
   searchIndex = null
@@ -771,7 +776,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
   const root = (await get($)).root
   blink?.cancel()
   blink = null
-  const was = new Set((await get($)).expanded)
+  const opened: string[] = []
   await patch($, cur => {
     if (cur.root !== root) return {}
     const open = new Set(cur.expanded)
@@ -789,6 +794,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
       if (!chain.some(a => !open.has(a))) continue
       for (const a of chain) {
         if (!open.has(a)) {
+          opened.push(a)
           dim.add(a)
           all[a] = all[a] ?? tone
         }
@@ -805,7 +811,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
       ...keepTop(cur, [...open]),
     }
   })
-  await markOpened($, was)
+  await markOpened($, opened, unique)
   if (generation !== mine) return
   blink = $.clock.after(FLASH_MS, () => {
     if (generation !== mine) return
@@ -1154,23 +1160,53 @@ async function touched($: EngineInterface, paths: string[], tone: string, show: 
 async function reveal($: EngineInterface, paths: string[]): Promise<void> {
   if (await followCwd($)) return
   await revealPaths($, paths)
-  const now = await $.clock.now()
-  const was = new Set((await get($)).expanded)
+  const opened: string[] = []
   await patch($, cur => {
     const open = new Set(cur.expanded)
-    for (const p of paths) for (const a of ancestorsOf(p, cur.root)) open.add(a)
+    for (const p of paths) for (const a of ancestorsOf(p, cur.root)) if (!open.has(a)) {
+      open.add(a)
+      opened.push(a)
+    }
     return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
   })
-  await markOpened($, was, now)
+  await markOpened($, opened, paths)
 }
 
-async function markOpened($: EngineInterface, was: Set<string>, at?: number): Promise<void> {
-  const now = at ?? (await $.clock.now())
-  const t = await get($)
-  const fresh = t.expanded.filter(d => !was.has(d) || autoOpened.has(d))
-  if (!fresh.length) return
-  for (const d of fresh) autoOpened.set(d, { until: now + ACTIVITY_TTL_MS, cursor: t.cursor })
-  $.clock.after(ACTIVITY_TTL_MS + 50, () => void autoCollapse($))
+async function markOpened($: EngineInterface, opened: string[], touched: string[]): Promise<void> {
+  if (!autoCollapseOn(await get($))) {
+    clearAutoCollapse()
+    return
+  }
+  const until = (await $.clock.now()) + ACTIVITY_TTL_MS
+  for (const d of opened) if (!autoOpened.has(d)) autoOpened.set(d, until)
+  for (const d of autoOpened.keys()) if (touched.some(p => p === d || inside(d, p))) autoOpened.set(d, until)
+  armCollapse($)
+}
+
+function armCollapse($: EngineInterface): void {
+  if (!autoOpened.size) return
+  const next = Math.min(...autoOpened.values())
+  if (collapseTimer && collapseAt <= next) return
+  collapseTimer?.cancel()
+  collapseAt = next
+  void $.clock.now().then(now => {
+    collapseTimer = $.clock.after(Math.max(1, next - now + 50), () => {
+      collapseTimer = null
+      collapseAt = 0
+      void autoCollapse($)
+    })
+  })
+}
+
+function clearAutoCollapse(): void {
+  autoOpened.clear()
+  collapseTimer?.cancel()
+  collapseTimer = null
+  collapseAt = 0
+}
+
+function claimMarks(cursor: string): void {
+  for (const d of [...autoOpened.keys()]) if (cursor === d || inside(d, cursor)) autoOpened.delete(d)
 }
 
 function autoCollapseOn(t: FileTree): boolean {
@@ -1181,16 +1217,16 @@ async function autoCollapse($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const t = await get($)
   if (!autoCollapseOn(t)) {
-    autoOpened.clear()
+    clearAutoCollapse()
     return
   }
   const shut: string[] = []
-  for (const [dir, mark] of autoOpened) {
-    if (mark.until > now) continue
+  for (const [dir, until] of [...autoOpened]) {
+    if (until > now) continue
     autoOpened.delete(dir)
-    if (t.cursor !== mark.cursor && (t.cursor === dir || inside(dir, t.cursor))) continue
     shut.push(dir)
   }
+  armCollapse($)
   if (!shut.length) return
   const gone = new Set(shut)
   await patch($, cur => {
@@ -2017,6 +2053,11 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 }
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
+  await steer($, key, shift, surface)
+  if (autoOpened.size) claimMarks((await get($)).cursor)
+}
+
+async function steer($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   const t = await get($)
   const rows = rowsOf(t)
   const at = rows.findIndex(r => r.node.id === t.cursor)
@@ -2103,7 +2144,10 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
-  else if (id === 'autocollapse') await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
+  else if (id === 'autocollapse') {
+    await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
+    if (!autoCollapseOn(await get($))) clearAutoCollapse()
+  }
   else if (previewActs.has(id) && id !== 'external') previewActs.get(id)?.()
   else if (id === 'scope') await scopeSearch($, '')
   else if (id === 'sort-name') await sortBy($, 'name')
@@ -2344,6 +2388,7 @@ export const register: Register = (on, options) => {
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
       if (data.ctrl || data.shift) await openNode($, n)
       else await press($, n)
+      if (autoOpened.size) claimMarks((await get($)).cursor)
       return {}
     }
     if (typeof data.key !== 'string') return {}
