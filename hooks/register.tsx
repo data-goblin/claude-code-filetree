@@ -14,7 +14,7 @@ import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, 
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
-import { activityIcon, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
+import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
 import {
@@ -2726,7 +2726,8 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const rowColors = { activeBg: theme.selection, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
+    const selBg = selectionOn(theme.selection, theme.bg, light)
+    const rowColors = { activeBg: selBg, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
     nativeScroll = e.surface === 'desktop'
     const accentInk = ink(theme.accent, DESK.accent)
     const mutedInk = ink(theme.muted, DESK.muted)
@@ -3035,15 +3036,16 @@ export const register: Register = (on, options) => {
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
       const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
-      const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : '  '
+      const isCur = n.id === t.cursor
+      const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
       const glyph = unicode ? (n.kind === 'dir' ? '■' : '∙') : fileIcon(n, r.open, isRepo)
       const lit = isBright || isDim
       const left: Seg[] = [
         { t: '  '.repeat(r.depth) },
-        { t: caret, c: theme.muted },
+        { t: caret, c: isCur ? theme.accent : theme.muted, b: isCur || undefined },
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
-        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
+        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' },
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
         const cell = cells[c]
@@ -3124,6 +3126,7 @@ export const register: Register = (on, options) => {
         : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
+          {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
           {tailCols(p.cells, `tail:${n.id}`)}

@@ -1,5 +1,7 @@
 import type { FileNode } from '../types'
 
+import { rgbOf } from './pixmap'
+
 const NS = 'http://www.w3.org/2000/svg'
 
 const FILE = 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6'
@@ -148,7 +150,7 @@ export const DESK = {
   guide: '#303034',
   fg: '#d6d6d6',
   urgent: '#ef5350',
-  selection: '#2b2d31',
+  selection: '#393c44',
   hover: '#232427',
   field: '#252525',
   edge: '#333336',
@@ -221,4 +223,31 @@ export function rowSvg(depth: number, chevron: 'open' | 'closed' | null, icon: I
   const chev = chevron ? glyph(chevron === 'open' ? 'chevron-down' : 'chevron-right', chevronColor, x + (STEP_PX - CHEVRON_PX) / 2, (ROW_PX - CHEVRON_PX) / 2, CHEVRON_PX, 3.2) : ''
   const pic = icon ? glyph(icon, color, x + STEP_PX, (ROW_PX - 16) / 2, 16) : ''
   return frame(w, ROW_PX, guides + chev + pic)
+}
+
+export function barSvg(color: string): string {
+  return `<svg xmlns="${NS}" width="2" height="${ROW_PX}"><rect width="2" height="${ROW_PX}" fill="${color}"/></svg>`
+}
+
+const SELECTION_MIN = 1.3
+
+function lumOf(hex: string): number {
+  const [r, g, b] = rgbOf(hex).map(c => {
+    const v = c / 255
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+  })
+  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
+}
+
+function shade(bg: string, light: boolean): string {
+  if (!light) return lighten(bg, 0.14)
+  return `#${rgbOf(bg).map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('')}`
+}
+
+export function selectionOn(selection: string, bg: string, light: boolean): string {
+  const fallback = light ? 'ansi256(252)' : 'ansi256(238)'
+  if (!selection || selection === 'ansi256(0)') return /^#[0-9a-f]{6}$/i.test(bg) ? shade(bg, light) : fallback
+  if (!/^#[0-9a-f]{6}$/i.test(selection) || !/^#[0-9a-f]{6}$/i.test(bg)) return selection
+  const [hi, lo] = [lumOf(selection), lumOf(bg)].sort((x, y) => y - x)
+  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05) >= SELECTION_MIN ? selection : shade(bg, light)
 }
