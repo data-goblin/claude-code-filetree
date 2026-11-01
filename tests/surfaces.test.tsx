@@ -5,7 +5,7 @@ import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
-import { age, ancestorsOf, formatSize, replaceChildren, toNodes } from '../hooks/tree'
+import { age, ancestorsOf, badPattern, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
   os: 'darwin' | 'linux' | 'win32'
@@ -3071,3 +3071,9 @@ test('folder dates come from one walk per folder that also dates every folder be
   expect(date(`${root}/src`)).toContain('2023-11-14 23:23')
   await ui.unmount()
 })
+
+test('regex search checks the pattern shape: nested or alternated repeats and backreferences are refused, ordinary patterns pass', () => {
+  for (const p of ['((a+))+$', '(?:(a|a)*)+', '(a*)*', '((ab)+)+', '(a+)+$', '(x)\\1']) expect(badPattern(p, true)).toBe(true)
+  for (const p of ['(foo|bar)\\.ts$', 'a+b', '[a-z]+\\d{2}', '(ab)+', '[(]+']) expect(badPattern(p, true)).toBe(false)
+})
+

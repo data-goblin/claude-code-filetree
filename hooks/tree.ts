@@ -275,14 +275,68 @@ export function relative(root: string, path: string): string {
 
 const MAX_QUERY = 200
 const MATCH_BUDGET_MS = 40
-const NESTED = /\((?:[^()\\]|\\.)*[+*}]\)[+*{]|\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*{]/
+
+export function catastrophic(q: string): boolean {
+  type Group = { quant: boolean; alt: boolean }
+  const stack: Group[] = [{ quant: false, alt: false }]
+  let last: { group: Group | null } | null = null
+  for (let i = 0; i < q.length; i++) {
+    const c = q[i]
+    if (c === '\\') {
+      const n = q[i + 1] ?? ''
+      if (/[1-9]/.test(n) || n === 'k') return true
+      i += 1
+      last = { group: null }
+    } else if (c === '[') {
+      i += 1
+      if (q[i] === '^') i += 1
+      if (q[i] === ']') i += 1
+      while (i < q.length && q[i] !== ']') i += q[i] === '\\' ? 2 : 1
+      last = { group: null }
+    } else if (c === '(') {
+      if (q[i + 1] === '?') {
+        const m = /^\?(?::|=|!|<=|<!|<[A-Za-z_$][\w$]*>)/.exec(q.slice(i + 1))
+        i += m ? m[0].length : 1
+      }
+      stack.push({ quant: false, alt: false })
+      last = null
+    } else if (c === ')') {
+      const g = stack.length > 1 ? stack.pop() : undefined
+      const top = stack[stack.length - 1]
+      if (g && top && g.quant) top.quant = true
+      last = g ? { group: g } : null
+    } else if (c === '|') {
+      const top = stack[stack.length - 1]
+      if (top) top.alt = true
+      last = null
+    } else if (c === '*' || c === '+' || c === '?' || c === '{') {
+      let repeats = c !== '?'
+      if (c === '{') {
+        const m = /^\{(\d+)(,(\d*))?\}/.exec(q.slice(i))
+        if (!m) {
+          last = { group: null }
+          continue
+        }
+        repeats = m[2] !== undefined && (m[3] === '' || Number(m[3]) > 1)
+        i += m[0].length - 1
+      }
+      if (q[i + 1] === '?') i += 1
+      if (!last) continue
+      if (last.group && (last.group.quant || last.group.alt)) return true
+      const top = stack[stack.length - 1]
+      if (top && (repeats || last.group)) top.quant = true
+      last = null
+    } else last = { group: null }
+  }
+  return false
+}
 
 export function badPattern(query: string, regex: boolean): boolean {
   const q = query.trim()
   if (!q) return false
   if (q.length > MAX_QUERY) return true
   if (!regex) return false
-  if (NESTED.test(q)) return true
+  if (catastrophic(q)) return true
   try {
     new RegExp(q)
     return false
@@ -291,24 +345,31 @@ export function badPattern(query: string, regex: boolean): boolean {
   }
 }
 
-export function matcher(query: string, cased: boolean, regex: boolean): ((text: string) => boolean) | null {
+export type Matcher = ((text: string) => boolean) & { partial: boolean }
+
+export function matcher(query: string, cased: boolean, regex: boolean): Matcher | null {
   const q = query.trim()
   if (!q) return null
-  if (badPattern(q, regex)) return () => false
+  const make = (test: (text: string) => boolean): Matcher => Object.assign(test, { partial: false })
+  if (badPattern(q, regex)) return make(() => false)
   if (regex) {
     const re = new RegExp(q, cased ? '' : 'i')
-    const deadline = Date.now() + MATCH_BUDGET_MS
-    let count = 0
-    let spent = false
-    return text => {
-      if (spent) return false
-      if ((++count & 63) === 0 && Date.now() > deadline) spent = true
-      return !spent && re.test(text.length > 512 ? text.slice(-512) : text)
-    }
+    let deadline = 0
+    const m: Matcher = make(text => {
+      if (m.partial) return false
+      const now = Date.now()
+      if (!deadline) deadline = now + MATCH_BUDGET_MS
+      else if (now > deadline) {
+        m.partial = true
+        return false
+      }
+      return re.test(text.length > 512 ? text.slice(-512) : text)
+    })
+    return m
   }
-  if (cased) return text => text.includes(q)
+  if (cased) return make(text => text.includes(q))
   const lower = q.toLowerCase()
-  return text => text.toLowerCase().includes(lower)
+  return make(text => text.toLowerCase().includes(lower))
 }
 
 export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => number): Row[] {
