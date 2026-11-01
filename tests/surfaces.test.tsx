@@ -3477,3 +3477,20 @@ test('a folder date walk that the engine aborts is retried, so the date still ap
   expect(docs?.right.map(x => x.t).join('')).toContain(stamp(1_700_000_600_000))
   await ui.unmount()
 })
+
+test('deleted files under an ignored name never come back as ghost rows or in the rolled-up counts', { timeoutMs: 20_000, options: { glyphs: 'plain', ignore: 'vendor' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, { ...ICON_WORLD(root), status: '## main\0 D vendor/x.ts\0 D gone.ts\0', numstat: '0\t5\tvendor/x.ts\0' + '0\t2\tgone.ts\0', dirs: { [root]: [['README.md', 'file'], ['vendor', 'dir']], [`${root}/vendor`]: [] } }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id.slice(root.length + 1))
+  expect(ids).toContain('gone.ts')
+  expect(ids.some(id => id.startsWith('vendor'))).toBe(false)
+  expect(shown).toContain('"t":" -2"')
+  expect(shown).not.toContain('" -7"')
+  expect(shown).toContain('" D:1"')
+  await ui.unmount()
+})

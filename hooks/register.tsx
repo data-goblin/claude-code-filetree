@@ -422,12 +422,14 @@ async function readGit($: EngineInterface): Promise<void> {
       const others = await git($, root, ['ls-files', '-o', '--exclude-standard', '-z', '--', ...parsed.untrackedDirs.map(d => d.slice(root.length + 1) || '.')])
       if (others.exitCode === 0) for (const rel of others.stdout.split('\0').filter(Boolean)) files[join(root, rel)] = 'new'
     }
-    for (const path of Object.keys(diff)) if (files[path] === 'new') delete diff[path]
+    for (const path of Object.keys(diff)) if (files[path] === 'new' || isIgnored(root, path)) delete diff[path]
+    for (const path of Object.keys(files)) if (isIgnored(root, path)) delete files[path]
+    const gitShown = Object.fromEntries(Object.entries(parsed.git).filter(([path]) => !isIgnored(root, path)))
     dirty = { root, files }
     await patch($, cur =>
       cur.root === root
         ? {
-            git: parsed.git,
+            git: gitShown,
             ignored: parsed.ignored,
             untrackedDirs: parsed.untrackedDirs,
             branch: parsed.branch,
@@ -1392,7 +1394,7 @@ function ghostScan(t: FileTree): FileNode[] {
   loaded.add(t.root)
   const out: FileNode[] = []
   for (const [id, status] of Object.entries(t.git)) {
-    if (status !== 'D' || have.has(id)) continue
+    if (status !== 'D' || have.has(id) || isIgnored(t.root, id)) continue
     const parent = dirname(id)
     if (!loaded.has(parent) || !inside(t.root, id)) continue
     const name = id.slice(parent.length + 1)
