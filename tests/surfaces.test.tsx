@@ -3149,3 +3149,24 @@ test('a slow index does not eat the regex time budget: the sole match at the end
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`${root}/target.md`])
   await ui.unmount()
 })
+
+test('a hidden folder with no value never freezes the sort of its visible siblings', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    ...ICON_WORLD(root),
+    dirs: { [root]: [['.hid', 'dir'], ['src', 'dir'], ['README.md', 'file'], ['logo.png', 'file']], [`${root}/src`]: [['a.ts', 'file']], [`${root}/.hid`]: [] },
+    mtimes: { [`${root}/README.md`]: 1_700_000_000_000, [`${root}/logo.png`]: 1_700_000_900_000 },
+    newest: dir => (dir === `${root}/src` ? `1700000100 ${root}/src\n` : ''),
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  if (treeRows(await ui.drawn()).rows.some(r => r.id.endsWith('/.hid'))) await ui.press({ key: 'hidden' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.some(r => r.id.endsWith('/.hid'))).toBe(false)
+  await ui.post({ key: 'm' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id.slice(root.length + 1))).toEqual(['src', 'logo.png', 'README.md'])
+  await ui.unmount()
+})

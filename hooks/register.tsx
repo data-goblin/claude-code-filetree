@@ -1336,6 +1336,12 @@ function metricOf(t: FileTree, n: FileNode): number {
   if (t.column === 'size') return n.kind === 'dir' ? (t.dirSizes[n.id] ?? -1) : n.size
   return n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime
 }
+function metricWorking(t: FileTree, n: FileNode): boolean {
+  if (n.kind !== 'dir' && t.column !== 'loc') return false
+  if (t.column === 'loc') return locBusy.has(`d${n.id}`) || locBusy.has(`s${n.id}`) || locQueue.some(([d]) => d === n.id) || locBusy.has(`s${n.parent}`) || locQueue.some(([d]) => d === n.parent)
+  if (t.column === 'size') return sizing.has(n.id) || sizeQueue.includes(n.id)
+  return timing.has(n.id) || timeQueue.some(([d]) => d === n.id) || [...timing].some(w => inside(w, n.id))
+}
 function metricKnown(t: FileTree, n: FileNode): boolean {
   if (t.column === 'loc') return n.kind === 'link' || locCache.has(n.id) || (n.kind === 'file' && !counted(n.name))
   if (t.column === 'size') return n.kind !== 'dir' || n.id in t.dirSizes
@@ -1386,8 +1392,14 @@ function rowsOf(base: FileTree): Row[] {
       }
     : (() => {
         const pending = new Set<string>()
-        for (const n of t.nodes) if (!pending.has(n.parent) && !metricKnown(t, n)) pending.add(n.parent)
-        return (a: FileNode, b: FileNode) => pending.has(a.parent) ? collator.compare(a.name, b.name) : sign * (metricOf(t, a) - metricOf(t, b)) || collator.compare(a.name, b.name)
+        for (const r of visibleRows(t)) if (!pending.has(r.node.parent) && !metricKnown(t, r.node) && metricWorking(t, r.node)) pending.add(r.node.parent)
+        return (a: FileNode, b: FileNode) => {
+          if (pending.has(a.parent)) return collator.compare(a.name, b.name)
+          const ka = metricKnown(t, a)
+          const kb = metricKnown(t, b)
+          if (ka !== kb) return ka ? -1 : 1
+          return (ka ? sign * (metricOf(t, a) - metricOf(t, b)) : 0) || collator.compare(a.name, b.name)
+        }
       })()
   return visibleRows(t, order)
 }
