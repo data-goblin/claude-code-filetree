@@ -273,10 +273,18 @@ export function relative(root: string, path: string): string {
   return path === root ? '' : path.slice(root.endsWith('/') ? root.length : root.length + 1)
 }
 
+const MAX_QUERY = 200
+const MATCH_BUDGET_MS = 40
+const NESTED = /\((?:[^()\\]|\\.)*[+*}]\)[+*{]|\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)[+*{]/
+
 export function badPattern(query: string, regex: boolean): boolean {
-  if (!regex || !query.trim()) return false
+  const q = query.trim()
+  if (!q) return false
+  if (q.length > MAX_QUERY) return true
+  if (!regex) return false
+  if (NESTED.test(q)) return true
   try {
-    new RegExp(query.trim())
+    new RegExp(q)
     return false
   } catch {
     return true
@@ -286,12 +294,16 @@ export function badPattern(query: string, regex: boolean): boolean {
 export function matcher(query: string, cased: boolean, regex: boolean): ((text: string) => boolean) | null {
   const q = query.trim()
   if (!q) return null
+  if (badPattern(q, regex)) return () => false
   if (regex) {
-    try {
-      const re = new RegExp(q, cased ? '' : 'i')
-      return text => re.test(text)
-    } catch {
-      return () => false
+    const re = new RegExp(q, cased ? '' : 'i')
+    const deadline = Date.now() + MATCH_BUDGET_MS
+    let count = 0
+    let spent = false
+    return text => {
+      if (spent) return false
+      if ((++count & 63) === 0 && Date.now() > deadline) spent = true
+      return !spent && re.test(text.length > 512 ? text.slice(-512) : text)
     }
   }
   if (cased) return text => text.includes(q)
