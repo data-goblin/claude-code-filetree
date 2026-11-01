@@ -6,6 +6,7 @@ import type { ZoneProps } from '../hooks/zone'
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
+import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { age, ancestorsOf, badPattern, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -3168,5 +3169,80 @@ test('a hidden folder with no value never freezes the sort of its visible siblin
   await ui.post({ key: 'm' }, { in: 'rows' })
   await clock.settle()
   expect(treeRows(await ui.drawn()).rows.map(r => r.id.slice(root.length + 1))).toEqual(['src', 'logo.png', 'README.md'])
+  await ui.unmount()
+})
+
+test('jump ranking: every term matches in order, the last one inside the folder name, exact then prefix then contains, then frecency', () => {
+  expect(jumpMatch('/home/k/git/claude-code-filetree', terms('git tree'))).toBe(true)
+  expect(jumpMatch('/home/k/git/claude-code-filetree', terms('tree git'))).toBe(false)
+  expect(jumpMatch('/home/k/git/claude-code-filetree/hooks', terms('tree'))).toBe(false)
+  expect(jumpMatch('/home/k/Videos', terms('VID'))).toBe(true)
+  const cands = [
+    { path: '/home/k/vivid-video-ontology', score: 90 },
+    { path: '/home/k/my-videos', score: 50 },
+    { path: '/home/k/Videos', score: 1 },
+    { path: '/home/k/video', score: 0 },
+    { path: '/home/k/video/old', score: 99 },
+  ]
+  expect(rankJump(cands, 'video')).toEqual(['/home/k/video', '/home/k/Videos', '/home/k/vivid-video-ontology', '/home/k/my-videos'])
+  expect(rankJump(cands, '')).toEqual(['/home/k/video/old', '/home/k/vivid-video-ontology', '/home/k/my-videos', '/home/k/Videos', '/home/k/video'])
+})
+
+test('z opens folder jump without zoxide: folders from the tree and filetree visits rank live, up/down picks, Enter re-roots, Esc cancels', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['tests', 'dir'], ['README.md', 'file']], [`${root}/hooks`]: [['a.ts', 'file']], [`${root}/tests`]: [['hooks-e2e', 'dir'], ['t.ts', 'file']], [`${root}/tests/hooks-e2e`]: [] },
+    find: `${root}/hooks/a.ts\0${root}/tests/t.ts\0${root}/tests/hooks-e2e/x.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('"hotkey":"z"')
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.settle()
+  expect(ran.some(a => a[0] === 'zoxide')).toBe(true)
+  expect(JSON.stringify(await ui.drawn())).toContain('"jump "')
+  for (const k of ['h', 'o', 'o', 'k']) await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(await ids()).toEqual([`${root}/hooks`, `${root}/tests/hooks-e2e`])
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).active).toBe(`${root}/tests/hooks-e2e`)
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"jump "')
+  expect(await ids()).toContain(`${root}/README.md`)
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  for (const k of ['t', 'e', 's', 't']) await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  await ui.post({ key: 'return' }, { in: 'rows' })
+  await clock.settle()
+  expect(await ids()).toEqual([`${root}/tests/hooks-e2e`, `${root}/tests/t.ts`])
+  await ui.unmount()
+})
+
+test('z with zoxide installed merges its scored folders, including ones outside the root, and caches the listing', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    stdout: { 'zoxide query --list': '  80.0 /home/k/other/hooks\n   2.5 /home/k/notes\n' },
+  }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  for (const k of ['h', 'o', 'o', 'k', 's']) await ui.post({ key: k }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/other/hooks', `${root}/hooks`])
+  expect(ran.filter(a => a[0] === 'zoxide').length).toBe(1)
   await ui.unmount()
 })

@@ -101,6 +101,7 @@ h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
+z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
 a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
