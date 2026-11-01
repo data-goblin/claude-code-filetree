@@ -3,6 +3,7 @@ import { GIT_COLOR } from '../hooks/icons'
 import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
+import { DESK, DESK_GIT } from '../hooks/svg'
 
 type Check = { name: string; color: string; min: number }
 
@@ -47,6 +48,14 @@ function checks(tones: typeof TONES, text: number, dim: number): Check[] {
 const suites = [
   { name: 'dark', backgrounds: DARK_BACKGROUNDS, checks: checks(TONES, TEXT, DIM) },
   { name: 'light', backgrounds: LIGHT_BACKGROUNDS, checks: checks(LIGHT_TONES, AAA, AAA) },
+  {
+    name: 'desktop',
+    backgrounds: { ...DARK_BACKGROUNDS, selection: DESK.selection, hover: DESK.hover, field: DESK.field },
+    checks: [
+      ...(['accent', 'muted', 'fg', 'urgent'] as const).map(k => ({ name: `desk ${k}`, color: DESK[k], min: TEXT })),
+      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git ${k}`, color, min: TEXT })),
+    ],
+  },
 ]
 
 let failed = 0
