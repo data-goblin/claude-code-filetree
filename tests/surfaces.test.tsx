@@ -45,6 +45,7 @@ type World = {
   findDelayMs?: number
   newestDelay?: number
   newestAbortOnce?: string[]
+  locAbortOnce?: string[]
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -120,6 +121,13 @@ function world(on: On, w: World, ran: Ran) {
       return ok(w.newest(argv[4] ?? ''))
     }
     if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
+    if (argv[0] === 'find' && argv.includes('grep')) {
+      const at = w.locAbortOnce?.indexOf(argv[1] ?? '') ?? -1
+      if (at >= 0) {
+        w.locAbortOnce?.splice(at, 1)
+        throw new Error('$.process.run(find) aborted')
+      }
+    }
     if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
     if (argv[0] === 'find' && w.find !== undefined) {
       if (w.findDelayMs) await new Promise(r => setTimeout(r, w.findDelayMs))
@@ -3519,4 +3527,23 @@ test('jump mode closes when the pane loses the keyboard and never pulls focus ba
   expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"jump"')
   expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
   await blurred.unmount()
+})
+
+test('a LOC scan that the engine aborts is retried, so the folder still shows its line count', { timeoutMs: 20_000, options: { column: 'loc' } }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] },
+    loc: { [`${root}/src`]: `${root}/src/a.ts:10\n` },
+    locAbortOnce: [`${root}/src`],
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await clock.advance(100)
+  await clock.settle()
+  const src = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src`)
+  expect(src?.right.map(x => x.t).join('').trim()).toBe('10')
+  await ui.unmount()
 })

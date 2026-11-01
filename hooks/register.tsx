@@ -200,6 +200,7 @@ let timeQueue: [string, number][] = []
 const timing = new Set<string>()
 const timeFailed = new Set<string>()
 const timeTries = new Map<string, number>()
+const locTries = new Map<string, number>()
 const TIME_TRIES = 3
 const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
@@ -468,6 +469,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   dirTimes.clear()
   timeFailed.clear()
   timeTries.clear()
+  locTries.clear()
   timeQueue = []
   lastRoot = root
   hintRoot = ''
@@ -660,9 +662,19 @@ function pumpLoc($: EngineInterface): void {
       const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', dir, '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
       takeLoc(parseLoc(run.stdout), dir, deep)
+      locTries.delete(key)
       void $.ui.invalidate('ui.render')
     })()
-      .catch(giveUp)
+      .catch(() => {
+        if (epoch !== sizeEpoch) return
+        const tries = (locTries.get(key) ?? 0) + 1
+        locTries.set(key, tries)
+        if (tries < TIME_TRIES) {
+          if (!locQueue.some(([d, k]) => d === dir && k === deep)) locQueue.push([dir, deep])
+          return
+        }
+        giveUp()
+      })
       .finally(() => {
         locBusy.delete(key)
         locActive -= 1
@@ -786,6 +798,7 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     dirTimes.clear()
     timeFailed.clear()
     timeTries.clear()
+    locTries.clear()
   }
   for (const p of paths ?? []) {
     locCache.delete(p)
