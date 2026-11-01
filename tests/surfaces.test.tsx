@@ -2944,7 +2944,7 @@ test('terminal: toolbar icons sit a space apart, the least used drop first when 
 
 test('terminal: a deleted file stays in its folder as a red struck ghost row with its -N count until committed, untracked files draw green, and the Git header says LOC', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const root = '/Users/k/proj'
-  const clock = world(on, { ...ICON_WORLD(root), status: '## main\0 D gone.ts\0?? new.ts\0', numstat: '0\t7\tgone.ts\0', dirs: { [root]: [['src', 'dir'], ['README.md', 'file'], ['new.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']] } }, [])
+  const clock = world(on, { ...ICON_WORLD(root), status: '## main\0 D gone.ts\0?? new.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n', dirs: { [root]: [['src', 'dir'], ['README.md', 'file'], ['new.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']] } }, [])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
@@ -2959,6 +2959,9 @@ test('terminal: a deleted file stays in its folder as a red struck ghost row wit
   const fresh = rows.find(r => r.id === `${root}/new.ts`)
   expect(fresh?.left[3]).toMatchObject({ c: 'ansi256(2)' })
   expect(fresh?.left[2]).toMatchObject({ c: 'ansi256(2)' })
+  await ui.post({ press: `${root}/gone.ts` }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('"format":"diff"')
   await ui.unmount()
 })
 

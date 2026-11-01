@@ -2061,6 +2061,7 @@ async function navigate($: EngineInterface, key: string, shift = false, surface?
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
     else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
   } else if (cur && (key === 'return' || key === 'o')) await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
+  else if (cur && (key === ' ' || key === 'space') && isGhost(t, cur.id)) await diffFile($, cur.id)
   else if (cur && (key === ' ' || key === 'space')) await (cur.kind !== 'dir' && (await osName($)) === 'darwin' ? quickLook($, cur.id) : toggle($, cur))
 }
 
@@ -2332,6 +2333,12 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (typeof data.press === 'string') {
+      const ghost = ghostsOf(t).find(x => x.id === data.press)
+      if (ghost) {
+        await patch($, () => ({ cursor: ghost.id, selected: ghost.id }))
+        await diffFile($, ghost.id)
+        return {}
+      }
       const n = t.nodes.find(x => x.id === data.press)
       if (!n) return {}
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
