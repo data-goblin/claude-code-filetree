@@ -2949,9 +2949,9 @@ export const register: Register = (on, options) => {
     const deskFrom = nativeScroll && shown.length > DESK_ROWS ? Math.max(0, Math.min(at - Math.floor(DESK_ROWS / 2), shown.length - DESK_ROWS)) : 0
     const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS) : shown
     if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
-    if (t.column === 'size') wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
+    if (t.column === 'size') wantSizes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'loc') {
-      const seen = [...pinned, ...shown].map(r => r.node)
+      const seen = [...pinned, ...drawn].map(r => r.node)
       wantLoc($, seen.filter(n => n.kind === 'dir' && !locCache.has(n.id)).map(n => n.id), true)
       wantLoc($, [...new Set(seen.filter(n => n.kind === 'file' && counted(n.name) && !locListed.has(n.parent)).map(n => n.parent))], false)
     }
@@ -3027,7 +3027,7 @@ export const register: Register = (on, options) => {
       if (metric) cells.metric = { t: metric, c: theme.muted }
       return cells
     }
-    const tailRows = desk ? shown.slice(0, DESK_ROWS) : [...pinned, ...shown]
+    const tailRows = desk ? drawn : [...pinned, ...shown]
     const allCells = tailRows.map(r => cellsOf(r.node))
     const branchCells: Partial<Record<Col, Seg>> = {}
     if (totals[0] > 0) branchCells['+'] = { t: `+${totals[0]}`, c: addColor }
