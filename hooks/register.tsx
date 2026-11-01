@@ -2014,8 +2014,14 @@ async function showPreview($: EngineInterface, path: string): Promise<void> {
   $.clock.after(100, () => parkPreview($))
 }
 
+let previewDesk = false
+
+function previewFocusKey(): 'edit' | 'back' {
+  return !previewDesk && (editWithSetting || inTmux || inHerdr) ? 'edit' : 'back'
+}
+
 function parkPreview($: EngineInterface): void {
-  void $.ui.focus({ requestId: PANE, key: editWithSetting || inTmux || inHerdr ? 'edit' : 'back' }).catch(() => {})
+  void $.ui.focus({ requestId: PANE, key: previewFocusKey() }).catch(() => {})
 }
 
 async function closePreview($: EngineInterface): Promise<void> {
@@ -2753,6 +2759,7 @@ export const register: Register = (on, options) => {
         const step = p?.diff ? (p.diff.some(l => l.kind === '@') ? 'file' : 'hunk') : ''
         const toTree = t.nodes.find(n => n.id === t.preview)?.kind === 'dir'
         const edits = editWithSetting || inTmux || inHerdr
+        previewDesk = true
         const acts: { id: string; key: string; icon: IconName; hint: string; run: () => Promise<void> }[] = [
           { id: 'pv-k', key: 'k', icon: 'arrow-up', hint: step ? `previous ${step}` : 'up a line', run: () => (step ? jumpDiff($, -1) : scrollPreview($, -1)) },
           { id: 'pv-j', key: 'j', icon: 'arrow-down', hint: step ? `next ${step}` : 'down a line', run: () => (step ? jumpDiff($, 1) : scrollPreview($, 1)) },
@@ -2770,7 +2777,7 @@ export const register: Register = (on, options) => {
             <Box key="pv-head" flexDirection="row" alignItems="center">
               <Box key="pv-back" flexDirection="row" alignItems="center" flexShrink={0}>
                 <Svg key="pv-back-icon" source={rowSvg(0, null, 'chevron-left', mutedInk, DESK.muted, 0)} alt="back to files" width={STEP_PX * 2} height={ROW_PX} />
-                <Button key="back" plain dimColor hover={{ dimColor: false }} hotkey="h" autoFocus={edits ? undefined : true} label="Files" onPress={() => void closePreview($)} />
+                <Button key="back" plain dimColor hover={{ dimColor: false }} hotkey="h" autoFocus label="Files" onPress={() => void closePreview($)} />
               </Box>
               <Text {...mutedText}>{' / '}</Text>
               <Box flexShrink={1} flexGrow={1} overflow="hidden">
@@ -2812,6 +2819,7 @@ export const register: Register = (on, options) => {
           </Box>
         )
       }
+      previewDesk = false
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
           <Box flexDirection="row">

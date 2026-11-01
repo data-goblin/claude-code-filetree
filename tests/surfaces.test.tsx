@@ -3358,3 +3358,27 @@ test('Windows z jump: zoxide backslash paths are normalised, a parent-only fragm
   await ui.unmount()
 })
 
+for (const [surface, options, want] of [
+  ['terminal', { open: 'preview' }, 'back'],
+  ['terminal', { open: 'preview', edit: 'nvim +{line} {path}' }, 'edit'],
+  ['desktop', { open: 'preview' }, 'back'],
+  ['desktop', { open: 'preview', edit: 'nvim +{line} {path}' }, 'back'],
+] as const) {
+  test(`${surface} preview with ${options.edit ? 'an editor' : 'no editor'}: focus goes to "${want}", which is drawn as the only autofocus`, { timeoutMs: 20_000, options }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', files: { '/home/k/proj/a.ts': 'const a = 1\n' } }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const where = surface === 'desktop' ? `hit:${root}/a.ts` : 'rows'
+    await ui.post({ press: `${root}/a.ts` }, { in: where })
+    await ui.post({ press: `${root}/a.ts` }, { in: where })
+    await clock.advance(200)
+    await clock.settle()
+    const shown = JSON.stringify(await ui.drawn())
+    expect(shown.match(/"autoFocus":true/g)?.length).toBe(1)
+    expect(shown).toMatch(new RegExp(`"key":"${want}"[^}]*"autoFocus":true`))
+    await ui.unmount()
+  })
+}
