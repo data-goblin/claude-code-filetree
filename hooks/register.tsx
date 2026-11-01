@@ -2946,7 +2946,8 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
-    const drawn = nativeScroll ? shown.slice(0, DESK_ROWS) : shown
+    const deskFrom = nativeScroll && shown.length > DESK_ROWS ? Math.max(0, Math.min(at - Math.floor(DESK_ROWS / 2), shown.length - DESK_ROWS)) : 0
+    const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS) : shown
     if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'loc') {
@@ -3184,9 +3185,9 @@ export const register: Register = (on, options) => {
     const deskParts: ReturnType<typeof rowParts>[] = []
     if (desk) {
       let size = 0
-      for (const [i, r] of shown.entries()) {
+      for (const r of drawn) {
         size += r.node.name.length + DESK_ROW_CHARS
-        if (size > ROWS_BUDGET || i >= DESK_ROWS) break
+        if (size > ROWS_BUDGET) break
         deskParts.push(rowParts(r))
       }
     }
@@ -3214,7 +3215,9 @@ export const register: Register = (on, options) => {
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
       for (const p of deskParts) out.push(deskRow(p))
-      if (deskParts.length < shown.length) out.push(<Text key="more" {...mutedText}>{`  … ${shown.length - deskParts.length} more rows, collapse folders or use search`}</Text>)
+      if (deskFrom > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskFrom} rows above, collapse folders or use search`}</Text>)
+      const below = shown.length - deskFrom - deskParts.length
+      if (below > 0) out.push(<Text key="more" {...mutedText}>{`  … ${below} more rows, collapse folders or use search`}</Text>)
       return <Box key="tree" flexDirection="column">{out}</Box>
     }
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
