@@ -865,6 +865,7 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     locCache.delete(p)
     locListed.delete(p)
     for (let d = dirname(p), prev = p; d !== prev; prev = d, d = dirname(d)) fileCounts.delete(d)
+    for (const d of [...fileCounts.keys()]) if (inside(p, d)) fileCounts.delete(d)
     for (let d = p, prev = ''; d !== prev; prev = d, d = dirname(d)) {
       dirTimes.delete(d)
       timeFailed.delete(d)
