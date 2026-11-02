@@ -8,6 +8,7 @@ import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
@@ -121,6 +122,12 @@ let previewed: Preview | null = null
 let previewRows = 20
 let splitAt: 'bottom' | 'top' = 'bottom'
 let jumpMovesClaude = true
+let followWork = true
+let workTouches: Touch[] = []
+let workLast = 0
+let mainBusy = false
+let workDeciding = false
+const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let peekPath = ''
 let peekRows = 8
@@ -1596,8 +1603,66 @@ function jumpClose($: EngineInterface, refocus = false): void {
   if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, treeKey()))
 }
 
+async function repoOf($: EngineInterface, path: string): Promise<string | null> {
+  const known = workRepos.get(path)
+  if (known) return known
+  const found = (async () => {
+    for (const dir of [path, dirname(path)]) {
+      try {
+        const run = await git($, dir, ['rev-parse', '--show-toplevel'], 3_000)
+        if (run.exitCode === 0 && run.stdout.trim()) return posix(run.stdout.trim())
+      } catch {}
+    }
+    return null
+  })()
+  workRepos.set(path, found)
+  if (workRepos.size > 2_000) workRepos.delete(workRepos.keys().next().value ?? path)
+  return found
+}
+
+async function noteWork($: EngineInterface, paths: string[], write: boolean): Promise<void> {
+  if (!followWork || paths.length === 0) return
+  const vault = home ? [`${home}/Git/agents`, `${home}/Desktop/Git/agents`, `${home}/git/agents`, `${home}/vault`] : []
+  const kept = [...new Set(paths.map(posix))].filter(p => p.startsWith('/') && !workIgnored(p, home, vault)).slice(0, 40)
+  const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', home, vault)))
+  if (repos.size === 0) return
+  const now = Date.now()
+  workTouches = [...workTouches.filter(t => now - t.at < 180_000), ...[...repos].map(repo => ({ repo, write, at: now }))].slice(-400)
+  if (!mainBusy) void considerWork($)
+}
+
+async function considerWork($: EngineInterface): Promise<void> {
+  if (!followWork || workDeciding) return
+  workDeciding = true
+  try {
+    const cwd = await cwdOf($)
+    const current = (await repoOf($, cwd)) ?? cwd
+    const now = Date.now()
+    const repo = pickRepo(workTouches, current, now, workLast)
+    if (!repo || inside(repo, cwd)) return
+    workLast = now
+    if (!jumpMovesClaude) {
+      follow = false
+      await reset($, repo)
+      return
+    }
+    $.clock.after(0, async () => {
+      try {
+        await $.command.run({ command: 'cd', args: repo })
+        void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
+        $.clock.after(400, () => void followCwd($))
+      } catch (error) {
+        void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+  } finally {
+    workDeciding = false
+  }
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
   jumpClose($, true)
+  workLast = Date.now()
   follow = false
   await reset($, dir)
   if (!jumpMovesClaude || (await cwdOf($)) === dir) return
@@ -2454,6 +2519,7 @@ export const register: Register = (on, options) => {
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
+  followWork = options?.work !== 'off'
   columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
@@ -2587,6 +2653,7 @@ export const register: Register = (on, options) => {
         scheduleScan($, { ...job, actions: proven(pending, results) })
       })()
       if (follow && /(^|[;&|\s])(cd|pushd|popd)(\s|$)/.test(command)) $.clock.after(400, () => void followCwd($))
+      void noteWork($, shellPaths(command, cwd, home), shellWrites(command))
     } else {
       const file =
         'file_path' in e && typeof e.file_path === 'string'
@@ -2595,13 +2662,16 @@ export const register: Register = (on, options) => {
             ? e.notebook_path
             : ''
       if (file) void touched($, [file], 'orange', showWrites)
+      if (file) void noteWork($, [file], true)
     }
     return result
   })
 
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     const result = await next(e)
-    if (result.deny || result.isError || e.tool !== 'Read' || !showReads) return result
+    if (result.deny || result.isError || e.tool !== 'Read') return result
+    void noteWork($, [posix(e.file_path)], false)
+    if (!showReads) return result
     void touched($, [posix(e.file_path)], 'purple', true)
     return result
   })
@@ -2609,13 +2679,29 @@ export const register: Register = (on, options) => {
   for (const tool of [/^Grep$/, /^Glob$/])
     on('tool.call', { tool }, async ($, e, next) => {
       const result = await next(e)
-      if (result.deny || result.isError || !showReads) return result
+      if (result.deny || result.isError) return result
       const names = strings(has(result.result, 'filenames') ? result.result.filenames : undefined)
       if (names.length === 0) return result
       const cwd = await cwdOf($)
+      void noteWork($, names.slice(0, 40).map(f => resolve(cwd, posix(f), home)), false)
+      if (!showReads) return result
       void touched($, names.map(f => resolve(cwd, posix(f), home)), 'purple', true)
       return result
     })
+
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) mainBusy = true
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId) {
+      mainBusy = false
+      void considerWork($)
+    }
+    return result
+  })
 
   on('ui.message', async ($, e, next) => {
     if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
