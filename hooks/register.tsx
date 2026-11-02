@@ -232,7 +232,7 @@ const STALE_MS = 1500
 const staleQueue = new Set<string>()
 let staleTimer: Timer | null = null
 type PictureJob = { path: string; key: string; kind: 'png' | 'image' | 'video' | 'pdf' | 'office'; sig: string; mtime: number; size: number; page: number; px: number; pdf: string }
-type Picture = { state: 'pending' } | { state: 'ready'; file: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
+type Picture = { state: 'pending' } | { state: 'ready'; file: string; png: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
 
 function osName($: EngineInterface): Promise<'linux' | 'darwin' | 'win32'> {
   platform ??= (async () => {
@@ -1835,7 +1835,10 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
       sessionDir = dirname(file)
       size = await pngHeader($, file)
     }
-    return size ? { state: 'ready', file, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) } : { state: 'failed', note: 'could not read the picture size' }
+    if (!size) return { state: 'failed', note: 'could not read the picture size' }
+    // iTerm2 draws only PNG bytes, not a file path the terminal reads itself.
+    const { base64: png } = await $.fs.read(file, { as: 'bytes' })
+    return { state: 'ready', file, png, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) }
   } catch (err) {
     return { state: 'failed', note: messageOf(err).split('\n')[0] ?? 'could not decode' }
   }
@@ -3506,7 +3509,7 @@ export const register: Register = (on, options) => {
         if (pic.state === 'ready' && Image) {
           const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), peekRows)
           status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
-          content = <Image key="peek-image" source={{ file: pic.file, format: 'png', generation: pic.generation }} columns={fit.columns} rows={fit.rows} alt={name} />
+          content = <Image key="peek-image" source={{ png: pic.png }} columns={fit.columns} rows={fit.rows} alt={name} />
         } else content = <Text {...mutedText}>{pic.state === 'pending' ? 'decoding…' : pic.state === 'failed' ? pic.note : 'images show in the terminal'}</Text>
       } else {
         if (isDoc && (peeked?.path !== target || (docKind === 'pdf' && peeked.page !== page))) {

@@ -77,6 +77,7 @@ function world(on: On, w: World, ran: Ran) {
   on('fs.read', (_$, e) => {
     if (w.theme && isTheme(e.path)) return { value: w.theme.toml }
     const file = norm(e.path).replace(/^[A-Za-z]:/, '')
+    if (e.as === 'bytes') return { value: { base64: btoa(PNG_1PX + file) } }
     const text = w.files?.[file]
     if (text !== undefined) return { value: text }
     throw new Error('no theme file')
@@ -296,6 +297,10 @@ function zoneAt(tree: unknown): ZoneProps {
 }
 
 const imageAt = (tree: unknown, key: string): string | undefined => sourceOf(search(tree, n => isKeyed(n, 'Image', key)))
+
+// The fake fs.read answers a bytes read with a 1×1 PNG followed by the path, so a drawn PNG names the file it came from.
+const PNG_1PX = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
+const pngOf = (path: string) => `"png":"${btoa(PNG_1PX + path)}"`
 
 function sourceOf(node: unknown): string | undefined {
   const props = propsOf(node)
@@ -2269,7 +2274,7 @@ test('split preview: a PDF draws its page as a picture with p N/M, prefetches th
   await clock.settle()
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain(`"file":"${cache}/p1.png"`)
+  expect(shown).toContain(pngOf(`${cache}/p1.png`))
   expect(shown).toContain('p 1/3')
   const posters = () => ran.filter(a => a[0] === 'sh' && a.includes(`${root}/doc.pdf`))
   expect(posters()[0]?.slice(8, 9)).toEqual(['pdf'])
@@ -2278,7 +2283,7 @@ test('split preview: a PDF draws its page as a picture with p N/M, prefetches th
   await clock.settle()
   await clock.settle()
   shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain(`"file":"${cache}/p2.png"`)
+  expect(shown).toContain(pngOf(`${cache}/p2.png`))
   expect(shown).toContain('p 2/3')
   await ui.post({ key: ']' }, { in: 'rows' })
   await clock.settle()
@@ -2355,7 +2360,7 @@ test('split preview: the header button shows the file under the cursor below a r
   await clock.settle()
   await clock.settle()
   shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain(`"file":"${root}/b.png","format":"png"`)
+  expect(shown).toContain(pngOf(`${root}/b.png`))
   expect(shown).toContain('800×400')
   expect(shown).toContain('"columns":59,"rows":15')
   expect(ran.some(a => a[0] === 'sh' && a.includes(`${root}/b.png`))).toBe(false)
@@ -2363,7 +2368,7 @@ test('split preview: the header button shows the file under the cursor below a r
   await clock.settle()
   await clock.settle()
   shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain('"file":"/run/user/1000/filetree-preview-1000/')
+  expect(shown).toContain(pngOf('/run/user/1000/filetree-preview-1000/test-session/0123456789abcdef.png'))
   const poster = ran.find(a => a[0] === 'sh' && a.includes(`${root}/c.mp4`))
   expect(poster?.slice(4)).toEqual([`${root}/c.mp4`, '/run/user/1000', 'test-session', poster?.[7] ?? '', 'video', 'mov', '64', POLICY])
   expect(POSTER).toContain('-protocol_whitelist file -f "$coder"')
@@ -2488,7 +2493,7 @@ test('split preview: a cached picture another session pruned is decoded again, a
   await ui.post({ key: 'p' }, { in: 'rows' })
   await clock.settle()
   await clock.settle()
-  expect(JSON.stringify(await ui.drawn())).toContain(`"file":"${cache}/x.png"`)
+  expect(JSON.stringify(await ui.drawn())).toContain(pngOf(`${cache}/x.png`))
   const decodes = () => ran.filter(a => a[0] === 'sh' && a.includes(`${root}/b.jpg`)).length
   expect(decodes()).toBe(1)
   w.dirs[cache] = []
