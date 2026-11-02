@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.6.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.2-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -58,7 +58,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
 - The selected file goes to Claude as context, and `@path` in a prompt reveals that file
-- Right column cycles date, size and lines of code from the header button, with git counts in their own columns beside it; a folder's date is its newest file
+- Right column cycles date, size, lines of code and number of files from the header button, with git counts in their own columns beside it; a folder's date is its newest file
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
 - `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name
@@ -101,7 +101,7 @@ h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
-z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots, Esc cancels
+z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
 a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
@@ -125,9 +125,10 @@ All settings are in `/config` under filetree, each with its own description ther
 ```yaml
 Claude activity:  reads and writes | writes | reads | none
 Follow Claude:    on | off
+Jump moves Claude: tree and Claude | tree
 Open at start:    on | off
 Focus on open:    on | off
-Right column:     date | age | size | loc
+Right column:     date | age | size | loc | files
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off

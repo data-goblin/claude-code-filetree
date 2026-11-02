@@ -1,33 +1,28 @@
 import type { Usage } from './treemap'
 
-const CODE = [
-  'ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'vue', 'svelte', 'astro',
-  'py', 'pyi', 'rs', 'go', 'java', 'kt', 'kts', 'scala', 'groovy', 'gradle', 'c', 'h', 'cc', 'cpp', 'cxx', 'hh', 'hpp', 'hxx', 'm', 'mm',
-  'cs', 'fs', 'fsx', 'vb', 'swift', 'dart', 'rb', 'php', 'pl', 'pm', 'lua', 'r', 'jl', 'ex', 'exs', 'erl', 'hrl', 'clj', 'cljs', 'hs', 'ml', 'mli', 'elm', 'nim', 'zig', 'v', 'sol',
-  'sh', 'bash', 'zsh', 'fish', 'ps1', 'psm1', 'bat', 'cmd', 'nu',
-  'sql', 'dax', 'tmdl', 'pq', 'graphql', 'gql', 'proto', 'tf', 'hcl', 'nix',
-  'html', 'htm', 'css', 'scss', 'sass', 'less', 'xml', 'xsl', 'svg',
-  'md', 'mdx', 'markdown', 'rst', 'adoc', 'tex', 'txt',
-  'json', 'jsonc', 'json5', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf', 'properties',
-  'qml', 'glsl', 'hlsl', 'wgsl', 'gd', 'cmake', 'mk', 'ipynb',
-]
-const NAMES = ['Makefile', 'Dockerfile', 'Containerfile', 'Justfile', 'Rakefile', 'Gemfile', 'CMakeLists.txt', 'Vagrantfile']
-const EXT = new Set(CODE)
 const SKIP = [/\.min\.(js|css)$/i, /-lock\.json$/i, /\.lock$/i, /lock\.yaml$/i]
 const BLANK = '^[[:space:]]*$'
 
 export function counted(name: string): boolean {
-  if (NAMES.includes(name)) return true
-  if (SKIP.some(r => r.test(name))) return false
-  const dot = name.lastIndexOf('.')
-  return dot > 0 && EXT.has(name.slice(dot + 1).toLowerCase())
+  return !SKIP.some(r => r.test(name))
+}
+
+export function scanFrom(dir: string): string {
+  return `${dir.replace(/\/+$/, '')}/.`
+}
+
+export function scanned(text: string, dir: string): string {
+  const base = dir.replace(/\/+$/, '')
+  return text.split(`${base}/./`).join(`${base}/`)
 }
 
 export function locArgv(dir: string, prune: string[]): string[] {
-  const names = [...CODE.map(e => `*.${e}`), ...NAMES]
-  const match = names.flatMap((n, i) => (i ? ['-o', '-iname', n] : ['-iname', n]))
   const skip = ['*.min.js', '*.min.css', '*-lock.json', '*.lock', '*lock.yaml'].flatMap(n => ['!', '-iname', n])
-  return ['find', dir, ...prune, '-type', 'f', '(', ...match, ')', ...skip, '-exec', 'grep', '-cvH', '-e', BLANK, '--', '{}', '+']
+  return ['find', scanFrom(dir), ...prune, '-type', 'f', ...skip, '-exec', 'grep', '-cvIH', '-e', BLANK, '--', '{}', '+']
+}
+
+export function parseLocIn(text: string, dir: string): Map<string, number> {
+  return parseLoc(scanned(text, dir))
 }
 
 export function parseLoc(text: string): Map<string, number> {
@@ -36,7 +31,7 @@ export function parseLoc(text: string): Map<string, number> {
     const at = line.lastIndexOf(':')
     if (at < 1) continue
     const n = Number(line.slice(at + 1))
-    if (Number.isInteger(n)) out.set(line.slice(0, at), n)
+    if (Number.isInteger(n) && n > 0) out.set(line.slice(0, at), n)
   }
   return out
 }
@@ -44,7 +39,7 @@ export function parseLoc(text: string): Map<string, number> {
 export function sumDirs(files: Map<string, number>, dir: string): Map<string, number> {
   const dirs = new Map<string, number>([[dir, 0]])
   for (const [path, n] of files) {
-    for (let d = path.slice(0, path.lastIndexOf('/')); d.length >= dir.length; d = d.slice(0, d.lastIndexOf('/'))) {
+    for (let d = path.slice(0, path.lastIndexOf('/')) || '/'; d.length >= dir.length; d = d.slice(0, d.lastIndexOf('/')) || (d === '/' ? '' : '/')) {
       dirs.set(d, (dirs.get(d) ?? 0) + n)
       if (d === dir) break
     }

@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -48,6 +48,16 @@
         "off"
       ]
     },
+    "jump": {
+      "type": "string",
+      "title": "Jump moves Claude",
+      "description": "tree and Claude: picking a folder with z re-roots the tree and moves the session there with /cd, which asks first for a folder this session has not trusted. tree: z re-roots only the tree and Claude stays where it is.",
+      "default": "tree and Claude",
+      "options": [
+        "tree and Claude",
+        "tree"
+      ]
+    },
     "start": {
       "type": "string",
       "title": "Open at start",
@@ -71,13 +81,14 @@
     "column": {
       "type": "string",
       "title": "Right column",
-      "description": "What the right column shows by default: date (last modified), age (time since last modified, short: now, 12m, 3h, 5d, then Oct 9 past a week and the year past a year), size (files in bytes, folders as disk usage computed in the background) or loc (non-blank lines in code, markup, config and docs files, folders as the sum, counted in the background; pictures, video, binaries and data files show nothing). The header button cycles the date or age, size and loc; in loc the treemap sizes boxes by lines.",
+      "description": "What the right column shows by default: date (last modified), age (time since last modified, short: now, 12m, 3h, 5d, then Oct 9 past a week and the year past a year), size (files in bytes, folders as disk usage computed in the background) loc (non-blank lines in every text file, folders as the sum and 0 when they hold no text, counted in the background; binaries show nothing) or files (the number of files under each folder, counted in the background). The header button cycles the date or age, size, loc and files; in loc the treemap sizes boxes by lines.",
       "default": "date",
       "options": [
         "date",
         "age",
         "size",
-        "loc"
+        "loc",
+        "files"
       ]
     },
     "hints": {
