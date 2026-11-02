@@ -1836,7 +1836,7 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
       size = await pngHeader($, file)
     }
     if (!size) return { state: 'failed', note: 'could not read the picture size' }
-    // iTerm2 draws only PNG bytes, not a file path the terminal reads itself.
+    // Claude Code draws an Image in iTerm2 only from png/rgba bytes, not from a file the terminal reads itself.
     const { base64: png } = await $.fs.read(file, { as: 'bytes' })
     return { state: 'ready', file, png, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) }
   } catch (err) {
