@@ -232,7 +232,7 @@ const STALE_MS = 1500
 const staleQueue = new Set<string>()
 let staleTimer: Timer | null = null
 type PictureJob = { path: string; key: string; kind: 'png' | 'image' | 'video' | 'pdf' | 'office'; sig: string; mtime: number; size: number; page: number; px: number; pdf: string }
-type Picture = { state: 'pending' } | { state: 'ready'; file: string; png: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
+type Picture = { state: 'pending' } | { state: 'ready'; file: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
 
 function osName($: EngineInterface): Promise<'linux' | 'darwin' | 'win32'> {
   platform ??= (async () => {
@@ -1835,10 +1835,7 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
       sessionDir = dirname(file)
       size = await pngHeader($, file)
     }
-    if (!size) return { state: 'failed', note: 'could not read the picture size' }
-    // Claude Code draws an Image in iTerm2 only from png/rgba bytes, not from a file the terminal reads itself.
-    const { base64: png } = await $.fs.read(file, { as: 'bytes' })
-    return { state: 'ready', file, png, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) }
+    return size ? { state: 'ready', file, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) } : { state: 'failed', note: 'could not read the picture size' }
   } catch (err) {
     return { state: 'failed', note: messageOf(err).split('\n')[0] ?? 'could not decode' }
   }
@@ -1848,6 +1845,18 @@ function forget($: EngineInterface, path: string): void {
   const old = pictures.get(path)
   pictures.delete(path)
   if (old?.picture.state === 'ready' && old.picture.file !== path) void $.process.run(['rm', '-f', '--', old.picture.file], { timeoutMs: 5_000 }).catch(() => undefined)
+}
+
+// Claude Code draws an Image in iTerm2 only from png/rgba bytes, not from a file the terminal reads itself.
+// Only the shown picture keeps its bytes, so memory stays at one picture however many the cache holds.
+let shownPng: { file: string; generation: number; png: string } | null = null
+
+async function pngOf($: EngineInterface, pic: { file: string; generation: number }): Promise<string> {
+  if (shownPng?.file === pic.file && shownPng.generation === pic.generation) return shownPng.png
+  shownPng = null
+  const { base64 } = await $.fs.read(pic.file, { as: 'bytes' }).catch(() => ({ base64: '' }))
+  if (base64) shownPng = { file: pic.file, generation: pic.generation, png: base64 }
+  return base64
 }
 
 async function spawnRun($: EngineInterface, job: PictureJob, argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
@@ -3509,7 +3518,8 @@ export const register: Register = (on, options) => {
         if (pic.state === 'ready' && Image) {
           const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), peekRows)
           status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
-          content = <Image key="peek-image" source={{ png: pic.png }} columns={fit.columns} rows={fit.rows} alt={name} />
+          const png = await pngOf($, pic)
+          content = png ? <Image key="peek-image" source={{ png }} columns={fit.columns} rows={fit.rows} alt={name} /> : <Text {...mutedText}>{name}</Text>
         } else content = <Text {...mutedText}>{pic.state === 'pending' ? 'decoding…' : pic.state === 'failed' ? pic.note : 'images show in the terminal'}</Text>
       } else {
         if (isDoc && (peeked?.path !== target || (docKind === 'pdf' && peeked.page !== page))) {
