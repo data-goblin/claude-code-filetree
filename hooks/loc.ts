@@ -22,7 +22,7 @@ export function parseLoc(text: string): Map<string, number> {
     const at = line.lastIndexOf(':')
     if (at < 1) continue
     const n = Number(line.slice(at + 1))
-    if (Number.isInteger(n)) out.set(line.slice(0, at), n)
+    if (Number.isInteger(n) && n > 0) out.set(line.slice(0, at), n)
   }
   return out
 }

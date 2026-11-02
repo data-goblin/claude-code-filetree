@@ -1811,8 +1811,8 @@ test('loc column: the toggle goes date, size, lines of code; code files show the
     dirs: { [root]: [['src', 'dir'], ['docs', 'dir'], ['README.md', 'file'], ['logo.png', 'file']], [`${root}/src`]: [['a.ts', 'file'], ['b.ts', 'file']], [`${root}/docs`]: [['guide.md', 'file']] },
     status: '## main\0', numstat: '',
     loc: {
-      [`${root} 1`]: `${root}/README.md:12\n`,
-      [root]: `${root}/README.md:12\n${root}/src/a.ts:1500\n${root}/src/b.ts:300\n${root}/docs/guide.md:40\n`,
+      [`${root} 1`]: `${root}/README.md:12\n${root}/logo.png:0\n`,
+      [root]: `${root}/README.md:12\n${root}/logo.png:0\n${root}/src/a.ts:1500\n${root}/src/b.ts:300\n${root}/docs/guide.md:40\n`,
       [`${root}/src`]: `${root}/src/a.ts:1500\n${root}/src/b.ts:300\n`,
       [`${root}/docs`]: `${root}/docs/guide.md:40\n`,
     },

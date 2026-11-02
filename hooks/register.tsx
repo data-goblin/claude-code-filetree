@@ -209,6 +209,7 @@ type Column = FileTree['column']
 const locCache = new Map<string, number>()
 const fileCounts = new Map<string, number>()
 const counting = new Set<string>()
+const countTries = new Map<string, number>()
 let countQueue: string[] = []
 const locListed = new Set<string>()
 const locBusy = new Set<string>()
@@ -475,6 +476,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   timeTries.clear()
   locTries.clear()
   fileCounts.clear()
+  countTries.clear()
   countQueue = []
   timeQueue = []
   lastRoot = root
@@ -714,10 +716,16 @@ function pumpCounts($: EngineInterface): void {
       if ((await osName($)) === 'win32') return fileCounts.set(dir, -1)
       const t = await get($)
       const run = await $.process.run(['find', `${dir}/.`, ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
-      if (epoch === sizeEpoch) takeCounts(run.stdout, dir)
+      if (epoch !== sizeEpoch) return
+      takeCounts(run.stdout, dir)
+      countTries.delete(dir)
     })()
       .catch(() => {
-        if (epoch === sizeEpoch) fileCounts.set(dir, -1)
+        if (epoch !== sizeEpoch) return
+        const tries = (countTries.get(dir) ?? 0) + 1
+        countTries.set(dir, tries)
+        if (tries < TIME_TRIES) countQueue.push(dir)
+        else fileCounts.set(dir, -1)
       })
       .finally(() => {
         counting.delete(dir)
@@ -847,7 +855,10 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     timeTries.clear()
     locTries.clear()
   }
-  if (!paths) fileCounts.clear()
+  if (!paths) {
+    fileCounts.clear()
+    countTries.clear()
+  }
   countQueue = []
   for (const p of paths ?? []) {
     locCache.delete(p)
