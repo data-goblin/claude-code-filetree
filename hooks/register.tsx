@@ -8,7 +8,7 @@ import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
-import { counted, formatLoc, locArgv, locUsage, parseLocIn, sumDirs } from './loc'
+import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
@@ -667,7 +667,7 @@ function pumpLoc($: EngineInterface): void {
       if ((await osName($)) === 'win32') return giveUp()
       const t = await get($)
       const argv = locArgv(dir, pruneArgs(t.root))
-      const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', argv[1] ?? `${dir}/.`, '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
+      const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', argv[1] ?? scanFrom(dir), '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
       takeLoc(parseLocIn(run.stdout, dir), dir, deep)
       locTries.delete(key)
@@ -697,8 +697,9 @@ function pumpLoc($: EngineInterface): void {
 
 function takeCounts(text: string, dir: string): void {
   const counts = new Map<string, number>([[dir, 0]])
-  for (const line of text.split(`${dir}/./`).join(`${dir}/`).split('\n')) {
-    if (!line.startsWith(`${dir}/`)) continue
+  const base = `${dir.replace(/\/+$/, '')}/`
+  for (const line of scanned(text, dir).split('\n')) {
+    if (!line.startsWith(base)) continue
     for (let d = dirname(line); d.length >= dir.length; d = dirname(d)) {
       counts.set(d, (counts.get(d) ?? 0) + 1)
       if (d === dir) break
@@ -715,7 +716,7 @@ function pumpCounts($: EngineInterface): void {
     void (async () => {
       if ((await osName($)) === 'win32') return fileCounts.set(dir, -1)
       const t = await get($)
-      const run = await $.process.run(['find', `${dir}/.`, ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
+      const run = await $.process.run(['find', scanFrom(dir), ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
       takeCounts(run.stdout, dir)
       countTries.delete(dir)

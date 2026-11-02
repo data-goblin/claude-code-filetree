@@ -7,13 +7,22 @@ export function counted(name: string): boolean {
   return !SKIP.some(r => r.test(name))
 }
 
+export function scanFrom(dir: string): string {
+  return `${dir.replace(/\/+$/, '')}/.`
+}
+
+export function scanned(text: string, dir: string): string {
+  const base = dir.replace(/\/+$/, '')
+  return text.split(`${base}/./`).join(`${base}/`)
+}
+
 export function locArgv(dir: string, prune: string[]): string[] {
   const skip = ['*.min.js', '*.min.css', '*-lock.json', '*.lock', '*lock.yaml'].flatMap(n => ['!', '-iname', n])
-  return ['find', `${dir}/.`, ...prune, '-type', 'f', ...skip, '-exec', 'grep', '-cvIH', '-e', BLANK, '--', '{}', '+']
+  return ['find', scanFrom(dir), ...prune, '-type', 'f', ...skip, '-exec', 'grep', '-cvIH', '-e', BLANK, '--', '{}', '+']
 }
 
 export function parseLocIn(text: string, dir: string): Map<string, number> {
-  return parseLoc(text.split(`${dir}/./`).join(`${dir}/`))
+  return parseLoc(scanned(text, dir))
 }
 
 export function parseLoc(text: string): Map<string, number> {
@@ -30,7 +39,7 @@ export function parseLoc(text: string): Map<string, number> {
 export function sumDirs(files: Map<string, number>, dir: string): Map<string, number> {
   const dirs = new Map<string, number>([[dir, 0]])
   for (const [path, n] of files) {
-    for (let d = path.slice(0, path.lastIndexOf('/')); d.length >= dir.length; d = d.slice(0, d.lastIndexOf('/'))) {
+    for (let d = path.slice(0, path.lastIndexOf('/')) || '/'; d.length >= dir.length; d = d.slice(0, d.lastIndexOf('/')) || (d === '/' ? '' : '/')) {
       dirs.set(d, (dirs.get(d) ?? 0) + n)
       if (d === dir) break
     }
