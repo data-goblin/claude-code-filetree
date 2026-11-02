@@ -298,7 +298,6 @@ function zoneAt(tree: unknown): ZoneProps {
 
 const imageAt = (tree: unknown, key: string): string | undefined => sourceOf(search(tree, n => isKeyed(n, 'Image', key)))
 
-// The fake fs.read answers a bytes read with a 1×1 PNG followed by the path, so a drawn PNG names the file it came from.
 const PNG_1PX = atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==')
 const pngOf = (path: string) => `"png":"${btoa(PNG_1PX + path)}"`
 

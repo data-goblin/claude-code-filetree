@@ -1847,8 +1847,6 @@ function forget($: EngineInterface, path: string): void {
   if (old?.picture.state === 'ready' && old.picture.file !== path) void $.process.run(['rm', '-f', '--', old.picture.file], { timeoutMs: 5_000 }).catch(() => undefined)
 }
 
-// Claude Code draws an Image in iTerm2 only from png/rgba bytes, not from a file the terminal reads itself.
-// Only the shown picture keeps its bytes, so memory stays at one picture however many the cache holds.
 let shownPng: { file: string; generation: number; png: string } | null = null
 
 async function pngOf($: EngineInterface, pic: { file: string; generation: number }): Promise<string> {
