@@ -28,3 +28,8 @@
 - Only an emergency hotfix ships the same day: a security issue, a bug that breaks things badly, or a UI that is badly broken
 - The release takes the version on `main` at that run; sign a `v<version>` tag on that commit and publish the GitHub release from it. The keeper has no signing key, so it hands the release to an agent on a machine that has one
 - The release notes cover every PR merged since the last release, including versions that never got their own release
+
+## Branch filetree-proactive
+
+- `filetree-proactive` holds the "Follow work" setting: the session runs `/cd` into the repo where it and its subagents work, with hysteresis (hooks/work.ts). It is under test and not meant for main yet
+- Keep it current with main: after every merge to main, rebase `filetree-proactive` onto `origin/main` and force-push it with `--force-with-lease`; its version stays one patch above main so the pre-push check passes
