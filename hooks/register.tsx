@@ -1847,6 +1847,18 @@ function forget($: EngineInterface, path: string): void {
   if (old?.picture.state === 'ready' && old.picture.file !== path) void $.process.run(['rm', '-f', '--', old.picture.file], { timeoutMs: 5_000 }).catch(() => undefined)
 }
 
+// Claude Code draws an Image in iTerm2 only from png/rgba bytes, not from a file the terminal reads itself.
+// Only the shown picture keeps its bytes, so memory stays at one picture however many the cache holds.
+let shownPng: { file: string; generation: number; png: string } | null = null
+
+async function pngOf($: EngineInterface, pic: { file: string; generation: number }): Promise<string> {
+  if (shownPng?.file === pic.file && shownPng.generation === pic.generation) return shownPng.png
+  shownPng = null
+  const { base64 } = await $.fs.read(pic.file, { as: 'bytes' }).catch(() => ({ base64: '' }))
+  if (base64) shownPng = { file: pic.file, generation: pic.generation, png: base64 }
+  return base64
+}
+
 async function spawnRun($: EngineInterface, job: PictureJob, argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
   const stream = $.process.spawn({ argv })
   let stopped = false
@@ -3506,7 +3518,8 @@ export const register: Register = (on, options) => {
         if (pic.state === 'ready' && Image) {
           const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), peekRows)
           status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
-          content = <Image key="peek-image" source={{ file: pic.file, format: 'png', generation: pic.generation }} columns={fit.columns} rows={fit.rows} alt={name} />
+          const png = await pngOf($, pic)
+          content = png ? <Image key="peek-image" source={{ png }} columns={fit.columns} rows={fit.rows} alt={name} /> : <Text {...mutedText}>{name}</Text>
         } else content = <Text {...mutedText}>{pic.state === 'pending' ? 'decoding…' : pic.state === 'failed' ? pic.note : 'images show in the terminal'}</Text>
       } else {
         if (isDoc && (peeked?.path !== target || (docKind === 'pdf' && peeked.page !== page))) {
