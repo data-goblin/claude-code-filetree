@@ -20,4 +20,10 @@
 
 - Run tests with `claude plugin test .`, never `bun test`: `claude-code/testing` only exists inside that harness, so bun fails to resolve it
 - Every PR raises the version in `.claude-plugin/plugin.json` and the README badge; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
-- After a PR merges, sign a `v<version>` tag on the merge commit and publish the GitHub release from it; CI cannot sign tags, so this stays a manual step
+
+## Releases
+
+- Releases go out once a day at 08:00 Europe/Brussels; never release right after a merge
+- Everything merged since the last release ships in the next 08:00 release; once today's release is out, new merges wait for tomorrow's
+- The release takes the version on `main` at 08:00; sign a `v<version>` tag on that commit and publish the GitHub release from it. CI cannot sign tags, so this stays a manual step
+- The release notes cover every PR merged since the last release, including versions that never got their own release
