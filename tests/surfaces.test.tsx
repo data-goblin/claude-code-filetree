@@ -50,6 +50,7 @@ type World = {
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
 const opens: unknown[] = []
+const registered: unknown[] = []
 const envs: Record<string, string>[] = []
 
 function world(on: On, w: World, ran: Ran) {
@@ -59,7 +60,10 @@ function world(on: On, w: World, ran: Ran) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: 'test-session' }))
-  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('command.register', (_$, e) => {
+    registered.push(e)
+    return { value: { command: e.name } }
+  })
   on('ui.open', (_$, e) => {
     opens.push(e)
     return { value: { isPlaced: true } }
@@ -921,6 +925,15 @@ test('in the desktop app /filetree opens the pane without the terminal layout ch
   expect(JSON.stringify(r)).toContain('File tree on')
   expect(opens.length).toBeGreaterThan(before)
   expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
+})
+
+test('/filetree registers as immediate so it toggles the tree while a turn runs', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  expect(registered.at(-1)).toMatchObject({ name: 'filetree', immediate: true })
 })
 
 test('focus on open off: a bare /filetree opens the tree without taking the keyboard, /filetree open still takes it', { timeoutMs: 20_000, options: { focus: 'off' } }, async ($, on) => {
