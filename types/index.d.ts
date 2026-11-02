@@ -42,7 +42,7 @@ export type FileTree = {
   sortCol: '' | 'name' | 'git' | 'metric'
   sortDir: 'desc' | 'asc'
   showHidden: boolean
-  column: 'date' | 'size' | 'loc'
+  column: 'date' | 'size' | 'loc' | 'files'
   dirSizes: Record<string, number>
   git: Record<string, string>
   diff: Record<string, [number, number]>

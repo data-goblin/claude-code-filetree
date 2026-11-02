@@ -126,13 +126,13 @@ function world(on: On, w: World, ran: Ran) {
     }
     if (w.font !== undefined && argv[0] === 'sh' && (argv[2] ?? '').includes('fc-list')) return ok(w.font)
     if (argv[0] === 'find' && argv.includes('grep')) {
-      const at = w.locAbortOnce?.indexOf(argv[1] ?? '') ?? -1
+      const at = w.locAbortOnce?.indexOf((argv[1] ?? '').replace(/\/\.$/, '')) ?? -1
       if (at >= 0) {
         w.locAbortOnce?.splice(at, 1)
         throw new Error('$.process.run(find) aborted')
       }
     }
-    if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${argv[1]}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
+    if (argv[0] === 'find' && argv.includes('grep')) return ok(w.loc?.[`${(argv[1] ?? '').replace(/\/\.$/, '')}${argv[2] === '-maxdepth' ? ' 1' : ''}`] ?? '')
     if (argv[0] === 'find' && w.find !== undefined) {
       if (w.findDelayMs) await new Promise(r => setTimeout(r, w.findDelayMs))
       return ok(w.find)
@@ -172,7 +172,7 @@ function world(on: On, w: World, ran: Ran) {
       w.abortDu = w.abortDu.filter(d => d !== argv.at(-1))
       return { deny: 'aborted' }
     }
-    const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[argv[1] ?? ''] ?? '') : ''
+    const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[(argv[1] ?? '').replace(/\/\.$/, '')] ?? '') : ''
     if (out) yield { stream: 'stdout', text: out }
     if (argv[0] === 'sh' && w.poster) yield { stream: 'stdout', text: w.poster(argv) }
     if (argv[0] === 'inotifywait' && w.watch) {
@@ -1796,6 +1796,9 @@ test('size column: the toggle swaps dates for sizes, folders are sized with du, 
   expect(await texts(ui)).not.toMatch(STAMP)
   await ui.press({ key: 'size' })
   await clock.settle()
+  expect(await texts(ui)).toContain('# Files')
+  await ui.press({ key: 'size' })
+  await clock.settle()
   expect(await texts(ui)).toMatch(STAMP)
   await ui.unmount()
 })
@@ -1842,6 +1845,9 @@ test('loc column: the toggle goes date, size, lines of code; code files show the
   const map = mapAt(await ui.drawn()).rows.map(r => r.left.map(x => x.t).join('')).join('\n')
   expect(map).toContain('src 1.80k')
   expect(JSON.stringify(await ui.drawn())).toContain(' lines')
+  await ui.press({ key: 'size' })
+  await clock.settle()
+  expect(await texts(ui)).toContain('# Files')
   await ui.press({ key: 'size' })
   await clock.settle()
   expect(await texts(ui)).toMatch(STAMP)
@@ -1928,6 +1934,9 @@ test('age column: files show how long ago they changed, the toggle swaps ages fo
   shown = await texts(ui)
   expect(shown).toContain('1 B ')
   expect(shown).not.toContain(' 12m')
+  await ui.press({ key: 'size' })
+  await clock.settle()
+  expect(await texts(ui)).not.toContain(' 12m')
   await ui.press({ key: 'size' })
   await clock.settle()
   expect(await texts(ui)).not.toContain(' 12m')

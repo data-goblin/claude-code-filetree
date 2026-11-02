@@ -8,7 +8,7 @@ import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
-import { counted, formatLoc, locArgv, locUsage, parseLoc, sumDirs } from './loc'
+import { counted, formatLoc, locArgv, locUsage, parseLocIn, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
@@ -120,6 +120,7 @@ let previewLine = 1
 let previewed: Preview | null = null
 let previewRows = 20
 let splitAt: 'bottom' | 'top' = 'bottom'
+let jumpMovesClaude = true
 let peeked: Preview | null = null
 let peekPath = ''
 let peekRows = 8
@@ -206,6 +207,9 @@ const dirTimes = new Map<string, [number, number]>()
 let sizeQueue: string[] = []
 type Column = FileTree['column']
 const locCache = new Map<string, number>()
+const fileCounts = new Map<string, number>()
+const counting = new Set<string>()
+let countQueue: string[] = []
 const locListed = new Set<string>()
 const locBusy = new Set<string>()
 let locQueue: [string, boolean][] = []
@@ -470,6 +474,8 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   timeFailed.clear()
   timeTries.clear()
   locTries.clear()
+  fileCounts.clear()
+  countQueue = []
   timeQueue = []
   lastRoot = root
   hintRoot = ''
@@ -659,9 +665,9 @@ function pumpLoc($: EngineInterface): void {
       if ((await osName($)) === 'win32') return giveUp()
       const t = await get($)
       const argv = locArgv(dir, pruneArgs(t.root))
-      const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', dir, '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
+      const run = await $.process.run(deep ? argv : [argv[0] ?? 'find', argv[1] ?? `${dir}/.`, '-maxdepth', '1', ...argv.slice(2)], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
-      takeLoc(parseLoc(run.stdout), dir, deep)
+      takeLoc(parseLocIn(run.stdout, dir), dir, deep)
       locTries.delete(key)
       void $.ui.invalidate('ui.render')
     })()
@@ -687,6 +693,45 @@ function pumpLoc($: EngineInterface): void {
   }
 }
 
+function takeCounts(text: string, dir: string): void {
+  const counts = new Map<string, number>([[dir, 0]])
+  for (const line of text.split(`${dir}/./`).join(`${dir}/`).split('\n')) {
+    if (!line.startsWith(`${dir}/`)) continue
+    for (let d = dirname(line); d.length >= dir.length; d = dirname(d)) {
+      counts.set(d, (counts.get(d) ?? 0) + 1)
+      if (d === dir) break
+    }
+  }
+  for (const [d, n] of counts) fileCounts.set(d, n)
+}
+
+function pumpCounts($: EngineInterface): void {
+  while (counting.size < SIZE_JOBS && countQueue.length) {
+    const dir = countQueue.shift() ?? ''
+    const epoch = sizeEpoch
+    counting.add(dir)
+    void (async () => {
+      if ((await osName($)) === 'win32') return fileCounts.set(dir, -1)
+      const t = await get($)
+      const run = await $.process.run(['find', `${dir}/.`, ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
+      if (epoch === sizeEpoch) takeCounts(run.stdout, dir)
+    })()
+      .catch(() => {
+        if (epoch === sizeEpoch) fileCounts.set(dir, -1)
+      })
+      .finally(() => {
+        counting.delete(dir)
+        void $.ui.invalidate('ui.render')
+        pumpCounts($)
+      })
+  }
+}
+
+function wantCounts($: EngineInterface, dirs: string[]): void {
+  for (const dir of dirs) if (!counting.has(dir) && !countQueue.includes(dir)) countQueue.push(dir)
+  pumpCounts($)
+}
+
 function wantLoc($: EngineInterface, dirs: string[], deep: boolean): void {
   for (const dir of dirs) {
     if (locBusy.has(`${deep ? 'd' : 's'}${dir}`) || locQueue.some(([d, k]) => d === dir && k === deep)) continue
@@ -694,6 +739,8 @@ function wantLoc($: EngineInterface, dirs: string[], deep: boolean): void {
   }
   pumpLoc($)
 }
+
+const DU_DARWIN_SH = 'du -kxH -d 2 -- "$1"; find -x "$1" -mindepth 1 -maxdepth 2 -type f -exec du -kH -- {} +'
 
 const NEWEST_SH = 'd=$1; s=$2; shift 2; find "$d" "$@" -type f -exec stat "$s" {} + 2>/dev/null | awk -v d="$d" \'{ t = $1 + 0; p = substr($0, index($0, " ") + 1); while (1) { i = match(p, /\\/[^\\/]*$/); if (!i) break; p = substr(p, 1, i - 1); if (length(p) < length(d)) break; if (t > m[p]) m[p] = t; if (p == d) break } } END { for (k in m) print m[k], k }\''
 
@@ -800,9 +847,12 @@ async function staleSizes($: EngineInterface, paths?: string[]): Promise<void> {
     timeTries.clear()
     locTries.clear()
   }
+  if (!paths) fileCounts.clear()
+  countQueue = []
   for (const p of paths ?? []) {
     locCache.delete(p)
     locListed.delete(p)
+    for (let d = dirname(p), prev = p; d !== prev; prev = d, d = dirname(d)) fileCounts.delete(d)
     for (let d = p, prev = ''; d !== prev; prev = d, d = dirname(d)) {
       dirTimes.delete(d)
       timeFailed.delete(d)
@@ -1375,18 +1425,21 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
 const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
 function metricOf(t: FileTree, n: FileNode): number {
   if (t.column === 'loc') return locCache.get(n.id) ?? -1
+  if (t.column === 'files') return n.kind === 'dir' ? (fileCounts.get(n.id) ?? -1) : -1
   if (t.column === 'size') return n.kind === 'dir' ? (t.dirSizes[n.id] ?? -1) : n.size
   return n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime
 }
 function metricWorking(t: FileTree, n: FileNode): boolean {
   if (n.kind !== 'dir' && t.column !== 'loc') return false
+  if (t.column === 'files') return counting.has(n.id) || countQueue.includes(n.id)
   if (t.column === 'loc') return locBusy.has(`d${n.id}`) || locBusy.has(`s${n.id}`) || locQueue.some(([d]) => d === n.id) || locBusy.has(`s${n.parent}`) || locQueue.some(([d]) => d === n.parent)
   if (t.column === 'size') return sizing.has(n.id) || sizeQueue.includes(n.id)
   return timing.has(n.id) || timeQueue.some(([d]) => d === n.id) || [...timing].some(w => inside(w, n.id))
 }
 function metricKnown(t: FileTree, n: FileNode): boolean {
-  if (t.column === 'loc') return n.kind === 'link' || locCache.has(n.id) || (n.kind === 'file' && !counted(n.name))
+  if (t.column === 'loc') return n.kind === 'link' || locCache.has(n.id) || (n.kind === 'file' && (!counted(n.name) || locListed.has(n.parent)))
   if (t.column === 'size') return n.kind !== 'dir' || n.id in t.dirSizes
+  if (t.column === 'files') return n.kind !== 'dir' || fileCounts.has(n.id)
   return n.kind !== 'dir' || dirTimes.has(n.id)
 }
 function gitOf(t: FileTree, n: FileNode): [number, number] {
@@ -1534,6 +1587,14 @@ async function jumpTo($: EngineInterface, dir: string): Promise<void> {
   jumpClose($, true)
   follow = false
   await reset($, dir)
+  if (!jumpMovesClaude || (await cwdOf($)) === dir) return
+  $.clock.after(0, async () => {
+    try {
+      await $.command.run({ command: 'cd', args: dir })
+    } catch (error) {
+      void $.ui.toast(`filetree: could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  })
 }
 
 async function jumpKey($: EngineInterface, key: string): Promise<void> {
@@ -1892,12 +1953,12 @@ async function runScan($: EngineInterface, scan: Scan, seeded: boolean): Promise
         text += chunk.text
         if (seeded || Date.now() - drawn < SCAN_DRAW_MS) continue
         drawn = Date.now()
-        out = locUsage(parseLoc(text.slice(0, text.lastIndexOf('\n') + 1)), scan.dir).items
+        out = locUsage(parseLocIn(text.slice(0, text.lastIndexOf('\n') + 1), scan.dir), scan.dir).items
         scan.items = out
         void $.ui.invalidate('ui.render')
       }
       if (scan.stopped) return
-      const files = parseLoc(text)
+      const files = parseLocIn(text, scan.dir)
       takeLoc(files, scan.dir, true)
       const got = locUsage(files, scan.dir)
       out = got.items
@@ -1910,7 +1971,8 @@ async function runScan($: EngineInterface, scan: Scan, seeded: boolean): Promise
         if (!seeded) void $.ui.invalidate('ui.render')
       }
     } else {
-      const stream = $.process.spawn({ argv: ['du', '-akxH', '-d', '2', '--', scan.dir] })
+      const argv = (await osName($)) === 'darwin' ? ['sh', '-c', DU_DARWIN_SH, 'sh', scan.dir] : ['du', '-akxH', '-d', '2', '--', scan.dir]
+      const stream = $.process.spawn({ argv })
       scan.stop = () => stopStream(stream)
       let text = ''
       let drawn = 0
@@ -2336,7 +2398,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
       else settle()
     }
   } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
-  else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : 'date' }))
+  else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
@@ -2369,7 +2431,7 @@ export const register: Register = (on, options) => {
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
-  columnDefault = options?.column === 'size' || options?.column === 'loc' ? options.column : 'date'
+  columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
   focusOnOpen = options?.focus !== 'off'
@@ -2388,6 +2450,7 @@ export const register: Register = (on, options) => {
   targetSetting = terminalTarget(options?.target)
   noDock = options?.start === 'off'
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
+  jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open] (no path = cwd, open = never hide)', immediate: true })
@@ -2950,6 +3013,7 @@ export const register: Register = (on, options) => {
     const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS) : shown
     if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
+    if (t.column === 'files') wantCounts($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !fileCounts.has(r.node.id)).map(r => r.node.id))
     if (t.column === 'loc') {
       const seen = [...pinned, ...drawn].map(r => r.node)
       wantLoc($, seen.filter(n => n.kind === 'dir' && !locCache.has(n.id)).map(n => n.id), true)
@@ -2971,7 +3035,7 @@ export const register: Register = (on, options) => {
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
-      { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : 'show dates', icon: 'columns' as const },
+      { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : t.column === 'loc' ? 'show file counts' : 'show dates', icon: 'columns' as const },
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'collapse' as const },
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
@@ -2999,13 +3063,19 @@ export const register: Register = (on, options) => {
       const metric = t.column === 'loc'
         ? n.kind === 'dir'
           ? locCache.has(n.id)
-            ? (locCache.get(n.id) ?? 0) > 0 ? formatLoc(locCache.get(n.id) ?? 0) : ''
+            ? (locCache.get(n.id) ?? 0) >= 0 ? formatLoc(locCache.get(n.id) ?? 0) : ''
             : '…'
           : n.kind === 'file' && counted(n.name)
             ? locCache.has(n.id)
               ? formatLoc(locCache.get(n.id) ?? 0)
               : locListed.has(n.parent) ? '' : '…'
             : ''
+        : t.column === 'files'
+        ? n.kind === 'dir'
+          ? fileCounts.has(n.id)
+            ? (fileCounts.get(n.id) ?? -1) >= 0 ? formatLoc(fileCounts.get(n.id) ?? 0) : ''
+            : '…'
+          : ''
         : t.column === 'size'
         ? n.kind === 'dir'
           ? n.id in t.dirSizes
@@ -3121,7 +3191,7 @@ export const register: Register = (on, options) => {
     const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
     const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
-    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : 'Modified'
+    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
