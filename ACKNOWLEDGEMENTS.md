@@ -22,6 +22,7 @@ pull request credits them even when the code that shipped was rewritten.
 - Desktop Open with preview draws the file body: [@joshrubio](https://github.com/joshrubio) ([#34](https://github.com/data-goblin/claude-code-filetree/pull/34))
 - Focus on open setting, so a key bound to `/filetree` hides the tree again: [@agustin130a](https://github.com/agustin130a) ([#39](https://github.com/data-goblin/claude-code-filetree/issues/39), [#40](https://github.com/data-goblin/claude-code-filetree/pull/40))
 - `/filetree` runs at once while Claude is working: [@bernard-kong](https://github.com/bernard-kong) ([#43](https://github.com/data-goblin/claude-code-filetree/pull/43))
+- Image previews draw in iTerm2, from PNG bytes: [@tjwelde](https://github.com/tjwelde) ([#45](https://github.com/data-goblin/claude-code-filetree/pull/45))
 
 ## Ideas
 
