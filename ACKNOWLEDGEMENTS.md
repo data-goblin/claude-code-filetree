@@ -21,6 +21,7 @@ pull request credits them even when the code that shipped was rewritten.
 - Binary files setting: images, media and documents to the default app while Open with keeps the code: [@bradtraversy](https://github.com/bradtraversy) ([#32](https://github.com/data-goblin/claude-code-filetree/pull/32))
 - Desktop Open with preview draws the file body: [@joshrubio](https://github.com/joshrubio) ([#34](https://github.com/data-goblin/claude-code-filetree/pull/34))
 - Focus on open setting, so a key bound to `/filetree` hides the tree again: [@agustin130a](https://github.com/agustin130a) ([#39](https://github.com/data-goblin/claude-code-filetree/issues/39), [#40](https://github.com/data-goblin/claude-code-filetree/pull/40))
+- `/filetree` runs at once while Claude is working: [@bernard-kong](https://github.com/bernard-kong) ([#43](https://github.com/data-goblin/claude-code-filetree/pull/43))
 
 ## Ideas
 
