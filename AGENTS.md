@@ -25,5 +25,6 @@
 
 - Releases go out once a day at 08:00 Europe/Brussels; never release right after a merge
 - Everything merged since the last release ships in the next 08:00 release; once today's release is out, new merges wait for tomorrow's
+- Only an emergency hotfix ships the same day: a security issue, a bug that breaks things badly, or a UI that is badly broken
 - The release takes the version on `main` at 08:00; sign a `v<version>` tag on that commit and publish the GitHub release from it. CI cannot sign tags, so this stays a manual step
 - The release notes cover every PR merged since the last release, including versions that never got their own release
