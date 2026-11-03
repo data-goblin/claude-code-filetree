@@ -2113,9 +2113,9 @@ for (const os of ['linux', 'win32'] as const) {
 test('Windows: a commit run through the PowerShell tool shows as git activity', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = 'C:/Users/k/proj'
-  const w: World = { os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\Users\k' }, cwd: 'C:\Users\k\proj', top: root, dirs: { [root]: [['a.txt', 'file']] }, status: '## main\0', numstat: '', heads: ['abc1234def0', 'fed4321cba9'] }
+  const w: World = { os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k' }, cwd: 'C:\\Users\\k\\proj', top: root, dirs: { [root]: [['a.txt', 'file']] }, status: '## main\0', numstat: '', heads: ['abc1234def0', 'fed4321cba9'] }
   const clock = world(on, w, ran)
-  await $.session.start({ cwd: 'C:\Users\k\proj', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: 'C:\\Users\\k\\proj', surface: 'desktop', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await $.tool.call(hostTool({ tool: 'PowerShell', command: 'git commit -m real' }))
