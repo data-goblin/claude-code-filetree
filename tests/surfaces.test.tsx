@@ -1191,7 +1191,7 @@ test('binary files: default app sends images and documents to the default app, i
   await ui.post({ press: `${root}/${files[0]}` }, { in: 'rows' })
   await ui.post({ press: `${root}/${files[0]}` }, { in: 'rows' })
   await clock.settle()
-  for (const f of files.slice(1)) {
+  for (let i = 1; i < files.length; i++) {
     await ui.post({ key: 'down' }, { in: 'rows' })
     await ui.post({ key: 'return' }, { in: 'rows' })
     await clock.settle()
@@ -2206,9 +2206,9 @@ test('the ignore setting applies before the reveal cap on a commit and on a Grep
 
 test('a second /filetree closes the tree', async ($, on) => {
   const closed: string[] = []
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: true, isFocused: false, isPlaced: true }] }))
-  on('ui.close', ($, e) => {
+  on('ui.close', (_$, e) => {
     closed.push(e.id)
     return { value: undefined }
   })
@@ -2220,9 +2220,9 @@ test('a second /filetree closes the tree', async ($, on) => {
 
 test('/filetree open keeps an open tree open', async ($, on) => {
   const closed: string[] = []
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: false, isFocused: false, isPlaced: true }] }))
-  on('ui.close', ($, e) => {
+  on('ui.close', (_$, e) => {
     closed.push(e.id)
     return { value: undefined }
   })
