@@ -2546,10 +2546,15 @@ async function toggleGuard($: EngineInterface, path: string): Promise<void> {
 }
 
 async function realOf($: EngineInterface, path: string): Promise<string> {
-  const own = await $.fs.stat(path, { resolve: true }).catch(() => undefined)
-  if (own?.realPath) return posix(own.realPath)
-  const dir = await $.fs.stat(dirname(path), { resolve: true }).catch(() => undefined)
-  return dir?.realPath ? join(posix(dir.realPath), path.slice(path.lastIndexOf('/') + 1)) : path
+  const rest: string[] = []
+  for (let dir = path; ; ) {
+    const st = await $.fs.stat(dir, { resolve: true }).catch(() => undefined)
+    if (st?.realPath) return rest.length ? join(posix(st.realPath), rest.join('/')) : posix(st.realPath)
+    const up = dirname(dir)
+    if (up === dir || rest.length > 64) return path
+    rest.unshift(dir.slice(dir.lastIndexOf('/') + 1))
+    dir = up
+  }
 }
 
 async function guardFor($: EngineInterface, path: string): Promise<string | undefined> {

@@ -48,6 +48,7 @@ type World = {
   newestAbortOnce?: string[]
   locAbortOnce?: string[]
   tops?: Record<string, string>
+  real?: Record<string, string>
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -102,12 +103,14 @@ function world(on: On, w: World, ran: Ran) {
       if (!w.theme) throw new Error(`ENOENT ${e.path}`)
       return { value: { kind: 'file', size: w.theme.toml.length, mtimeMs: w.theme.mtimeMs, isLink: false } }
     }
-    const p = norm(e.path)
+    const said = norm(e.path)
+    const alias = Object.keys(w.real ?? {}).find(k => said === k || said.startsWith(`${k}/`))
+    const p = alias ? `${w.real?.[alias]}${said.slice(alias.length)}` : said
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
     const hit = dirOf(p) ? 'dir' : dirOf(parent)?.find(([n]) => n === name)?.[1]
     if (!hit) throw new Error(`ENOENT ${e.path}`)
-    return { value: { kind: hit, size: 1, mtimeMs: w.mtimes?.[p.replace(/^[A-Za-z]:/, '')] ?? (name === 'a.ts' ? 1_800_000_000_500 : 1_700_000_000_000), isLink: false } }
+    return { value: { kind: hit, size: 1, mtimeMs: w.mtimes?.[p.replace(/^[A-Za-z]:/, '')] ?? (name === 'a.ts' ? 1_800_000_000_500 : 1_700_000_000_000), isLink: false, ...(e.resolve && w.real ? { realPath: p } : {}) } }
   })
   on('process.run', async (_$, e) => {
     const argv: string[] = [...e.argv]
@@ -3891,4 +3894,38 @@ test('Follow work reads shell commands: absolute, home, drive-letter and relativ
 test('Follow work ignores temporary folders on Linux, macOS and Windows', () => {
   for (const p of ['/tmp/x/repo', '/var/folders/ab/T/repo', 'C:/Users/k/AppData/Local/Temp/repo', 'C:/Windows/Temp/repo']) expect(workIgnored(p, p.startsWith('C:') ? 'C:/Users/k' : '/home/k')).toBe(true)
   for (const p of ['/home/k/a', 'C:/Users/k/a', 'D:/Temp/repo']) expect(workIgnored(p, p.startsWith('/') ? '/home/k' : 'C:/Users/k')).toBe(false)
+})
+
+test('a guard holds through a symlink into a folder that does not exist yet, so Write cannot create files inside the guarded folder by an alias', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w = GUARD_WORLD(root)
+  w.real = { '/home/k/alias': `${root}/secret` }
+  const clock = world(on, w, [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  const write = (file_path: string) => $.tool.check({ tool: 'Write', input: { file_path, content: 'x' } })
+  expect((await write('/home/k/alias/key.ts')).decision).toBe('deny')
+  expect((await write('/home/k/alias/new/deeper/file.txt')).decision).toBe('deny')
+  expect((await write('/home/k/other/new/file.txt')).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('failed shell calls into another repo never count as work: neither Claude nor the tree moves', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w = WORK_WORLD(a, b)
+  w.tool = e => (e.tool === 'Bash' ? { isError: true, result: 'Exit code 1' } : undefined)
+  const ran: Ran = []
+  const { ui, root, clock } = await workSession($, on, w, ran)
+  for (let i = 0; i < 6; i++) await $.tool.call({ tool: 'Bash', command: `touch ${b}/b.ts ${b}/c.ts` })
+  await clock.advance(1000)
+  await clock.settle()
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(await root()).toBe(`${a}/src`)
+  await ui.unmount()
 })
