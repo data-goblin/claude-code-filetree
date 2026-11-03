@@ -281,9 +281,9 @@ async function readThemeSetting($: EngineInterface): Promise<void> {
   void $.ui.invalidate('ui.render')
 }
 
-async function get(_$: EngineInterface): Promise<FileTree> {
+function get(_$: EngineInterface): Promise<FileTree> {
   cached ??= emptyTree('')
-  return cached
+  return Promise.resolve(cached)
 }
 
 async function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {

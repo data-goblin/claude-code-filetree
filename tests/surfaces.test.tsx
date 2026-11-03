@@ -1451,7 +1451,7 @@ test('a listing error keeps the cached rows and says so', { timeoutMs: 20_000 },
   await ui.unmount()
 })
 
-test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', async () => {
+test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', () => {
   const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, size: 0, loaded })
   const file = (id: string) => ({ ...dir(id, false), kind: 'file' as const })
   const nodes = [dir('/r/a', true), dir('/r/b', true), file('/r/a/x'), dir('/r/b/y', true), file('/r/b/y/z')]
@@ -1740,7 +1740,7 @@ test('a light theme setting only changes the activity colours; the tree keeps th
   await desktop.unmount()
 })
 
-test('formatSize: at most three digits, unit glued on, ? for unknown', async () => {
+test('formatSize: at most three digits, unit glued on, ? for unknown', () => {
   expect(formatSize(0)).toBe('0B')
   expect(formatSize(980)).toBe('980B')
   expect(formatSize(1023)).toBe('1.0K')
@@ -1751,7 +1751,7 @@ test('formatSize: at most three digits, unit glued on, ? for unknown', async () 
   expect(formatSize(-1)).toBe('?')
 })
 
-test('age: now, minutes, hours and days, then the day past a week and the year past a year', async () => {
+test('age: now, minutes, hours and days, then the day past a week and the year past a year', () => {
   const now = new Date(2026, 9, 12, 10, 42).getTime()
   const ago = (s: number) => now - s * 1000
   expect(age(0, now)).toBe('')
