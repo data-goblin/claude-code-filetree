@@ -3380,6 +3380,7 @@ export const register: Register = (on, options) => {
     const theme: Theme = { ...DEFAULT_THEME, ...palette.theme }
     const tones = light ? LIGHT_TONES : TONES
     const mutedText = theme.muted ? { color: theme.muted } : { dimColor: true }
+    const focusRule = <Text key="focus-rule" {...(e.props.isFocused ? { color: theme.accent } : mutedText)}>{'─'.repeat(Math.max(1, e.props.bodyColumns))}</Text>
     const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
@@ -3476,7 +3477,7 @@ export const register: Register = (on, options) => {
       const p = previewed
       const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(t.preview)
       const all = p?.diff?.length ?? (p?.text ?? '').split('\n').length
-      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 3 : 2))
+      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 4 : 3))
       const start = nativeScroll ? 0 : p?.diff ? Math.min(t.previewTop, Math.max(0, all - 1)) : Math.min(t.previewTop, Math.max(0, all - previewRows))
       const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
       previewLine = win.top + 1
@@ -3570,6 +3571,7 @@ export const register: Register = (on, options) => {
       previewDesk = false
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+          {focusRule}
           <Box flexDirection="row">
             <Button key="back" plain hotkey="h" autoFocus={editWithSetting || inTmux || inHerdr ? undefined : true} label={unicode ? '← files' : '\u{ea9b} files'} onPress={() => void closePreview($)} />
             <Text> </Text>
@@ -3619,7 +3621,7 @@ export const register: Register = (on, options) => {
     if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
-    const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsSetting === 'auto' ? 1 : 0)
+    const chrome = (desk ? 1 : 2) + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsSetting === 'auto' ? 1 : 0)
     const spare = body - chrome - 5
     const splitRows = t.split && !nativeScroll && spare >= 6 && (treemapSetting !== 'off' || Boolean(peekTarget(t))) ? Math.min(Math.max(6, Math.floor(body * 0.45)), spare) : 0
     splitShown = splitRows > 0
@@ -4308,6 +4310,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+        {desk ? null : focusRule}
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
