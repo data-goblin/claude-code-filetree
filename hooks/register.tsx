@@ -6,7 +6,7 @@ import { CACHE_KEEP, cacheName, CLEAN, coderFor, EXIT_FAILED, EXIT_LOCKED, EXIT_
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { type DiffLine, diffWindow, splitPatch } from './diff'
+import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
@@ -124,6 +124,7 @@ let openWithSetting = ''
 let binariesInDefaultApp = false
 let editWithSetting = ''
 let diffWithSetting = ''
+let groupSetting: DiffGroups = 'folder'
 let targetSetting: Target = 'auto'
 let palette: Palette = parsePalette('')
 let inTmux = false
@@ -2116,7 +2117,7 @@ async function loadDiff($: EngineInterface, path: string, folder: boolean): Prom
   }
   if (!files.length) return false
   const many = folder || files.length > 1
-  const lines = files.flatMap(f => (many ? [{ kind: '@' as const, text: f.path, old: 0, new: 0 }, ...f.lines] : f.lines))
+  const lines = many ? groupFiles(files, folder ? groupSetting : 'off').flatMap(g => ('group' in g ? [{ kind: '@' as const, text: g.group, old: 0, new: 0 }] : [{ kind: '@' as const, text: g.file.path, old: 0, new: 0 }, ...g.file.lines])) : files.flatMap(f => f.lines)
   const note = many ? `${files.length} changed file${files.length === 1 ? '' : 's'} against HEAD` : others.length ? 'untracked file' : 'changes against HEAD'
   previewed = { path, text: '', note, diff: lines }
   return true
@@ -2908,6 +2909,7 @@ export const register: Register = (on, options) => {
   editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   palette = parsePalette(options?.palette)
   diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
+  groupSetting = diffGroups(options?.groups)
   targetSetting = terminalTarget(options?.target)
   noDock = options?.start === 'off'
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
@@ -3452,6 +3454,12 @@ export const register: Register = (on, options) => {
                 {win.segments.map((g, i) => {
                   const node: FileNode = { id: g.title, parent: '', name: g.title.split('/').pop() ?? g.title, kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true }
                   const counts = p?.diff ? diffCounts(g.source) : [0, 0]
+                  if (g.title.startsWith(GROUP)) return (
+                    <Box key={`pv-seg-${i}`} flexDirection="row" alignItems="center" marginBottom={1}>
+                      <Svg key={`pv-group-icon-${i}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`group ${g.title.slice(GROUP.length)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                      <Text weight="semibold" color={accentInk}>{g.title.slice(GROUP.length)}</Text>
+                    </Box>
+                  )
                   return (
                     <Box key={`pv-seg-${i}`} flexDirection="column" marginBottom={1}>
                       {g.title ? (

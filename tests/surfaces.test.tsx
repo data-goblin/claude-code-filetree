@@ -4219,3 +4219,31 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await pane.unmount()
   })
 }
+
+for (const [surface, groups, want] of [
+  ['terminal', 'folder', ['── lib/ (1)', 'lib/a.ts', '── src/ (2)', 'src/a.ts', 'src/b.ts', '── tests, builds and generated (2)', 'package-lock.json', 'tests/x.test.ts']],
+  ['desktop', 'folder', ['group lib/ (1)', 'file lib/a.ts', 'group src/ (2)', 'file src/a.ts', 'file src/b.ts', 'group tests, builds and generated (2)', 'file package-lock.json', 'file tests/x.test.ts']],
+  ['terminal', 'kind', ['── source (3)', 'src/b.ts', 'lib/a.ts', 'src/a.ts', '── tests, builds and generated (2)', 'package-lock.json', 'tests/x.test.ts']],
+  ['terminal', 'off', ['src/b.ts', 'package-lock.json', 'lib/a.ts', 'tests/x.test.ts', 'src/a.ts']],
+] as const) {
+  test(`d on a folder with Diff groups ${groups} orders the files on the ${surface}`, { timeoutMs: 20_000, options: { groups } }, async ($, on) => {
+    const root = '/home/k/proj'
+    const files = ['src/b.ts', 'package-lock.json', 'lib/a.ts', 'tests/x.test.ts', 'src/a.ts']
+    const patch = files.map(f => `diff --git a/${f} b/${f}\nindex 1..2 100644\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('')
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir'], ['lib', 'dir'], ['tests', 'dir'], ['package-lock.json', 'file']] }, status: '## main\0 M src/a.ts\0', numstat: '', patch }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 80 } } })
+    await clock.settle()
+    await ui.post({ key: 'k' }, { in: surface === 'desktop' ? `hit:${root}/lib` : 'rows' })
+    await ui.post({ key: 'd' }, { in: surface === 'desktop' ? `hit:${root}/lib` : 'rows' })
+    await clock.settle()
+    const tree = await ui.drawn()
+    if (surface === 'desktop') expect(svgs(tree).map(s => s.alt).filter(a => a.startsWith('group ') || a.startsWith('file '))).toEqual([...want])
+    else {
+      const preview = rowsProps(clientProps(tree, 'rows')).preview
+      expect(preview?.segments?.map(g => g.title).filter(Boolean)).toEqual([...want])
+    }
+    await ui.unmount()
+  })
+}

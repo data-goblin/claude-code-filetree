@@ -186,6 +186,17 @@
       "description": "What d does on a changed file, in the tree or the preview. Empty: show its diff against HEAD in the pane, drawn by Claude Code's own diff view (an untracked file shows as all added; d again goes back to the file). Anything else is a terminal command, run on the file in a tmux window, a herdr pane or, on Linux, a new terminal window through xdg-terminal-exec, the file path going last. Examples: hunk diff --, lazygit -f, git difftool -y --, nvim -c Gvdiffsplit.",
       "default": ""
     },
+    "groups": {
+      "type": "string",
+      "title": "Diff groups",
+      "description": "How d on a folder orders its changed files. folder: grouped by folder, with test, build and generated files (lockfiles, dist, build and out folders, *.min.*, snapshots, test folders, *.test.* and *_test.* files) in their own group last. kind: the other files first, then that test, build and generated group. off: one list in git's order.",
+      "default": "folder",
+      "options": [
+        "folder",
+        "kind",
+        "off"
+      ]
+    },
     "target": {
       "type": "string",
       "title": "Terminal target",

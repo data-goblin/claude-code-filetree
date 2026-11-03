@@ -64,7 +64,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Right column cycles date, size, lines of code and number of files from the header button, with git counts in their own columns beside it; a folder's date is its newest file
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
-- `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name
+- `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name; a folder's files are grouped by folder, with test, build and generated files (lockfiles, `dist`, `build`, `out`, `*.min.*`, snapshots, test folders and `*.test.*` / `*_test.*` files) in a group of their own after the rest
 - Open files in their default app, an editor in a tmux or herdr pane, or any command, and `t` opens a shell in a folder in a new tmux or herdr pane (where Terminal target says)
 - Changes made outside Claude show at once on Linux through `inotifywait`
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
@@ -152,6 +152,7 @@ Open with:        empty | editor | preview | a command with {path} and {dir}
 Binary files:     Open with | default app
 Edit with:        empty | a command with {path} and {line}
 Diff with:        empty | a command such as "hunk diff --" or "lazygit -f"
+Diff groups:      folder | kind | off
 Terminal target:  auto | pane right | pane below | tab | workspace
 Ignore:           names to hide, such as ".cache .tmp"
 Preview pane:     bottom | top
