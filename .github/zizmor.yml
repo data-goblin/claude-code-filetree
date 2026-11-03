@@ -1,0 +1,7 @@
+rules:
+  dangerous-triggers:
+    ignore:
+      - codex-automerge.yml
+  adhoc-packages:
+    ignore:
+      - platforms.yml
