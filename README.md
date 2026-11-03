@@ -54,7 +54,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 ## Features
 
 - File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, with the matched characters highlighted in each result, and sortable Name, Git and value column headers
-- `?` as the first character of the search searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
+- The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
@@ -106,10 +106,11 @@ With the tree focused:
 j / k:        move down / up; k on the first row selects the root
 h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
-s:            focus search; start the query with ? to search inside files (j / k pick a match, Enter opens it)
+s:            focus search
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
 z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
+q:            search: file contents instead of names (the contents toggle in the search row); j / k pick a match, Enter opens it
 a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
 p:            show or hide the preview or treemap
@@ -122,7 +123,7 @@ w:            list the files Claude wrote outside the repo this session (shown o
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
 v / V:        mark or unmark the entry under the cursor / clear all marks
-"?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); any key that acts closes it first (? typed in the search field searches file contents instead)
+"?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); any key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS
 ```
 

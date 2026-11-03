@@ -151,6 +151,7 @@ let peekWant: { path: string; top: number } | null = null
 let peekAt: { path: string; line: number; jumped: boolean } | null = null
 let deskLine: { path: string; top: number; scrolled: boolean; line: number } | null = null
 type GrepHit = { path: string; line: number; text: string }
+type SearchFlag = 'searchCase' | 'searchRegex' | 'searchContent'
 const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
 let peekPath = ''
 let peekRows = 8
@@ -536,7 +537,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   searchIndex = null
   sizeEpoch += 1
   sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex) }))
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
   const title = `Files: ${root.split('/').pop() || root}`
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
@@ -1540,7 +1541,7 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!(await get($)).query.trim()) searchIndex = null
   await patch($, () => ({ query }))
   const t = await get($)
-  if (query.startsWith('?')) {
+  if (t.searchContent) {
     grep.key = ''
     return []
   }
@@ -1563,11 +1564,11 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
 }
 
 function grepOn(t: FileTree): boolean {
-  return t.query.startsWith('?')
+  return Boolean(t.searchContent) && Boolean(t.query.trim())
 }
 
 function grepKey(t: FileTree): string {
-  return JSON.stringify([t.root, t.top, t.query.slice(1).trim(), Boolean(t.searchCase), Boolean(t.searchRegex), t.searchScope, t.showHidden])
+  return JSON.stringify([t.root, t.top, t.query.trim(), Boolean(t.searchCase), Boolean(t.searchRegex), t.searchScope, t.showHidden])
 }
 
 function grepId(h: GrepHit): string {
@@ -1611,7 +1612,7 @@ function grepRun($: EngineInterface, t: FileTree): void {
   grepClear()
   grep.key = grepKey(t)
   const mine = grep.seq
-  const q = t.query.slice(1).trim()
+  const q = t.query.trim()
   if (!q) return
   if (badPattern(q, Boolean(t.searchRegex))) {
     grep.note = 'not a valid pattern'
@@ -2021,14 +2022,14 @@ async function jumpKey($: EngineInterface, key: string): Promise<void> {
   }
 }
 
-async function searchFlag($: EngineInterface, flag: 'searchCase' | 'searchRegex'): Promise<void> {
-  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : { searchRegex: !cur.searchRegex }))
+async function searchFlag($: EngineInterface, flag: SearchFlag): Promise<void> {
+  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : flag === 'searchRegex' ? { searchRegex: !cur.searchRegex } : { searchContent: !cur.searchContent }))
   const t = await get($)
   if (t.query.trim()) await search($, t.query)
 }
 
 async function jump($: EngineInterface, query: string, surface?: RenderSurface): Promise<void> {
-  if (query.startsWith('?')) {
+  if ((await get($)).searchContent) {
     const hit = grep.rows[grep.sel]
     if (hit) await openHit($, hit, surface)
     return
@@ -2820,6 +2821,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
+  else if (key === 'q') await searchFlag($, 'searchContent')
   else if (key === 'w') await showOutside($)
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
@@ -2887,6 +2889,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'sort-metric') await sortBy($, 'metric')
   else if (id === 'case') await searchFlag($, 'searchCase')
   else if (id === 'regex') await searchFlag($, 'searchRegex')
+  else if (id === 'content') await searchFlag($, 'searchContent')
 }
 
 function loadGuards($: EngineInterface): Promise<void> {
@@ -3459,17 +3462,20 @@ export const register: Register = (on, options) => {
     const bgRgb = rgbOf(theme.bg)
     const searchBg = bgRgb ? toHex(over(bgRgb, rgbOf(theme.fg) ?? (light ? [0, 0, 0] : [255, 255, 255]), 0.07)) : light ? 'ansi256(254)' : 'ansi256(236)'
     const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
-    const toggle = (id: 'case' | 'regex', label: string, active: boolean, bad: boolean) => {
+    const flagOf = { case: 'searchCase', regex: 'searchRegex', content: 'searchContent' } as const
+    const toggle = (id: keyof typeof flagOf, label: string, active: boolean, bad: boolean) => {
       const color = bad ? ink(theme.urgent, DESK.urgent) : active ? accentInk : mutedInk
       return desk ? (
         <Box key={`tool-${id}`} position="relative" flexShrink={0} flexDirection="row" alignItems="center">
-          <Text color={glow(color, id)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>
+          {id === 'content' && Svg
+            ? <Svg key={`search-${id}-icon-${active ? 'on' : 'off'}`} source={iconSvg('file-text', glow(color, id), 16)} alt={`search file contents ${active ? 'on' : 'off'}`} width={16} height={16} />
+            : <Text color={glow(color, id)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>}
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key={`button-${id}`} module="./button.tsx" props={{ id, label: '', dim: !active } satisfies ButtonProps} width="100%" height="100%" />
           </Box>
         </Box>
       ) : (
-        <Button key={`search-${id}`} plain label={label} onPress={() => void searchFlag($, id === 'case' ? 'searchCase' : 'searchRegex')}>
+        <Button key={`search-${id}`} plain label={label} onPress={() => void searchFlag($, flagOf[id])}>
           <Text {...(bad ? { color: theme.urgent } : active ? { color: theme.accent } : { dimColor: true })}>{label}</Text>
         </Button>
       )
@@ -3920,7 +3926,7 @@ export const register: Register = (on, options) => {
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
     const grepNode = (path: string): FileNode => ({ id: path, parent: dirname(path), name: path.slice(path.lastIndexOf('/') + 1), kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true })
-    const grepNote = !grepping ? '' : grep.rows.length === 0 ? (grep.busy ? 'searching…' : grep.note || (t.query.slice(1).trim() ? 'no matches' : 'type after ? to search inside files')) : grep.capped ? `first ${GREP_LIMIT} matches; keep typing to narrow` : grep.note
+    const grepNote = !grepping ? '' : grep.rows.length === 0 ? (grep.busy ? 'searching…' : grep.note || 'no matches') : grep.capped ? `first ${GREP_LIMIT} matches; keep typing to narrow` : grep.note
     const grepRoom = Math.max(1, room - (grepNote ? 1 : 0))
     const grepFrom = nativeScroll ? 0 : Math.max(0, Math.min(grep.sel - Math.floor(grepRoom / 2), grep.rows.length - grepRoom))
     const grepSpecs: RowSpec[] = !grepping ? [] : [
@@ -4300,6 +4306,7 @@ export const register: Register = (on, options) => {
       ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
+      { key: 'q', label: 'contents', act: () => void navigate($, 'q', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
     ]
     const overlay = shortcutsShown && !zjump.on
@@ -4390,7 +4397,7 @@ export const register: Register = (on, options) => {
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
               </> : <Input
                 key="q"
-                placeholder="Search files..."
+                placeholder={t.searchContent ? 'Search file contents...' : 'Search files...'}
                 value={t.query}
                 onInput={onQuery}
                 onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
@@ -4400,6 +4407,7 @@ export const register: Register = (on, options) => {
             <Box flexShrink={0} flexDirection="row" gap={2} marginLeft={1} marginRight={1}>
               {toggle('case', 'Aa', Boolean(t.searchCase), false)}
               {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+              {toggle('content', 'contents', Boolean(t.searchContent), false)}
             </Box>
           </Box>
         ) : (
@@ -4413,7 +4421,7 @@ export const register: Register = (on, options) => {
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
               </> : <Input
                 key="q"
-                placeholder="search"
+                placeholder={t.searchContent ? 'search contents' : 'search'}
                 submitLabel="go"
                 value={t.query}
                 onInput={onQuery}
@@ -4424,6 +4432,7 @@ export const register: Register = (on, options) => {
             <Box flexShrink={0} flexDirection="row" gap={1} marginLeft={1}>
               {toggle('case', 'Aa', Boolean(t.searchCase), false)}
               {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+              {toggle('content', glyphSetting === 'text' ? 'in' : unicode ? '≡' : '\u{f09aa}', Boolean(t.searchContent), false)}
               <Text> </Text>
             </Box>
           </Box>

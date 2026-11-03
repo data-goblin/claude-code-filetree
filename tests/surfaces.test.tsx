@@ -2115,32 +2115,81 @@ test('the shortcuts overlay scrolls with j and the wheel when the pane is short,
   await ui.unmount()
 })
 
-test('? typed into the search field searches file contents and never opens the overlay, while ? on the rows during content search does', { timeoutMs: 20_000 }, async ($, on) => {
-  const root = '/home/k/proj'
-  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] }, status: '## main\0', numstat: '', grep: 'a.ts\x003\x00const alpha = 1\n' }, [])
-  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
-  await clock.settle()
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await clock.settle()
-  await ui.input({ key: 'q', text: '?', kind: 'change' })
-  await clock.settle()
-  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
-  await ui.input({ key: 'q', text: '?alpha', kind: 'change' })
-  await clock.settle()
-  await clock.advance(200)
-  await clock.settle()
-  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
-  expect(JSON.stringify(await ui.drawn())).toContain('"value":"?alpha"')
-  expect(treeRows(await ui.drawn()).rows.some(r => r.id.startsWith('grep:'))).toBe(true)
-  await ui.post({ key: '?' }, { in: 'rows' })
-  await clock.settle()
-  expect(shortcutText(await ui.drawn())).toContain('Keyboard shortcuts')
-  expect(JSON.stringify(await ui.drawn())).toContain('"value":"?alpha"')
-  await ui.post({ key: '?' }, { in: 'rows' })
-  await clock.settle()
-  expect(treeRows(await ui.drawn()).rows.some(r => r.id.startsWith('grep:'))).toBe(true)
-  await ui.unmount()
-})
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`? typed into the search box is a literal character and never toggles content search or the overlay on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file'], ['why?.md', 'file']] }, status: '## main\0', numstat: '', grep: 'a.ts\x003\x00const alpha = 1\n' }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await ui.input({ key: 'q', text: '?', kind: 'change' })
+    await clock.settle()
+    await clock.advance(200)
+    await clock.settle()
+    const drawn = await ui.drawn()
+    expect(JSON.stringify(drawn)).toContain('"value":"?"')
+    expect(JSON.stringify(drawn)).not.toContain('Keyboard shortcuts')
+    expect(JSON.stringify(drawn)).not.toContain('grep:')
+    expect(ran.some(a => a.includes('grep'))).toBe(false)
+    if (surface === 'desktop') {
+      expect(deskRows(drawn)).toEqual([`${root}/why?.md`])
+      expect(svgs(drawn).map(x => x.alt)).toContain('search file contents off')
+    } else expect(treeRows(drawn).rows.map(r => r.id).filter(id => id.startsWith(root))).toEqual([`${root}/why?.md`])
+    await ui.unmount()
+  })
+
+  test(`the q hotkey and a click on the contents toggle switch the search box between names and file contents on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file'], ['alpha.md', 'file']] }, status: '## main\0', numstat: '', grep: 'a.ts\x003\x00const alpha = 1\n' }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const hit = `grep:3:${root}/a.ts`
+    const settle = async () => {
+      await clock.settle()
+      await clock.advance(200)
+      await clock.settle()
+    }
+    await ui.input({ key: 'q', text: 'alpha', kind: 'change' })
+    await settle()
+    expect(JSON.stringify(await ui.drawn())).not.toContain(hit)
+    expect(ran.some(a => a.includes('grep'))).toBe(false)
+    if (surface === 'desktop') await ui.press({ key: 'hk-q' })
+    else await ui.post({ key: 'q' }, { in: 'rows' })
+    await settle()
+    const on1 = await ui.drawn()
+    expect(JSON.stringify(on1)).toContain(hit)
+    expect(JSON.stringify(on1)).toContain('"value":"alpha"')
+    expect(ran.some(a => a.includes('grep') && a.includes('alpha'))).toBe(true)
+    if (surface === 'desktop') {
+      expect(svgs(on1).map(x => x.alt)).toContain('search file contents on')
+      expect(JSON.stringify(on1)).toContain('"placeholder":"Search file contents..."')
+      await tap(ui, 'content')
+    } else {
+      expect(JSON.stringify(on1)).toContain('"placeholder":"search contents"')
+      expect(await ui.find({ key: 'search-content' })).toBeDefined()
+      await ui.press({ key: 'search-content' })
+    }
+    await settle()
+    const off = await ui.drawn()
+    expect(JSON.stringify(off)).not.toContain(hit)
+    if (surface === 'desktop') {
+      expect(svgs(off).map(x => x.alt)).toContain('search file contents off')
+      expect(deskRows(off)).toEqual([`${root}/alpha.md`])
+      await tap(ui, 'content')
+    } else {
+      expect(treeRows(off).rows.map(r => r.id).filter(id => id.startsWith(root))).toEqual([`${root}/alpha.md`])
+      await ui.press({ key: 'search-content' })
+    }
+    await settle()
+    expect(JSON.stringify(await ui.drawn())).toContain(hit)
+    await ui.unmount()
+  })
+}
 
 test('shortcuts always opens the overlay with the pane and ? still closes it', { timeoutMs: 20_000, options: { shortcuts: 'always' } }, async ($, on) => {
   const root = '/home/k/proj'
@@ -4129,7 +4178,7 @@ test('Follow work starts over in a new or resumed session: reads from the last s
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
 })
 
-test('? searches file contents, groups matches per file, opens the split at the line and caps the results', { timeoutMs: 20_000 }, async ($, on) => {
+test('the contents toggle searches file contents, groups matches per file, opens the split at the line and caps the results', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
   const w: World = {
@@ -4143,7 +4192,8 @@ test('? searches file contents, groups matches per file, opens the split at the 
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.press({ key: 'search-content' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4161,7 +4211,7 @@ test('? searches file contents, groups matches per file, opens the split at the 
   expect(peekOf(await ui.drawn()).preview.startLine).toBe(43)
   expect(treeRows(await ui.drawn()).active).toBe(`grep:45:${root}/src/a.ts`)
   w.grep = `${Array.from({ length: 250 }, (_, i) => `b.md\x00${i + 1}\x00needle ${i}`).join('\n')}\n`
-  await ui.input({ key: 'q', text: '?needles', kind: 'change' })
+  await ui.input({ key: 'q', text: 'needles', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4459,7 +4509,8 @@ test('content search in a tree rooted in a repository subdirectory joins hits to
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4484,7 +4535,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.settle()
     const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
     await clock.settle()
-    await ui.input({ key: 'q', text: '?line 1500', kind: 'change' })
+    if (surface === 'desktop') await tap(ui, 'content')
+    else await ui.post({ key: 'q' }, { in: 'rows' })
+    await ui.input({ key: 'q', text: 'line 1500', kind: 'change' })
     await clock.settle()
     await clock.advance(200)
     await clock.settle()
@@ -4527,7 +4580,8 @@ test('regex content search hands grep the same pattern in POSIX ERE and keeps on
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   await ui.post({ key: 'r' }, { in: 'rows' })
-  await ui.input({ key: 'q', text: '?\\d+', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: '\\d+', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4551,7 +4605,8 @@ test('content search outside a repo in a hidden root with hidden files off searc
   await clock.settle()
   await ui.press({ key: 'hidden' })
   await clock.settle()
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4587,7 +4642,8 @@ test('row keys during content search act on the highlighted result, not the tree
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   await ui.post({ press: `${root}/b.md` }, { in: 'rows' })
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4618,7 +4674,8 @@ test('content search: the wheel walks the results, and right-click copies the hi
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
@@ -4658,7 +4715,8 @@ test('open content search results refresh after Claude writes a file', { timeout
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
   await clock.settle()
   await clock.advance(200)
   await clock.settle()

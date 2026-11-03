@@ -26,6 +26,7 @@ export function emptyTree(root: string): FileTree {
     query: '',
     searchCase: false,
     searchRegex: false,
+    searchContent: false,
     searchScope: '',
     sortCol: '',
     sortDir: 'desc',
@@ -349,7 +350,7 @@ export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => n
   }
   if (order) for (const list of kids.values()) list.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || order(a, b))
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
-  const match = t.query.startsWith('?') ? null : matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
+  const match = t.searchContent ? null : matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
   let keep: Set<string> | null = null
   if (match) {
     keep = new Set()
