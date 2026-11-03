@@ -3893,7 +3893,7 @@ export const register: Register = (on, options) => {
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
-        : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.length > 1 ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentInk} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
+        : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentInk} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
