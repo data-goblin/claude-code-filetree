@@ -722,7 +722,10 @@ function pumpCounts($: EngineInterface): void {
     const epoch = sizeEpoch
     counting.add(dir)
     void (async () => {
-      if ((await osName($)) === 'win32') return fileCounts.set(dir, -1)
+      if ((await osName($)) === 'win32') {
+        fileCounts.set(dir, -1)
+        return
+      }
       const t = await get($)
       const run = await $.process.run(['find', scanFrom(dir), ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
@@ -951,7 +954,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
   blink = $.clock.after(FLASH_MS, () => {
     if (generation !== mine) return
     blink = null
-    void patch($, cur => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
+    void patch($, () => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
   })
 }
 
@@ -2691,7 +2694,7 @@ export const register: Register = (on, options) => {
       return result
     })
 
-  on('turn.start', async ($, e, next) => {
+  on('turn.start', async (_$, e, next) => {
     if (!e.agentId) mainBusy = true
     return next(e)
   })
@@ -2995,7 +2998,6 @@ export const register: Register = (on, options) => {
           { id: 'external', key: '', icon: 'external-link', hint: 'open in default app', run: () => pressHeader($, 'external') },
         ]
         previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
-        const { Code } = elements
         const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
         return (
           <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
@@ -3767,7 +3769,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : <>{scopeChip()}</>}
+            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : scopeChip()}
             <Box flexGrow={1}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
