@@ -4389,6 +4389,34 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+test('a reply reference pressed on the terminal while a full diff is open replaces it with the split preview at that line', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0 M src/a.ts\0', numstat: '',
+    dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] },
+    files: { [`${root}/src/a.ts`]: Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join('\n') },
+    patch: 'diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-line 0\n+line 1\n',
+  }, [])
+  on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await pane.post({ key: 'end' }, { in: 'rows' })
+  await pane.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(pane)).toContain('"format":"diff"')
+  const reply = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'AssistantMessage', props: { text: 'Fixed it in `src/a.ts:40`.', isFirstOfReply: true } })
+  await clock.settle()
+  await reply.press({ key: 'filetree-refs', link: { href: `file://${root}/src/a.ts#L40` } })
+  await clock.settle()
+  expect(await texts(pane)).not.toContain('"format":"diff"')
+  expect(peekOf(await pane.drawn()).preview.startLine).toBe(38)
+  expect(treeRows(await pane.drawn()).active).toBe(`${root}/src/a.ts`)
+  await reply.unmount()
+  await pane.unmount()
+})
+
 for (const [surface, groups, want] of [
   ['terminal', 'folder', ['── lib/ (1)', 'lib/a.ts', '── src/ (2)', 'src/a.ts', 'src/b.ts', '── tests, builds and generated (2)', 'package-lock.json', 'tests/x.test.ts']],
   ['desktop', 'folder', ['group lib/ (1)', 'file lib/a.ts', 'group src/ (2)', 'file src/a.ts', 'file src/b.ts', 'group tests, builds and generated (2)', 'file package-lock.json', 'file tests/x.test.ts']],

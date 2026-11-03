@@ -1708,7 +1708,7 @@ async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface):
   if (peekPath === h.path) peeked = null
   else peekWant = { path: h.path, top }
   overPeek = false
-  await patch($, cur => ({ split: true, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
+  await patch($, cur => ({ split: true, preview: '', previewTop: 0, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
 }
 
 const refCache = new Map<string, Promise<FileRef[]>>()
