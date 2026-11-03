@@ -1634,7 +1634,7 @@ async function repoOf($: EngineInterface, path: string): Promise<string | null> 
 async function noteWork($: EngineInterface, paths: string[], write: boolean): Promise<void> {
   if (!followWork || paths.length === 0) return
   const vault = home ? [`${home}/Git/agents`, `${home}/Desktop/Git/agents`, `${home}/git/agents`, `${home}/vault`] : []
-  const kept = [...new Set(paths.map(posix))].filter(p => p.startsWith('/') && !workIgnored(p, home, vault)).slice(0, 40)
+  const kept = [...new Set(paths.map(posix))].filter(p => isAbsolute(p) && !workIgnored(p, home, vault)).slice(0, 40)
   const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', home, vault)))
   if (repos.size === 0) return
   const now = Date.now()
