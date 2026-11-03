@@ -1375,7 +1375,7 @@ test('open with preview: End shows the last screen, an edit reloads the file, a 
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain('"startLine":44')
+  expect(shown).toContain('"startLine":43')
   expect(shown).toContain('line 59')
   w.files![`${root}/a.ts`] = 'changed\n'
   await $.tool.call({ tool: 'Edit', file_path: `${root}/a.ts`, old_string: 'a', new_string: 'b' })
@@ -1995,7 +1995,7 @@ for (const hints of ['on', 'off'] as const) {
     await clock.settle()
     const drawn = await ui.drawn()
     expect(JSON.stringify(drawn).includes('No git repo')).toBe(hints === 'on')
-    expect(treeRows(drawn).rows.length).toBe(hints === 'on' ? 13 : 14)
+    expect(treeRows(drawn).rows.length).toBe(hints === 'on' ? 14 : 15)
     await ui.unmount()
   })
 }
@@ -2009,7 +2009,7 @@ test('spacing off and shortcuts off drop the blank lines and the shortcut row, a
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } } })
   await clock.settle()
   const drawn = await ui.drawn()
-  expect(treeRows(drawn).rows.length).toBe(15)
+  expect(treeRows(drawn).rows.length).toBe(16)
   expect(await ui.find({ key: 'nav-j' })).toBeUndefined()
   expect(await ui.find({ key: 'gap-above' })).toBeUndefined()
   await ui.post({ key: 'j' }, { in: 'rows' })
@@ -2019,7 +2019,6 @@ test('spacing off and shortcuts off drop the blank lines and the shortcut row, a
   await ui.unmount()
 })
 
-const rules = (drawn: string) => drawn.split('["──').length - 1
 const shortcutText = (tree: unknown) => treeRows(tree).rows.map(r => r.left.map(x => x.t).join('')).join('\n')
 
 test('the footer names the entry under the cursor, and ? toggles a grouped shortcuts overlay in the tree body with no timer', { timeoutMs: 20_000 }, async ($, on) => {
@@ -2189,50 +2188,6 @@ test('on the desktop the Shortcuts button opens a keyboard panel in the pane bod
   expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
   expect(JSON.stringify(await ui.drawn())).toContain('1 marked')
   await ui.unmount()
-})
-
-test('the terminal pane draws one top rule in the accent color while it holds the keyboard and muted otherwise, and the tree keeps the same rows', { timeoutMs: 20_000 }, async ($, on) => {
-  const root = '/home/k/big'
-  const names = Array.from({ length: 60 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
-  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: names, [`${root}/f00.txt`]: [] }, status: '', numstat: '', files: { [`${root}/f00.txt`]: 'one\ntwo\n' } }, [])
-  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
-  await clock.settle()
-  const rule = (tree: unknown) => (has(kids(tree)[0], 'props') ? kids(tree)[0] : undefined)
-  const blurred = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await clock.settle()
-  const off = await blurred.drawn()
-  expect(JSON.stringify(rule(off))).toBe(JSON.stringify({ type: 'Text', props: { dimColor: true }, children: ['─'.repeat(60)] }))
-  const offRows = treeRows(off).rows.length
-  await blurred.unmount()
-  const focused = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
-  await clock.settle()
-  const lit = await focused.drawn()
-  expect(JSON.stringify(rule(lit))).toBe(JSON.stringify({ type: 'Text', props: { color: 'ansi256(4)' }, children: ['─'.repeat(60)] }))
-  expect(treeRows(lit).rows.length).toBe(offRows)
-  expect(rules(JSON.stringify(lit))).toBe(1)
-  await focused.unmount()
-})
-
-test('the focus rule also tops the full preview, and the desktop pane draws none', { timeoutMs: 20_000, options: { palette: 'muted=#808080', open: 'preview' } }, async ($, on) => {
-  const root = '/home/k/proj'
-  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.ts', 'file']] }, files: { [`${root}/a.ts`]: 'const a = 1\n' } }
-  const clock = world(on, w, [])
-  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
-  await clock.settle()
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(40) })
-  await clock.settle()
-  expect(JSON.stringify(kids(await ui.drawn())[0])).toBe(JSON.stringify({ type: 'Text', props: { color: '#808080' }, children: ['─'.repeat(40)] }))
-  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
-  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
-  await clock.settle()
-  const preview = await ui.drawn()
-  expect(JSON.stringify(preview)).toContain('const a = 1')
-  expect(JSON.stringify(kids(preview)[0])).toBe(JSON.stringify({ type: 'Text', props: { color: '#808080' }, children: ['─'.repeat(40)] }))
-  await ui.unmount()
-  const desk = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(40), isFocused: true } })
-  await clock.settle()
-  expect(rules(JSON.stringify(await desk.drawn()))).toBe(0)
-  await desk.unmount()
 })
 
 test('the root row has a folder glyph, k from the first row selects it and k on it stays, the split maps the whole root, and the footer keeps ?: shortcuts left of the selected name', { timeoutMs: 20_000 }, async ($, on) => {
@@ -2531,11 +2486,11 @@ test('split preview: the header button shows the file under the cursor below a r
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  expect(rules(JSON.stringify(await ui.drawn()))).toBe(1)
+  expect(JSON.stringify(await ui.drawn())).not.toContain('──')
   await ui.press({ key: 'split' })
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(rules(shown)).toBe(2)
+  expect(shown).toContain('──')
   expect(shown).toContain('empty')
   await ui.post({ key: 'k' }, { in: 'rows' })
   await clock.settle()
@@ -2592,7 +2547,7 @@ test('split preview: the header button shows the file under the cursor below a r
   await ui.press({ key: 'split' })
   await clock.settle()
   shown = JSON.stringify(await ui.drawn())
-  expect(rules(shown)).toBe(1)
+  expect(shown).not.toContain('──')
   expect(shown).not.toContain('"Image"')
   await ui.unmount()
 })
@@ -2613,7 +2568,7 @@ test('split preview at the top: p shows it under the header with the rule below 
   await ui.post({ key: 'p' }, { in: 'rows' })
   await clock.settle()
   const drawn = await ui.drawn()
-  const split = kids(drawn)[2]
+  const split = kids(drawn)[1]
   const order = JSON.stringify(split)
   expect(order.indexOf('a.md')).toBeLessThan(order.indexOf('──'))
   expect(peekOf(drawn).preview.markdown).toBe(true)
@@ -2623,7 +2578,7 @@ test('split preview at the top: p shows it under the header with the rule below 
   expect(JSON.stringify(await ui.drawn())).toContain('no magick or ffmpeg to decode it')
   await ui.post({ key: 'p' }, { in: 'rows' })
   await clock.settle()
-  expect(rules(JSON.stringify(await ui.drawn()))).toBe(1)
+  expect(JSON.stringify(await ui.drawn())).not.toContain('──')
   await ui.unmount()
 })
 
@@ -2664,7 +2619,7 @@ test('split preview: a scrollbar click lands mid-file, the wheel goes back to th
   await ui.unmount()
   const short = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 16 } } })
   await clock.settle()
-  expect(rules(JSON.stringify(await short.drawn()))).toBe(1)
+  expect(JSON.stringify(await short.drawn())).not.toContain('──')
   await short.unmount()
 })
 
@@ -2682,7 +2637,7 @@ test('split preview on desktop: p does nothing and Page Down still moves the tre
   await ui.post({ key: 'pagedown' }, zone)
   await clock.settle()
   const tree = await ui.drawn()
-  expect(rules(JSON.stringify(tree))).toBe(0)
+  expect(JSON.stringify(tree)).not.toContain('──')
   expect(deskActive(tree)).toBe(`${root}/f10.txt`)
   await ui.unmount()
 })
