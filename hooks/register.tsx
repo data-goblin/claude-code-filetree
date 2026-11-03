@@ -1741,6 +1741,18 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
   return true
 }
 
+async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
+  if (!['x', 'd', 'v', 't', 'y', 'Y', 'u'].includes(key) || (key === 'v' && shift)) return false
+  const path = grep.rows[grep.sel]?.path
+  if (!path) return true
+  if (key === 'x') await toggleGuard($, path)
+  else if (key === 'd') await diffFile($, path)
+  else if (key === 'v') toggleMark($, path)
+  else if (key === 't') await openTerminal($, dirname(path))
+  else await copyPaths($, marks.length ? marks : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  return true
+}
+
 const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
 function metricOf(t: FileTree, n: FileNode): number {
   if (t.column === 'loc') return locCache.get(n.id) ?? -1
@@ -2720,7 +2732,7 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
   if (key === 'z') return jumpOpen($)
-  if (grepOn(await get($)) && (await grepNav($, key, surface))) return
+  if (grepOn(await get($)) && ((await grepNav($, key, surface)) || (await grepAct($, key, shift, surface)))) return
   await steer($, key, shift, surface)
   if (autoOpened.size) claimMarks((await get($)).cursor)
 }

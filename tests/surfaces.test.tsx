@@ -4312,3 +4312,31 @@ test('a Markdown preview opened at a line splits only between blocks outside cod
   expect(below.endsWith('[d]: https://x.test')).toBe(true)
   expect(markdownSplit('a\n\nb\n\nc', 4)[1]).toBe('c')
 })
+
+test('row keys during content search act on the highlighted result, not the tree cursor left behind', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['b.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    grep: 'b.md\x002\x00a needle\nsrc/a.ts\x0040\x00const needle = 1\n',
+  }
+  const clock = world(on, w, [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/b.md` }, { in: 'rows' })
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  for (let i = 0; i < 3; i++) await ui.post({ key: 'j' }, { in: 'rows' })
+  expect(treeRows(await ui.drawn()).active).toBe(`grep:40:${root}/src/a.ts`)
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  const edit = (file_path: string) => $.tool.check({ tool: 'Edit', input: { file_path, old_string: 'a', new_string: 'b' } })
+  expect((await edit(`${root}/src/a.ts`)).decision).toBe('deny')
+  expect((await edit(`${root}/b.md`)).decision).toBe('allow')
+  await ui.unmount()
+})
