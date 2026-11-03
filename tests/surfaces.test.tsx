@@ -4152,3 +4152,34 @@ for (const [surface, env, want] of [
     await ui.unmount()
   })
 }
+
+test('name search highlights the matched characters for plain, case and regex search, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['xAbyab.ts', 'file'], ['zz.ts', 'file']] } }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const lit = async () => {
+    const row = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src/xAbyab.ts`)
+    return row?.left.slice(3).filter(s => s.c === 'ansi256(4)' && s.b).map(s => s.t) ?? []
+  }
+  await ui.input({ key: 'q', text: 'ab', kind: 'change' })
+  await clock.settle()
+  expect(await lit()).toEqual(['Ab', 'ab'])
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await clock.settle()
+  expect(await lit()).toEqual(['ab'])
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'b.a', kind: 'change' })
+  await clock.settle()
+  expect(await lit()).toEqual(['bya'])
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const name = every(await desktop.drawn(), n => has(n, 'type') && n.type === 'Text' && kids(n).some(c => has(c, 'type') && c.type === 'Text'))
+  expect(JSON.stringify(name)).toContain('"weight":"semibold","bold":true},"children":["bya"]')
+  expect(JSON.stringify(name)).toContain('"children":["xA",')
+  await desktop.unmount()
+  await ui.unmount()
+})

@@ -242,6 +242,63 @@ function run(prog: Op[], text: string): boolean {
   return false
 }
 
+function longest(prog: Op[], text: string, from: number): number {
+  const seen = new Int32Array(prog.length).fill(-1)
+  let mark = 0
+  let best = -1
+  const add = (into: number[], pc0: number, at: number): void => {
+    const stack = [pc0]
+    while (stack.length) {
+      const pc = stack.pop() as number
+      if (seen[pc] === mark) continue
+      seen[pc] = mark
+      const op = prog[pc]
+      if (!op) continue
+      if (op.op === 'match') best = Math.max(best, at)
+      else if (op.op === 'jmp') stack.push(op.x)
+      else if (op.op === 'split') stack.push(op.y, op.x)
+      else if (op.op === 'bol') {
+        if (at === 0) stack.push(pc + 1)
+      } else if (op.op === 'eol') {
+        if (at === text.length) stack.push(pc + 1)
+      } else into.push(pc)
+    }
+  }
+  let list: number[] = []
+  add(list, 0, from)
+  for (let at = from; at < text.length && list.length; at++) {
+    const c = text[at] as string
+    mark += 1
+    const next: number[] = []
+    for (const pc of list) {
+      const op = prog[pc]
+      if (op?.op === 'char' && op.test(c)) add(next, pc + 1, at + 1)
+    }
+    list = next
+  }
+  return best
+}
+
+export function compileSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
+  try {
+    const prog = compile(parse(src, ignoreCase))
+    return text => {
+      const out: [number, number][] = []
+      for (let at = 0; at < text.length; ) {
+        const end = longest(prog, text, at)
+        if (end > at) {
+          out.push([at, end])
+          at = end
+        } else at += 1
+      }
+      return out
+    }
+  } catch (err) {
+    if (err instanceof Unsupported) return null
+    throw err
+  }
+}
+
 export function compileRegex(src: string, ignoreCase: boolean): ((text: string) => boolean) | null {
   try {
     const prog = compile(parse(src, ignoreCase))
