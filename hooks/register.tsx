@@ -1637,7 +1637,7 @@ async function noteWork($: EngineInterface, paths: string[], write: boolean): Pr
   const kept = [...new Set(paths.map(posix))].filter(p => isAbsolute(p) && !workIgnored(p, home, vault)).slice(0, 40)
   const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', home, vault)))
   if (repos.size === 0) return
-  const now = Date.now()
+  const now = await $.clock.now()
   workTouches = [...workTouches.filter(t => now - t.at < 180_000), ...[...repos].map(repo => ({ repo, write, at: now }))].slice(-400)
   if (!mainBusy) void considerWork($)
 }
@@ -1646,11 +1646,11 @@ async function considerWork($: EngineInterface): Promise<void> {
   if (!followWork || workDeciding) return
   workDeciding = true
   try {
-    const cwd = await cwdOf($)
-    const current = (await repoOf($, cwd)) ?? cwd
-    const now = Date.now()
+    const base = jumpMovesClaude ? await cwdOf($) : (await get($)).root
+    const current = (await repoOf($, base)) ?? base
+    const now = await $.clock.now()
     const repo = pickRepo(workTouches, current, now, workLast)
-    if (!repo || inside(repo, cwd)) return
+    if (!repo || inside(repo, base)) return
     workLast = now
     if (!jumpMovesClaude) {
       follow = false
@@ -1673,7 +1673,7 @@ async function considerWork($: EngineInterface): Promise<void> {
 
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
   jumpClose($, true)
-  workLast = Date.now()
+  workLast = await $.clock.now()
   follow = false
   await reset($, dir)
   if (!jumpMovesClaude || (await cwdOf($)) === dir) return
@@ -2534,7 +2534,8 @@ async function toggleGuard($: EngineInterface, path: string): Promise<void> {
     $.ui.toast(`${shortPath(path)} is already guarded by ${shortPath(over)}`)
     return
   }
-  const key = t.top && inside(t.top, path) ? t.top : t.root
+  const owner = over === path ? Object.keys(guards).find(k => guards[k]?.includes(path)) : undefined
+  const key = owner ?? (t.top && inside(t.top, path) ? t.top : t.root)
   const own = toggled(guards[key] ?? [], path)
   const next = { ...guards }
   if (own.length) next[key] = own
