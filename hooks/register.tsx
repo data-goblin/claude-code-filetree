@@ -138,6 +138,9 @@ let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let marks: string[] = []
+type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
+const links = new Set<string>()
+const linkStates = new Map<string, LinkState | null>()
 let peekWant: { path: string; top: number } | null = null
 type GrepHit = { path: string; line: number; text: string }
 const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
@@ -326,6 +329,12 @@ async function setActivities($: EngineInterface, fn: (list: Activity[]) => Activ
 async function list($: EngineInterface, dir: string): Promise<FileNode[] | null> {
   try {
     const entries = await $.fs.list(dir)
+    for (const e of entries) {
+      const id = join(dir, e.name)
+      linkStates.delete(id)
+      if (e.isLink) links.add(id)
+      else links.delete(id)
+    }
     const resolved = await Promise.all(
       entries.map(async e => {
         if (!e.isLink) return { name: e.name, kind: e.kind, mtimeMs: e.mtimeMs, size: e.size, isLink: false }
@@ -506,6 +515,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   lastRoot = root
   hintRoot = ''
   marks = []
+  linkStates.clear()
   searchIndex = null
   sizeEpoch += 1
   sizeQueue = []
@@ -1191,6 +1201,54 @@ async function copyPaths($: EngineInterface, ids: string[], how: 'relative' | 'a
 
 function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
   return copyPaths($, [id], absolute ? 'absolute' : 'relative', surface)
+}
+
+async function linkTarget($: EngineInterface, id: string): Promise<string> {
+  if ((await osName($)) === 'win32') return ''
+  try {
+    const run = await $.process.run(['readlink', '--', id], { timeoutMs: 3_000 })
+    return run.exitCode === 0 ? run.stdout.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+async function loops($: EngineInterface, id: string, first: string): Promise<boolean> {
+  const seen = new Set([id])
+  let cur = id
+  let to = first
+  for (let hop = 0; hop < 16; hop++) {
+    if (!to) return false
+    const next = isAbsolute(to) ? to : join(dirname(cur), to.replace(/^\.\//, ''))
+    if (seen.has(next)) return true
+    seen.add(next)
+    cur = next
+    to = await linkTarget($, cur)
+  }
+  return true
+}
+
+async function classifyLink($: EngineInterface, id: string): Promise<void> {
+  if (linkStates.has(id)) return
+  linkStates.set(id, null)
+  const root = (await get($)).root
+  let state: LinkState
+  try {
+    const real = (await $.fs.stat(id, { resolve: true })).realPath
+    state = real ? { kind: inside(await realOf($, root), posix(real)) ? 'ok' : 'outside', target: posix(real) } : { kind: 'broken', target: await linkTarget($, id) }
+  } catch (err) {
+    const target = await linkTarget($, id)
+    state = { kind: /ELOOP|too many|loop/i.test(messageOf(err)) || (await loops($, id, target)) ? 'circular' : 'broken', target }
+  }
+  if (linkStates.get(id) !== null) return
+  linkStates.set(id, state)
+  void $.ui.invalidate('ui.render')
+}
+
+function linkNote(state: LinkState | null | undefined): string {
+  if (!state) return ' →'
+  const to = state.target ? ` ${shortPath(state.target)}` : ''
+  return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
 }
 
 function toggleMark($: EngineInterface, id: string): void {
@@ -3553,7 +3611,11 @@ export const register: Register = (on, options) => {
       const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
       const isMarked = marks.includes(n.id)
-      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0))
+      const isLink = links.has(n.id)
+      const link = isLink ? linkStates.get(n.id) : undefined
+      if (isLink && !linkStates.has(n.id)) void classifyLink($, n.id)
+      const linkColor = link?.kind === 'broken' || link?.kind === 'circular' ? theme.urgent : link?.kind === 'outside' ? warnColor : theme.muted
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0) - (isLink ? 2 : 0))
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
@@ -3565,6 +3627,7 @@ export const register: Register = (on, options) => {
         { t: caret, c: isCur ? theme.accent : theme.muted, b: isCur || undefined },
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
         lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' },
+        ...(isLink ? [{ t: ' →', c: linkColor }] : []),
         ...(isMarked ? [{ t: ' ●', c: theme.accent }] : []),
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
@@ -3573,7 +3636,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked }
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked, isLink, link, linkColor }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -3648,7 +3711,9 @@ export const register: Register = (on, options) => {
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
-          <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
+          <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
+          {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
+          {p.isLink ? <Box flexGrow={1} /> : null}
           {p.isMarked && Svg ? <Svg key={`mark:${n.id}`} source={iconSvg('mark', accentInk, 12)} alt={`marked ${n.name}`} width={12} height={12} /> : null}
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
@@ -4016,6 +4081,8 @@ export const register: Register = (on, options) => {
 
     const paging = splitShown && Boolean(peekPath) && (pictureKind(peekPath) === 'pdf' || (pictureKind(peekPath) === 'office' && Boolean(Image) && !imageDenied && !inTmux && !inHerdr))
     const park = () => focusPane($, t.root, paging ? 'rows' : treeKey())
+    const footerLink = footer && links.has(footer) ? linkStates.get(footer) : undefined
+    if (footer && links.has(footer) && !linkStates.has(footer)) void classifyLink($, footer)
     const footerName = footer === t.root ? t.root.split('/').filter(Boolean).pop() || t.root : footer ? (inside(t.root, footer) ? footer.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(footer)) : ''
     const allKeys: { key: string; label: string; act: () => void }[] = [
       { key: 'jkhl', label: 'move', act: () => undefined },
@@ -4193,7 +4260,7 @@ export const register: Register = (on, options) => {
             {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
             {footerName && !tipText ? (
               <Box flexShrink={1}>
-                <Text {...mutedText} wrap="truncate-start">{footerName}</Text>
+                <Text {...mutedText} wrap="truncate-start">{footer && links.has(footer) ? footerName + linkNote(footerLink) : footerName}</Text>
               </Box>
             ) : null}
           </Box>

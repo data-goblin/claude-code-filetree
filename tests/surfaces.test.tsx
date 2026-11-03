@@ -4082,3 +4082,46 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('symlinks show an arrow, and the footer says where they lead: inside, outside the tree, broken or circular, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['gone.ts', 'file'], ['in.ts', 'file'], ['loop', 'file'], ['out.ts', 'file'], ['x.ts', 'file']] },
+    links: [`${root}/in.ts`, `${root}/out.ts`, `${root}/gone.ts`, `${root}/loop`],
+    linkTo: { [`${root}/in.ts`]: `${root}/x.ts`, [`${root}/out.ts`]: '/etc/hosts', [`${root}/gone.ts`]: '' },
+    loops: [`${root}/loop`],
+    stdout: { [`readlink -- ${root}/gone.ts`]: 'missing.ts\n', [`readlink -- ${root}/loop`]: 'loop\n' },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
+  await clock.settle()
+  await ui.drawn()
+  await clock.settle()
+  const rows = treeRows(await ui.drawn()).rows
+  const arrow = (name: string) => rows.find(r => r.id === `${root}/${name}`)?.left.find(s => s.t === ' →')
+  expect(arrow('x.ts')).toBeUndefined()
+  expect(arrow('in.ts')?.c).toBe('')
+  expect(arrow('out.ts')?.c).toBe('ansi256(3)')
+  expect(arrow('gone.ts')?.c).toBe('ansi256(1)')
+  expect(arrow('loop')?.c).toBe('ansi256(1)')
+  const footer = async (name: string) => {
+    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
+    await clock.advance(1000)
+    await clock.settle()
+    return JSON.stringify(await ui.drawn())
+  }
+  expect(await footer('in.ts')).toContain('in.ts → ~/proj/x.ts"')
+  expect(await footer('out.ts')).toContain('out.ts → /etc/hosts (outside the tree)')
+  expect(await footer('gone.ts')).toContain('gone.ts → missing.ts (broken: target missing)')
+  expect(await footer('loop')).toContain('loop → loop (circular link)')
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
+  await clock.settle()
+  const drawn = JSON.stringify(await desktop.drawn())
+  expect(drawn.match(/"children":\[" → "\]/g)?.length).toBe(4)
+  expect(drawn).toContain('{"color":"#d99a1e"},"children":[" → "]')
+  expect(drawn).toContain('loop → loop (circular link)')
+  await desktop.unmount()
+  await ui.unmount()
+})
