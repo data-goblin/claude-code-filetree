@@ -6,6 +6,7 @@ import type { ZoneProps } from '../hooks/zone'
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, toEre } from '../hooks/regex'
+import { markdownSplit } from '../hooks/refs'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
@@ -4273,4 +4274,40 @@ test('regex content search hands grep the same pattern in POSIX ERE and keeps on
   expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '[0-9]+', '--', '.'])
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`])
   await ui.unmount()
+})
+
+test('content search outside a repo in a hidden root with hidden files off searches its visible children, so grep never skips the root itself', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/.config'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['app', 'dir'], ['.cache', 'dir'], ['node_modules', 'dir'], ['b.toml', 'file']], [`${root}/app`]: [['c.toml', 'file']] },
+    grep: `${root}/app/c.toml\x003\x00needle = 1\n`,
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'hidden' })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const argv = ran.find(a => a[0] === 'grep' && a.includes('-rnIZ')) ?? []
+  expect(argv).toContain('--exclude-dir=.*')
+  expect(argv.slice(argv.indexOf('--') + 1)).toEqual([`${root}/app`, `${root}/b.toml`])
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/app/c.toml`, `grep:3:${root}/app/c.toml`])
+  await ui.unmount()
+})
+
+test('a Markdown preview opened at a line splits only between blocks outside code fences and keeps link definitions in both halves', () => {
+  const doc = ['# Title', '', 'See [docs][d].', '', '```ts', 'const a = 1', 'const b = 2', '```', '', 'After', '', '[d]: https://x.test'].join('\n')
+  const [above, below] = markdownSplit(doc, 6)
+  expect(above.split('\n').slice(0, 4)).toEqual(['# Title', '', 'See [docs][d].', ''])
+  expect(below.startsWith('```ts\nconst a = 1\nconst b = 2\n```')).toBe(true)
+  expect(above.endsWith('[d]: https://x.test')).toBe(true)
+  expect(below.endsWith('[d]: https://x.test')).toBe(true)
+  expect(markdownSplit('a\n\nb\n\nc', 4)[1]).toBe('c')
 })

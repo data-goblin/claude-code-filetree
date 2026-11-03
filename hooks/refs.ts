@@ -32,3 +32,19 @@ export function parseHref(href: string): FileRef | null {
   const path = /^\/[A-Za-z]:\//.test(raw) ? raw.slice(1) : raw
   return { path, line: Number(m[2]), end: Number(m[3] ?? m[2]) }
 }
+
+export function markdownSplit(text: string, at: number): [string, string] {
+  const lines = text.split('\n')
+  let fence = ''
+  let cut = 0
+  for (let i = 0; i < Math.min(at, lines.length); i++) {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i] ?? '')
+    if (m?.[1]) {
+      if (!fence) fence = m[1]
+      else if (m[1][0] === fence[0] && m[1].length >= fence.length) fence = ''
+    } else if (!fence && !(lines[i] ?? '').trim()) cut = i + 1
+  }
+  const defs = lines.filter(l => /^\s{0,3}\[[^\]]+\]:\s*\S/.test(l)).join('\n')
+  const tail = defs ? `\n\n${defs}` : ''
+  return [lines.slice(0, cut).join('\n') + tail, lines.slice(cut).join('\n') + tail]
+}

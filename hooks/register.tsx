@@ -15,7 +15,7 @@ import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, 
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
-import { type FileRef, fileRefs, parseHref, refHref } from './refs'
+import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
@@ -1577,11 +1577,21 @@ function grepClear(): void {
   grep.note = ''
 }
 
-function grepArgv(t: FileTree, q: string): string[] {
+function grepSkip(t: FileTree): string[] {
+  return [...PRUNE, ...(broad(t.root) ? HOME_PRUNE : []), ...ignoreNames, ...(t.showHidden ? [] : ['.*'])]
+}
+
+async function grepTargets($: EngineInterface, t: FileTree): Promise<string[]> {
+  const dir = t.searchScope || t.root
+  const skip = new Set(grepSkip(t))
+  const kids = await $.fs.list(dir).catch(() => [])
+  return kids.filter(k => !skip.has(k.name) && (t.showHidden || !k.name.startsWith('.'))).map(k => join(dir, k.name))
+}
+
+function grepArgv(t: FileTree, q: string, targets: string[]): string[] {
   const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (toEre(q) ?? '.') : q]
   if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
-  const skip = [...PRUNE, ...(broad(t.root) ? HOME_PRUNE : []), ...ignoreNames, ...(t.showHidden ? [] : ['.*'])]
-  return ['grep', '-rnIZ', ...skip.map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', t.searchScope || t.root]
+  return ['grep', '-rnIZ', ...grepSkip(t).map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
 }
 
 function grepRun($: EngineInterface, t: FileTree): void {
@@ -1601,7 +1611,14 @@ function grepRun($: EngineInterface, t: FileTree): void {
 }
 
 async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: number): Promise<void> {
-  const stream = $.process.spawn({ argv: grepArgv(t, q), ...(t.top ? { env: { GIT_OPTIONAL_LOCKS: '0' } } : {}) })
+  const targets = t.top ? [] : await grepTargets($, t)
+  if (grep.seq !== mine) return
+  if (!t.top && targets.length === 0) {
+    grep.busy = false
+    void $.ui.invalidate('ui.render')
+    return
+  }
+  const stream = $.process.spawn({ argv: grepArgv(t, q, targets), ...(t.top ? { env: { GIT_OPTIONAL_LOCKS: '0' } } : {}) })
   const stop = () => stopStream(stream)
   grep.stop = stop
   let note = ''
@@ -3487,11 +3504,11 @@ export const register: Register = (on, options) => {
                 $.clock.after(50, () => void $.ui.scroll({ to: { key: 'pv-line' }, in: PANE, block: 'start' }).catch(() => undefined))
               }
               const { Markdown, Code } = elements
-              const part = (key: string, text: string, from: number) => (markdown ? <Markdown key={key} text={text} /> : <Code key={key} source={text} path={t.preview} startLine={from + 1} wrap="truncate-end" />)
+              const [above, below] = markdown ? markdownSplit(p?.text ?? '', at) : [lines.slice(0, at).join('\n'), lines.slice(at).join('\n')]
               return (
                 <Box key="pv-split" flexDirection="column">
-                  {part('pv-above', lines.slice(0, at).join('\n'), 0)}
-                  {part('pv-line', lines.slice(at).join('\n'), at)}
+                  {markdown ? <Markdown key="pv-above" text={above} /> : <Code key="pv-above" source={above} path={t.preview} startLine={1} wrap="truncate-end" />}
+                  {markdown ? <Markdown key="pv-line" text={below} /> : <Code key="pv-line" source={below} path={t.preview} startLine={at + 1} wrap="truncate-end" />}
                 </Box>
               )
             })() : directPreview(elements, win, t.preview, markdown, theme.accent)}
