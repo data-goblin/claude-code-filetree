@@ -3742,3 +3742,37 @@ test('desktop: a guarded file draws the vector x icon in red', { timeoutMs: 20_0
   await ui.unmount()
 })
 
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: Edit, Write and NotebookEdit outside the repo, by Claude or a subagent, count in a header badge with one toast, and the badge lists the paths`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, GUARD_WORLD(root), ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await $.tool.call({ tool: 'Write', file_path: `${root}/src/a.ts`, content: 'x' })
+    await $.tool.call({ tool: 'Bash', command: 'echo x > /home/k/other/shell.md' })
+    await clock.settle()
+    expect(await ui.find({ key: 'button-outside' })).toBeUndefined()
+    await $.tool.call({ tool: 'Write', file_path: '/home/k/other/out.md', content: 'x' })
+    await clock.settle()
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([['toast', 'Claude wrote outside ~/proj: ~/other/out.md. w lists these writes.']])
+    if (surface === 'terminal') expect(clientProps(await ui.drawn(), 'button-outside')).toEqual({ id: 'outside', label: '⚠ 1', dim: false, color: 'ansi256(3)' })
+    else expect(svgs(await ui.drawn()).some(s => s.alt === 'outside button' && s.source.includes(ICONS.warning))).toBe(true)
+    await $.tool.call({ tool: 'Edit', file_path: '/home/k/other/out.md', old_string: 'x', new_string: 'y' })
+    await $.tool.call({ tool: 'NotebookEdit', notebook_path: '/home/k/other/nb.ipynb', new_source: 'x', agentId: 'sub-1' })
+    await clock.settle()
+    expect(ran.filter(a => a[0] === 'toast').length).toBe(1)
+    if (surface === 'terminal') expect(clientProps(await ui.drawn(), 'button-outside')).toMatchObject({ label: '⚠ 2' })
+    else expect(JSON.stringify(await ui.drawn())).toContain('"children":["2 "]')
+    await (surface === 'desktop' ? tap(ui, 'outside') : ui.post({ key: 'w' }, { in: 'rows' }))
+    await clock.settle()
+    const listed = await texts(ui)
+    expect(listed).toContain('~/other/out.md\\n~/other/nb.ipynb')
+    expect(listed).toContain('2 files Claude wrote outside the repo this session')
+    expect(listed).not.toContain('shell.md')
+    expect(await ui.find({ key: 'pv-d' })).toBeUndefined()
+    await ui.unmount()
+  })
+}

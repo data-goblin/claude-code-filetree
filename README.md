@@ -67,6 +67,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
 - `AGENTS.md`, `CLAUDE.md`, their `.local.md` variants and Markdown files under any `.claude/rules/` folder draw a brain instead of the Markdown icon (`§` in plain glyphs)
 - `x` guards a file or folder: it draws a red x, and Claude's Edit, Write and NotebookEdit calls on it or anything under it are refused with a reason naming the guard. A Bash or PowerShell command whose text names a guarded path asks you first; that check reads only the command text, so it can miss a path the command builds itself. Guards are kept per repo in filetree's own store under your Claude configuration, never in the repo
+- When Claude or a subagent writes a file outside the repo (or outside the tree root when there is no repo) with Edit, Write or NotebookEdit, a warning badge with the count shows in the header and a toast says so the first time in a session; the badge or `w` lists those files. Writes from Bash are not counted, since a shell command's targets cannot be known for sure
 
   <img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
 
@@ -112,6 +113,7 @@ f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
 d:            diff of the entry under the cursor
 x:            guard or unguard the entry under the cursor (off limits to Claude's edits)
+w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path
 "?":          show the shortcuts in the footer for 10 seconds
 Space:        Quick Look on macOS

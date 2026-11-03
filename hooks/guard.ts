@@ -49,3 +49,7 @@ export function guardIn(command: string, guards: string[], cwd: string, home: st
   const text = command.replace(/\\/g, '/')
   return guards.find(g => spellings(g, cwd, home).some(s => mentions(text, s)))
 }
+
+export function outsideOf(base: string, path: string): boolean {
+  return Boolean(base) && !inside(base, path)
+}

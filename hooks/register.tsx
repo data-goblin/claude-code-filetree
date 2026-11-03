@@ -18,7 +18,7 @@ import type { HitProps } from './hit'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
-import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, parseGuards, toggled } from './guard'
+import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
 import {
   age,
   ancestorsOf,
@@ -97,6 +97,7 @@ const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
+const OUTSIDE = 'writes outside the repo'
 
 let blink: Timer | null = null
 let cached: FileTree | null = null
@@ -189,6 +190,7 @@ let sortHeader = true
 let longFile = 500
 let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
+let outside: string[] = []
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -1791,6 +1793,7 @@ async function docText($: EngineInterface, path: string, page: number): Promise<
 }
 
 async function readPreview($: EngineInterface, path: string, page = 1): Promise<Preview> {
+  if (path === OUTSIDE) return { path, text: outside.map(shortPath).join('\n'), note: `${outside.length} file${outside.length === 1 ? '' : 's'} Claude wrote outside the repo this session` }
   let text = ''
   let note = ''
   try {
@@ -2451,6 +2454,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
+  else if (key === 'w') await showOutside($)
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
@@ -2501,6 +2505,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
     await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
     if (!autoCollapseOn(await get($))) clearAutoCollapse()
@@ -2555,6 +2560,23 @@ async function guardFor($: EngineInterface, path: string): Promise<string | unde
   return undefined
 }
 
+async function noteOutside($: EngineInterface, file: string): Promise<void> {
+  const t = await get($)
+  const abs = resolve(await cwdOf($), posix(file), home)
+  if (!outsideOf(t.top || t.root, abs) || outside.includes(abs)) return
+  outside = [...outside, abs]
+  if (outside.length === 1) $.ui.toast(`Claude wrote outside ${shortPath(t.top || t.root)}: ${shortPath(abs)}. w lists these writes.`)
+  if (previewed?.path === OUTSIDE) previewed = null
+  void $.ui.invalidate('ui.render')
+}
+
+async function showOutside($: EngineInterface): Promise<void> {
+  if (!outside.length) return
+  await loadPreview($, OUTSIDE)
+  await patch($, () => ({ preview: OUTSIDE, previewTop: 0 }))
+  $.clock.after(100, () => parkPreview($))
+}
+
 async function selectRoot($: EngineInterface): Promise<void> {
   mapLock = null
   await patch($, cur => ({ cursor: cur.root, selected: cur.root, scroll: null }))
@@ -2593,6 +2615,7 @@ export const register: Register = (on, options) => {
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
+    outside = []
     guardsLoaded = null
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
@@ -2717,6 +2740,7 @@ export const register: Register = (on, options) => {
             : ''
       if (file) void touched($, [file], 'orange', showWrites)
       if (file) void noteWork($, [file], true)
+      if (file) void noteOutside($, file)
     }
     return result
   })
@@ -2844,6 +2868,7 @@ export const register: Register = (on, options) => {
       const page = Math.max(1, previewRows - 2)
       const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, f: page, b: -page, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
       if (data.key === 'left' || data.key === 'h') await closePreview($)
+      else if (t.preview === OUTSIDE && (data.key === 'e' || data.key === 'd')) return {}
       else if (data.key === 'e') await editPreview($, t.preview)
       else if (data.key === 'd') await diffFile($, t.preview)
       else if (previewed?.diff && (data.key === 'j' || data.key === 'k')) await jumpDiff($, data.key === 'j' ? 1 : -1)
@@ -2959,6 +2984,7 @@ export const register: Register = (on, options) => {
     const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
+    const warnColor = gitColors.M ?? 'ansi256(3)'
     await loadGuards($)
     const guarded = new Set(allGuards(guards))
     const deskDiff = (source: string, key: string) => {
@@ -3031,12 +3057,13 @@ export const register: Register = (on, options) => {
     const deskHover = palette.hover ?? DESK.hover
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
-        <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
+        <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
+        {b.id === 'outside' ? <Text key="outside-count" color={glow(ink(warnColor, DESK_GIT.M ?? DESK.accent), b.id)} tabular>{`${outside.length} `}</Text> : null}
         <Box position="absolute" top={0} left={0} right={0} bottom={0}>
           <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: '', dim: b.dim } satisfies ButtonProps} width="100%" height="100%" />
         </Box>
       </Box>
-    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : {}) } satisfies ButtonProps} />
+    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : b.id === 'outside' ? { color: warnColor } : {}) } satisfies ButtonProps} />
     const hint = (buttons: { id: string; label: string; hint: string; dim: boolean }[], title: number) => {
       const over = buttons.find(b => b.id === hovered)
       const text = over?.hint
@@ -3055,20 +3082,21 @@ export const register: Register = (on, options) => {
       const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
       previewLine = win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      const listing = t.preview === OUTSIDE
       const external = { id: 'external', label: glyphSetting === 'text' ? 'open' : unicode ? '↗' : '\u{eb14}', dim: true, hint: 'open in default app' }
       if (desk && Svg) {
         const step = p?.diff ? (p.diff.some(l => l.kind === '@') ? 'file' : 'hunk') : ''
         const toTree = t.nodes.find(n => n.id === t.preview)?.kind === 'dir'
-        const edits = editWithSetting || inTmux || inHerdr
+        const edits = !listing && (editWithSetting || inTmux || inHerdr)
         previewDesk = true
         const acts: { id: string; key: string; icon: IconName; hint: string; run: () => Promise<void> }[] = [
           { id: 'pv-k', key: 'k', icon: 'arrow-up', hint: step ? `previous ${step}` : 'up a line', run: () => (step ? jumpDiff($, -1) : scrollPreview($, -1)) },
           { id: 'pv-j', key: 'j', icon: 'arrow-down', hint: step ? `next ${step}` : 'down a line', run: () => (step ? jumpDiff($, 1) : scrollPreview($, 1)) },
           { id: 'pv-b', key: 'b', icon: 'page-up', hint: 'page up', run: () => scrollPreview($, 2 - previewRows) },
           { id: 'pv-f', key: 'f', icon: 'page-down', hint: 'page down', run: () => scrollPreview($, previewRows - 2) },
-          { id: 'pv-d', key: 'd', icon: p?.diff ? (toTree ? 'folder' : 'file') : 'diff', hint: p?.diff ? (toTree ? 'back to the tree' : 'back to the file') : 'diff against HEAD', run: () => diffFile($, t.preview) },
+          ...(listing ? [] : [{ id: 'pv-d', key: 'd', icon: (p?.diff ? (toTree ? 'folder' : 'file') : 'diff') as IconName, hint: p?.diff ? (toTree ? 'back to the tree' : 'back to the file') : 'diff against HEAD', run: () => diffFile($, t.preview) }]),
           ...(edits ? [{ id: 'pv-e', key: 'e', icon: 'pencil' as const, hint: `edit at line ${previewLine}`, run: () => editPreview($, t.preview) }] : []),
-          { id: 'external', key: '', icon: 'external-link', hint: 'open in default app', run: () => pressHeader($, 'external') },
+          ...(listing ? [] : [{ id: 'external', key: '', icon: 'external-link' as const, hint: 'open in default app', run: () => pressHeader($, 'external') }]),
         ]
         previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
         const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
@@ -3128,8 +3156,8 @@ export const register: Register = (on, options) => {
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
-            {hint([external], 8 + name.length)}
-            {button(external)}
+            {listing ? null : hint([external], 8 + name.length)}
+            {listing ? null : button(external)}
           </Box>
           <Box flexDirection="row" gap={2}>
             {([['j', '↓', '\u{ea9a}', 1], ['k', '↑', '\u{eaa1}', -1], ['f', 'page ↓', '\u{ea9a} page', previewRows - 2], ['b', 'page ↑', '\u{eaa1} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => {
@@ -3137,8 +3165,8 @@ export const register: Register = (on, options) => {
               const label = step ? `${unicode ? plain : nerd} ${step}` : unicode ? plain : nerd
               return <Button key={`pv-${k}`} plain dimColor hotkey={k} label={label} onPress={() => void (step ? jumpDiff($, by > 0 ? 1 : -1) : scrollPreview($, by)).then(() => parkPreview($))} />
             })}
-            <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? (t.nodes.find(n => n.id === t.preview)?.kind === 'dir' ? 'tree' : 'file') : 'diff'} onPress={() => void diffFile($, t.preview)} />
-            {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
+            {listing ? null : <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? (t.nodes.find(n => n.id === t.preview)?.kind === 'dir' ? 'tree' : 'file') : 'diff'} onPress={() => void diffFile($, t.preview)} />}
+            {!listing && (editWithSetting || inTmux || inHerdr) ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text {...mutedText}>{p.note}</Text> : null}
           {nativeScroll ? directPreview(elements, win, t.preview, markdown, theme.accent) : (
@@ -3216,6 +3244,7 @@ export const register: Register = (on, options) => {
     }
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
+      ...(outside.length ? [{ id: 'outside', label: `${unicode ? '⚠' : '\u{ea6c}'} ${outside.length}`, dim: false, hint: `${outside.length} file${outside.length === 1 ? '' : 's'} written outside the repo`, icon: 'warning' as const }] : []),
       ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
       { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
@@ -3226,7 +3255,7 @@ export const register: Register = (on, options) => {
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
-    const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
+    const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${outside.length}` : (WORDS[b.id] ?? b.label) }))
     const wordWidth = wordButtons.reduce((w, b) => w + b.label.length + 1, 1)
     const buttons = glyphSetting === 'text' && e.props.bodyColumns - wordWidth >= 8 ? wordButtons : plainButtons
     const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
@@ -3753,6 +3782,7 @@ export const register: Register = (on, options) => {
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
       { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
+      ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
@@ -3761,7 +3791,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
