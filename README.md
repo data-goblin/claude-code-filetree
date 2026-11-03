@@ -57,6 +57,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - `?` as the first character of the search searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
+- A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
 - The selected file goes to Claude as context, and `@path` in a prompt reveals that file
 - `v` marks up to 100 files and folders: marked rows show a dot, `y` / `Y` copy all their paths, `u` their names, and the marked paths go to Claude as context

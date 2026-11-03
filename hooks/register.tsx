@@ -15,6 +15,7 @@ import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, 
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
+import { type FileRef, fileRefs, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
@@ -144,6 +145,7 @@ type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: strin
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
 let peekWant: { path: string; top: number } | null = null
+let deskLine: { path: string; top: number; scrolled: boolean } | null = null
 type GrepHit = { path: string; line: number; text: string }
 const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
 let peekPath = ''
@@ -1662,6 +1664,7 @@ async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface):
   const top = Math.max(0, line - 3)
   if (surface === 'desktop' || nativeScroll) {
     await loadPreview($, h.path)
+    deskLine = { path: h.path, top, scrolled: false }
     await patch($, () => ({ preview: h.path, previewTop: top, selected: h.path }))
     $.clock.after(100, () => parkPreview($))
     return
@@ -1671,6 +1674,36 @@ async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface):
   else peekWant = { path: h.path, top }
   overPeek = false
   await patch($, cur => ({ split: true, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
+}
+
+const refCache = new Map<string, Promise<FileRef[]>>()
+
+function refsIn($: EngineInterface, text: string, root: string, cwd: string): Promise<FileRef[]> {
+  const key = `${root}\0${cwd}\0${text}`
+  const known = refCache.get(key)
+  if (known) return known
+  const found = (async () => {
+    const out: FileRef[] = []
+    for (const r of fileRefs(text)) {
+      const path = resolve(cwd, r.path, home)
+      if (!inside(root, path) || path === root || out.some(o => o.path === path && o.line === r.line && o.end === r.end)) continue
+      const kind = await $.fs.stat(path).then(st => st.kind, () => '')
+      if (kind === 'file') out.push({ ...r, path })
+    }
+    return out
+  })()
+  refCache.set(key, found)
+  if (refCache.size > 200) refCache.delete(refCache.keys().next().value ?? key)
+  return found
+}
+
+async function openRef($: EngineInterface, href: string, surface: RenderSurface): Promise<void> {
+  const ref = parseHref(href)
+  if (!ref) return
+  const t = await get($)
+  if (!inside(t.root, ref.path)) return
+  if (surface !== 'desktop') void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
+  await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
 }
 
 async function grepNav($: EngineInterface, key: string, surface?: RenderSurface): Promise<boolean> {
@@ -3236,6 +3269,23 @@ export const register: Register = (on, options) => {
     return next(context.length ? { ...e, context } : e)
   })
 
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    const drawn = await next(e)
+    if (e.component !== 'AssistantMessage' || e.props.isSummary || (e.surface !== 'terminal' && e.surface !== 'desktop') || !fileRefs(e.props.text).length) return drawn
+    const t = await get($)
+    if (!t.root) return drawn
+    const refs = await refsIn($, e.props.text, t.root, await cwdOf($))
+    if (!refs.length) return drawn
+    const { Box, Markdown } = $.ui.resolve(e)
+    const links = refs.map(r => ({ href: refHref(r), label: `${relative(t.root, r.path)}:${r.line}${r.end > r.line ? `-${r.end}` : ''}` }))
+    return (
+      <Box flexDirection="column">
+        {drawn}
+        <Markdown key="filetree-refs" dimColor text={`in the file tree: ${links.map(l => `[${l.label.replace(/[[\]]/g, '\\$&')}](${l.href})`).join('  ')}`} pressableLinks={links.map(l => l.href)} onLinkPress={(link, p) => void openRef($, link.href, p.surface)} />
+      </Box>
+    )
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
     if (e.surface === 'terminal' && e.props.placement === 'inline') {
@@ -3418,7 +3468,22 @@ export const register: Register = (on, options) => {
                   )
                 })}
               </Box>
-            ) : directPreview(elements, win, t.preview, markdown, theme.accent)}
+            ) : deskLine?.path === t.preview && deskLine.top > 0 && !p?.diff ? (() => {
+              const lines = (p?.text ?? '').split('\n')
+              const at = Math.min(deskLine.top, Math.max(0, lines.length - 1))
+              if (!deskLine.scrolled) {
+                deskLine.scrolled = true
+                $.clock.after(50, () => void $.ui.scroll({ to: { key: 'pv-line' }, in: PANE, block: 'start' }).catch(() => undefined))
+              }
+              const { Markdown, Code } = elements
+              const part = (key: string, text: string, from: number) => (markdown ? <Markdown key={key} text={text} /> : <Code key={key} source={text} path={t.preview} startLine={from + 1} wrap="truncate-end" />)
+              return (
+                <Box key="pv-split" flexDirection="column">
+                  {part('pv-above', lines.slice(0, at).join('\n'), 0)}
+                  {part('pv-line', lines.slice(at).join('\n'), at)}
+                </Box>
+              )
+            })() : directPreview(elements, win, t.preview, markdown, theme.accent)}
             <Box key="pv-hotkeys" height={0} overflow="hidden" flexDirection="row">
               {acts.filter(a => a.key).map(a => <Button key={`pv-hk-${a.key}`} plain hotkey={a.key} label={a.key} onPress={() => previewActs.get(a.id)?.()} />)}
             </Box>

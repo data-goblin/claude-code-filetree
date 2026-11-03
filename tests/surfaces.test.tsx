@@ -4183,3 +4183,39 @@ test('name search highlights the matched characters for plain, case and regex se
   await desktop.unmount()
   await ui.unmount()
 })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`file references with a line in Claude's reply get a link that reveals the file and previews that line, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+      dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] },
+      files: { [`${root}/src/a.ts`]: Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join('\n') },
+    }, [])
+    on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const pane = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const text = 'Fixed it in `src/a.ts:40-42`, see also src/a.ts#L50, /home/k/proj/src/missing.ts:3, http://host:8080 and 12:30.'
+    const reply = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+    await clock.settle()
+    const drawn = JSON.stringify(await reply.drawn())
+    expect(drawn).toContain(text)
+    expect(drawn).toContain(`in the file tree: [src/a.ts:40-42](file://${root}/src/a.ts#L40-L42)  [src/a.ts:50](file://${root}/src/a.ts#L50)"`)
+    await reply.press({ key: 'filetree-refs', link: { href: `file://${root}/src/a.ts#L40-L42` } })
+    await clock.settle()
+    if (surface === 'desktop') {
+      expect(JSON.stringify(await pane.drawn())).toMatch(/"source":"line 38\\nline 39[^"]*","path":"\/home\/k\/proj\/src\/a\.ts","startLine":38/)
+    } else {
+      expect(peekOf(await pane.drawn()).preview.startLine).toBe(38)
+      expect(treeRows(await pane.drawn()).active).toBe(`${root}/src/a.ts`)
+    }
+    const plain = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text: 'No files here, version 1.2:3 aside.', isFirstOfReply: false } })
+    await clock.settle()
+    expect(JSON.stringify(await plain.drawn())).not.toContain('filetree-refs')
+    await plain.unmount()
+    await reply.unmount()
+    await pane.unmount()
+  })
+}
