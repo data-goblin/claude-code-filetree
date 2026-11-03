@@ -33,8 +33,14 @@ jobs:
         run: oxlint --format github
       - name: No code comments
         run: |
-          if grep -rnE '^\s*(//|/\*)' hooks tests scripts types --exclude-dir=engine; then
+          if grep -rnE '^\s*(//|/\*)|\s//\s|\{/\*' hooks tests scripts types --exclude-dir=engine; then
             echo "::error::remove the code comments listed above"
+            exit 1
+          fi
+      - name: Absolute paths go through isAbsolute
+        run: |
+          if grep -rnE "startsWith\('/'\)|\[0\] === '/'" hooks | grep -vE "^hooks/tree\.ts:|isAbsolute\(path\) && !path\.startsWith"; then
+            echo "::error::use isAbsolute() from hooks/tree.ts so Windows drive paths count as absolute"
             exit 1
           fi
 

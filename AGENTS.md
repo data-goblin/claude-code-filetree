@@ -6,6 +6,7 @@
 - A feature rebuilt from someone's pull request or suggestion still credits them under Ideas, even when none of their code shipped
 - Release notes credit the same people: each line that comes from a contributor ends with `(@handle, #n)`
 - Add the attribution in the same change that lands the work; a release is not cut while `ACKNOWLEDGEMENTS.md` is missing someone in it
+- The `credits` workflow fails a pull request whose author, commit authors or closed-issue reporters (other than the owner and bots) have no line there
 
 ## Colors
 
@@ -20,6 +21,8 @@
 ## Merging
 
 - Wait for the Codex review on a pull request to finish (its summary comment says completed for the head commit) and fix or answer every finding before merging; CI passing is not enough
+- This holds for pull requests into any branch, not only main: findings left open on a side branch come back when it lands
+- A Codex finding that names a class of bug (Windows paths, missing credit, untested logic) gets a CI check or a regression test in the fix, not only the one-line fix
 
 ## Tests
 
