@@ -242,7 +242,7 @@ function run(prog: Op[], text: string): boolean {
   return false
 }
 
-function longest(prog: Op[], text: string, from: number): number {
+function longest(prog: Op[], text: string, from: number, work: { left: number }): number {
   const seen = new Int32Array(prog.length).fill(-1)
   let mark = 0
   let best = -1
@@ -267,6 +267,7 @@ function longest(prog: Op[], text: string, from: number): number {
   let list: number[] = []
   add(list, 0, from)
   for (let at = from; at < text.length && list.length; at++) {
+    if (--work.left < 0) return -1
     const c = text[at] as string
     mark += 1
     const next: number[] = []
@@ -279,13 +280,16 @@ function longest(prog: Op[], text: string, from: number): number {
   return best
 }
 
+const SPAN_WORK = 4_000
+
 export function compileSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
   try {
     const prog = compile(parse(src, ignoreCase))
     return text => {
       const out: [number, number][] = []
-      for (let at = 0; at < text.length; ) {
-        const end = longest(prog, text, at)
+      const work = { left: SPAN_WORK }
+      for (let at = 0; at < text.length && work.left > 0; ) {
+        const end = longest(prog, text, at, work)
         if (end > at) {
           out.push([at, end])
           at = end

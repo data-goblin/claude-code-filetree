@@ -3170,7 +3170,7 @@ export const register: Register = (on, options) => {
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
-      await copyPath($, data.copy, Boolean(data.shift), e.surface)
+      await copyPath($, data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
       return {}
     }
     if (typeof data.scrollTo === 'number') {
@@ -3266,6 +3266,11 @@ export const register: Register = (on, options) => {
     }
     if (t.split && overPeek) {
       scrollSplit($, peekTop + Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
+      return {}
+    }
+    if (grepOn(t) && grep.rows.length) {
+      grep.sel = Math.max(0, Math.min(grep.rows.length - 1, grep.sel + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
+      void $.ui.invalidate('ui.render')
       return {}
     }
     const to = Math.max(0, Math.min(view.max, (t.scroll ?? view.from) + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))

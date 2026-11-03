@@ -5,7 +5,7 @@ import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
-import { compileRegex, toEre } from '../hooks/regex'
+import { compileRegex, compileSpans, toEre } from '../hooks/regex'
 import { markdownSplit } from '../hooks/refs'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
@@ -4339,4 +4339,45 @@ test('row keys during content search act on the highlighted result, not the tree
   expect((await edit(`${root}/src/a.ts`)).decision).toBe('deny')
   expect((await edit(`${root}/b.md`)).decision).toBe('allow')
   await ui.unmount()
+})
+
+test('content search: the wheel walks the results, and right-click copies the hit file path, relative and absolute', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['b.md', 'file']] },
+    grep: `${Array.from({ length: 80 }, (_, i) => `b.md\x00${i + 1}\x00needle ${i}`).join('\n')}\n`,
+  }
+  const clock = world(on, w, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(await ids()).not.toContain(`grep:70:${root}/b.md`)
+  for (let i = 0; i < 25; i++) await $.ui.scroll({ ...wheelDown, by: 3 })
+  await clock.settle()
+  expect(await ids()).toContain(`grep:70:${root}/b.md`)
+  await ui.post({ copy: `grep:70:${root}/b.md` }, { in: 'rows' })
+  await ui.post({ copy: `grep:70:${root}/b.md`, shift: true }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['b.md', `${root}/b.md`])
+  await ui.unmount()
+})
+
+test('match highlighting does bounded work: a pattern with overlapping alternatives over a long path returns at once, and plain patterns still light every match', () => {
+  const spans = compileSpans('(a|aa)*z|a', false)
+  const start = performance.now()
+  for (let i = 0; i < 200; i++) spans?.(`/${'a'.repeat(1000)}`)
+  expect(performance.now() - start).toBeLessThan(2000)
+  expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
 })
