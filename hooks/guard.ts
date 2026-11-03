@@ -40,7 +40,7 @@ function mentions(text: string, spelling: string): boolean {
   for (let at = text.indexOf(spelling); at >= 0; at = text.indexOf(spelling, at + 1)) {
     const before = at === 0 ? '' : (text[at - 1] ?? '')
     const after = text[at + spelling.length] ?? ''
-    if (!/[\w.\-/~]/.test(before) && !/[\w.\-]/.test(after)) return true
+    if (!/[\w.\-/~]/.test(before) && !/[\w.-]/.test(after)) return true
   }
   return false
 }
