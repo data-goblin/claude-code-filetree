@@ -24,6 +24,12 @@
 - This holds for pull requests into any branch, not only main: findings left open on a side branch come back when it lands
 - A Codex finding that names a class of bug (Windows paths, missing credit, untested logic) gets a CI check or a regression test in the fix, not only the one-line fix
 
+## Review guidelines
+
+- Check `README.md` against the change on every review and flag anything out of date as a finding: features, keys, settings and their defaults, the version badge, install steps
+- Flag a screenshot or GIF in `README.md` that shows old behaviour as a finding, naming the file
+- A pull request that changes behaviour without updating `README.md` is a finding
+
 ## Tests
 
 - Run tests with `claude plugin test .`, never `bun test`: `claude-code/testing` only exists inside that harness, so bun fails to resolve it
