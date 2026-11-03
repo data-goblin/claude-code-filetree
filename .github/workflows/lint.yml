@@ -1,0 +1,61 @@
+name: lint
+
+on:
+  workflow_dispatch:
+  push:
+    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
+  pull_request:
+    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.13
+      - name: Type check
+        run: bunx --bun --package typescript@5.9.3 tsc -p tsconfig.json
+      - name: Install oxlint 1.88.0 and tsgolint 7.0.2004
+        run: bun add --global --exact oxlint@1.88.0 oxlint-tsgolint@7.0.2004
+      - name: Oxlint
+        run: oxlint --format github
+      - name: No code comments
+        run: |
+          if grep -rnE '^\s*(//|/\*)' hooks tests scripts types --exclude-dir=engine; then
+            echo "::error::remove the code comments listed above"
+            exit 1
+          fi
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: actionlint 1.7.12
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -color
+
+  zizmor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
+        with:
+          version: 1.31.1
+          advanced-security: false
