@@ -6,6 +6,7 @@ export const CHEVRON_OPEN = '▾'
 export const CHEVRON_CLOSED = '▸'
 
 export const BRAIN = { nerd: cp(0xf09d1), plain: '§' }
+export const GUARD = { nerd: cp(0xea76), plain: '×' }
 
 const MEMORY = new Set(['agents.md', 'claude.md', 'agents.local.md', 'claude.local.md'])
 

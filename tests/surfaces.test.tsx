@@ -3673,3 +3673,72 @@ for (const [set, surface, brain, markdown] of [['nerd', 'terminal', '\u{f09d1} '
   })
 }
 
+const GUARD_WORLD = (root: string): World => ({
+  os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root,
+  dirs: { [root]: [['secret', 'dir'], ['src', 'dir'], ['notes.md', 'file']], [`${root}/secret`]: [['key.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']], '/home/k/other': [['out.md', 'file']] },
+  status: '## main\0', numstat: '',
+})
+
+test('x guards the folder under the cursor: an x glyph, kept across sessions, Edit and Write under it denied naming it, Bash naming it asks, x again lifts it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, GUARD_WORLD(root), [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const start = async () => {
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    return ui
+  }
+  const glyph = async (ui: Awaited<ReturnType<typeof start>>, id: string) => treeRows(await ui.drawn()).rows.find(r => r.id === id)?.left[2]
+  let ui = await start()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('■ ')
+  expect(await ui.find({ key: 'nav-x' })).toBeUndefined()
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect(await glyph(ui, `${root}/secret`)).toEqual({ t: '× ', c: 'ansi256(1)' })
+  expect((await glyph(ui, `${root}/src`))?.t).toBe('■ ')
+  await ui.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 'test-session', resume: { id: 'test-session' } })
+  ui = await start()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('× ')
+  const edit = await $.tool.check({ tool: 'Edit', input: { file_path: `${root}/secret/key.ts`, old_string: 'a', new_string: 'b' } })
+  expect(edit.decision).toBe('deny')
+  expect(edit.reason).toContain('~/proj/secret is guarded')
+  const write = await $.tool.check({ tool: 'Write', input: { file_path: 'secret/new.ts', content: 'x' } })
+  expect(write.decision).toBe('deny')
+  expect((await $.tool.check({ tool: 'Write', input: { file_path: `${root}/src/a.ts`, content: 'x' } })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'Write', input: { file_path: `${root}/secretive.ts`, content: 'x' } })).decision).toBe('allow')
+  const bash = await $.tool.check({ tool: 'Bash', input: { command: 'sed -i s/a/b/ secret/key.ts' } })
+  expect(bash.decision).toBe('ask')
+  expect(bash.reason).toContain('only reads the command text')
+  expect((await $.tool.check({ tool: 'Bash', input: { command: `cat ${root}/secret` } })).decision).toBe('ask')
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'ls src secrets' } })).decision).toBe('allow')
+  await clock.advance(1000)
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('■ ')
+  expect((await $.tool.check({ tool: 'Edit', input: { file_path: `${root}/secret/key.ts`, old_string: 'a', new_string: 'b' } })).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('desktop: a guarded file draws the vector x icon in red', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, GUARD_WORLD(root), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/notes.md` }, { in: `hit:${root}/notes.md` })
+  await clock.settle()
+  await ui.press({ key: 'hk-x' })
+  await clock.settle()
+  const icon = svgs(await ui.drawn()).find(s => s.alt === 'guarded file notes.md')?.source ?? ''
+  expect(icon).toContain(ICONS.x)
+  expect(icon).toContain('#ef5350')
+  await ui.unmount()
+})
+

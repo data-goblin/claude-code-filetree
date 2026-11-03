@@ -17,7 +17,8 @@ import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
-import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, isMemory } from './icons'
+import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
+import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, parseGuards, toggled } from './guard'
 import {
   age,
   ancestorsOf,
@@ -95,6 +96,7 @@ const SIZE_TIMEOUT_MS = 15_000
 const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
+const GUARDS = 'guards'
 
 let blink: Timer | null = null
 let cached: FileTree | null = null
@@ -185,6 +187,8 @@ let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
 let longFile = 500
+let guards: Guards = {}
+let guardsLoaded: Promise<void> | null = null
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -2447,6 +2451,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
+  else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
@@ -2509,6 +2514,47 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'regex') await searchFlag($, 'searchRegex')
 }
 
+function loadGuards($: EngineInterface): Promise<void> {
+  guardsLoaded ??= $.store.get(GUARDS).then(v => {
+    guards = parseGuards(v)
+  }, () => undefined)
+  return guardsLoaded
+}
+
+async function toggleGuard($: EngineInterface, path: string): Promise<void> {
+  await loadGuards($)
+  const t = await get($)
+  const over = guardOver(allGuards(guards), path)
+  if (over && over !== path) {
+    $.ui.toast(`${shortPath(path)} is already guarded by ${shortPath(over)}`)
+    return
+  }
+  const key = t.top && inside(t.top, path) ? t.top : t.root
+  const own = toggled(guards[key] ?? [], path)
+  const next = { ...guards }
+  if (own.length) next[key] = own
+  else delete next[key]
+  guards = next
+  void $.ui.invalidate('ui.render')
+  await $.store.set(GUARDS, guards)
+}
+
+async function realOf($: EngineInterface, path: string): Promise<string> {
+  const own = await $.fs.stat(path, { resolve: true }).catch(() => undefined)
+  if (own?.realPath) return posix(own.realPath)
+  const dir = await $.fs.stat(dirname(path), { resolve: true }).catch(() => undefined)
+  return dir?.realPath ? join(posix(dir.realPath), path.slice(path.lastIndexOf('/') + 1)) : path
+}
+
+async function guardFor($: EngineInterface, path: string): Promise<string | undefined> {
+  const list = allGuards(guards)
+  const hit = guardOver(list, path)
+  if (hit) return hit
+  const real = await realOf($, path)
+  for (const g of list) if (inside(g, real) || inside(await realOf($, g), real)) return g
+  return undefined
+}
+
 async function selectRoot($: EngineInterface): Promise<void> {
   mapLock = null
   await patch($, cur => ({ cursor: cur.root, selected: cur.root, scroll: null }))
@@ -2547,6 +2593,8 @@ export const register: Register = (on, options) => {
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
+    guardsLoaded = null
+    void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open] (no path = cwd, open = never hide)', immediate: true })
     if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
@@ -2673,6 +2721,26 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  on('tool.check', { tool: /^(Edit|Write|NotebookEdit|Bash|PowerShell)$/ }, async ($, e, next) => {
+    await loadGuards($)
+    const list = allGuards(guards)
+    if (!list.length) return next(e)
+    const input = has(e.input, 'file_path') ? e.input.file_path : has(e.input, 'notebook_path') ? e.input.notebook_path : has(e.input, 'command') ? e.input.command : undefined
+    if (typeof input !== 'string' || !input) return next(e)
+    const cwd = await cwdOf($)
+    if ((GUARD_TOOLS as readonly string[]).includes(e.tool)) {
+      const path = resolve(cwd, posix(input), home)
+      const hit = await guardFor($, path)
+      if (!hit) return next(e)
+      return { decision: 'deny', reason: `${shortPath(hit)} is guarded in the file tree, so ${e.tool} on ${shortPath(path)} is refused. Leave it alone, or ask the user to unguard it with x in the tree.` }
+    }
+    const hit = guardIn(input, list, cwd, home)
+    if (!hit) return next(e)
+    const verdict = await next(e)
+    if (verdict.decision === 'deny') return verdict
+    return { decision: 'ask', decider: 'person', reason: `This command names ${shortPath(hit)}, which is guarded in the file tree. The check only reads the command text, so it can be a false alarm and can miss a path the command builds itself.` }
+  })
+
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     const result = await next(e)
     if (result.deny || result.isError || e.tool !== 'Read') return result
@@ -2789,6 +2857,8 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     cached = null
+    guards = {}
+    guardsLoaded = null
     watcher?.stop()
     watcher = null
     snapshot?.cancel()
@@ -2889,6 +2959,8 @@ export const register: Register = (on, options) => {
     const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
+    await loadGuards($)
+    const guarded = new Set(allGuards(guards))
     const deskDiff = (source: string, key: string) => {
       const rows: { kind: ' ' | '+' | '-' | '@'; text: string; old: number; new: number }[] = []
       let old = 0
@@ -3240,7 +3312,8 @@ export const register: Register = (on, options) => {
       const isBright = bright.has(n.id)
       const isDim = !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
-      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
+      const isGuard = guarded.has(n.id)
+      const iconColor = isGuard ? theme.urgent : isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
       const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const cells = cellsOf(n)
       if (cells.metric && gitColor && !isIgnored && !isLong(n)) cells.metric = { ...cells.metric, c: gitColor }
@@ -3251,7 +3324,7 @@ export const register: Register = (on, options) => {
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
-      const glyph = unicode ? (n.kind === 'dir' ? '■' : isMemory(n) ? BRAIN.plain : '∙') : fileIcon(n, r.open, isRepo)
+      const glyph = isGuard ? (unicode ? GUARD.plain : GUARD.nerd) : unicode ? (n.kind === 'dir' ? '■' : isMemory(n) ? BRAIN.plain : '∙') : fileIcon(n, r.open, isRepo)
       const lit = isBright || isDim
       const left: Seg[] = [
         { t: '  '.repeat(r.depth) },
@@ -3265,7 +3338,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo }
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -3329,9 +3402,9 @@ export const register: Register = (on, options) => {
     const deskRow = (p: ReturnType<typeof rowParts>) => {
       const r = p.r
       const n = p.n
-      const icon = nodeIcon(n, p.isRepo)
+      const icon = p.isGuard ? 'x' : nodeIcon(n, p.isRepo)
       const tone = tones[p.tone]
-      const iconInk = p.lit ? (tone?.solid ?? accentInk) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
+      const iconInk = p.lit ? (tone?.solid ?? accentInk) : p.isGuard ? ink(theme.urgent, DESK.urgent) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
@@ -3339,7 +3412,7 @@ export const register: Register = (on, options) => {
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
-          {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+          {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
@@ -3679,6 +3752,7 @@ export const register: Register = (on, options) => {
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
@@ -3687,7 +3761,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
