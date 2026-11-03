@@ -12,8 +12,8 @@ export function shellWrites(command: string): boolean {
 
 export function workIgnored(path: string, home: string, extra: string[] = []): boolean {
   const roots = ['/tmp', '/private/tmp', '/var/folders', '/private/var', '/dev', '/proc', ...extra]
-  if (home) roots.push(`${home}/.claude`, `${home}/.config`, `${home}/Library`, `${home}/.cache`, `${home}/.local`)
-  return roots.some(r => path === r || path.startsWith(`${r}/`))
+  if (home) roots.push(`${home}/.claude`, `${home}/.config`, `${home}/Library`, `${home}/.cache`, `${home}/.local`, `${home}/AppData/Local/Temp`)
+  return /^[A-Za-z]:\/Windows\/Temp(\/|$)/i.test(path) || roots.some(r => path === r || path.startsWith(`${r}/`))
 }
 
 export function shellPaths(command: string, cwd: string, home: string): string[] {

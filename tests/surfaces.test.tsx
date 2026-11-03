@@ -8,7 +8,7 @@ import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
-import { shellPaths } from '../hooks/work'
+import { shellPaths, workIgnored } from '../hooks/work'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -3886,4 +3886,9 @@ test('Follow work reads shell commands: absolute, home, drive-letter and relativ
   expect(shellPaths('Get-Content C:\\Users\\k\\b\\x.ts; type D:/data/y.csv', 'C:/Users/k/a', 'C:/Users/k')).toEqual(['C:/Users/k/b/x.ts', 'D:/data/y.csv'])
   expect(shellPaths('cd lib', '/home/k/a', '/home/k')).toEqual(['/home/k/a/lib'])
   expect(shellPaths('curl https://x.test/a -o out', '/home/k/a', '/home/k')).toEqual([])
+})
+
+test('Follow work ignores temporary folders on Linux, macOS and Windows', () => {
+  for (const p of ['/tmp/x/repo', '/var/folders/ab/T/repo', 'C:/Users/k/AppData/Local/Temp/repo', 'C:/Windows/Temp/repo']) expect(workIgnored(p, p.startsWith('C:') ? 'C:/Users/k' : '/home/k')).toBe(true)
+  for (const p of ['/home/k/a', 'C:/Users/k/a', 'D:/Temp/repo']) expect(workIgnored(p, p.startsWith('/') ? '/home/k' : 'C:/Users/k')).toBe(false)
 })

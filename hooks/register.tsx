@@ -2731,7 +2731,7 @@ export const register: Register = (on, options) => {
         scheduleScan($, { ...job, actions: proven(pending, results) })
       })()
       if (follow && /(^|[;&|\s])(cd|pushd|popd)(\s|$)/.test(command)) $.clock.after(400, () => void followCwd($))
-      void noteWork($, shellPaths(command, cwd, home), shellWrites(command))
+      if (!result.isError) void noteWork($, shellPaths(command, cwd, home), shellWrites(command))
     } else {
       const file =
         'file_path' in e && typeof e.file_path === 'string'
