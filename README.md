@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.6.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.4-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -126,6 +126,7 @@ All settings are in `/config` under filetree, each with its own description ther
 Claude activity:  reads and writes | writes | reads | none
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
+Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
@@ -145,6 +146,8 @@ Treemap:          auto | image | cells | off
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
+
+Follow work moves the session to where the work is. When Claude or its subagents read and write in another git repo for a few minutes (two or more writes there, or four reads with no writes, and clearly more than anywhere else), filetree runs `/cd` to that repo at the end of the turn, or right away while Claude is idle, and the tree follows. It moves at most once every two minutes, stays put while several repos are equally busy, and skips temp folders, `~/.claude`, `~/.config`, `~/Library` and the agents vault. A `z` jump counts as a move, so it is not undone straight away.
 
 <img src="docs/media/text-glyphs.gif" alt="Glyphs set to text spells the header buttons out as words" width="800">
 
