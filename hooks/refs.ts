@@ -8,7 +8,7 @@ export function fileRefs(text: string): FileRef[] {
   const seen = new Set<string>()
   for (const m of text.matchAll(REF)) {
     const path = (m[1] ?? '').replace(/\\/g, '/').replace(/[.,;]+$/, '')
-    if (!/[./]/.test(path) || /^[\d.]+$/.test(path) || path.endsWith('/')) continue
+    if (/^[\d.]+$/.test(path) || path.endsWith('/') || (!/[./]/.test(path) && !/^[A-Za-z][\w-]*$/.test(path))) continue
     const line = Number(m[2] ?? m[4])
     const end = Math.max(line, Number(m[3] ?? m[5] ?? line))
     if (!line) continue

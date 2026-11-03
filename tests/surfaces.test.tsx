@@ -6,7 +6,7 @@ import type { ZoneProps } from '../hooks/zone'
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, compileSpans, toEre } from '../hooks/regex'
-import { markdownSplit } from '../hooks/refs'
+import { fileRefs, markdownSplit } from '../hooks/refs'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
@@ -4380,4 +4380,36 @@ test('match highlighting does bounded work: a pattern with overlapping alternati
   for (let i = 0; i < 200; i++) spans?.(`/${'a'.repeat(1000)}`)
   expect(performance.now() - start).toBeLessThan(2000)
   expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
+})
+
+test('file references with a line include extensionless names like Dockerfile, never bare numbers', () => {
+  expect(fileRefs('Edit Dockerfile:12, Makefile#L3-L5 and src/a.ts:7; port 8080:1 is not a file').map(r => `${r.path}:${r.line}-${r.end}`)).toEqual(['Dockerfile:12-12', 'Makefile:3-5', 'src/a.ts:7-7'])
+})
+
+test('open content search results refresh after Claude writes a file', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] },
+    grep: 'a.ts\x001\x00needle\n',
+  }
+  const clock = world(on, w, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(await ids()).toEqual([`grep:0:${root}/a.ts`, `grep:1:${root}/a.ts`])
+  w.grep = 'a.ts\x001\x00needle\nb.ts\x004\x00needle again\n'
+  await $.tool.call({ tool: 'Write', file_path: `${root}/b.ts`, content: 'x' })
+  await clock.settle()
+  await ui.drawn()
+  await clock.advance(1000)
+  await clock.settle()
+  expect(await ids()).toEqual([`grep:0:${root}/a.ts`, `grep:1:${root}/a.ts`, `grep:0:${root}/b.ts`, `grep:4:${root}/b.ts`])
+  await ui.unmount()
 })

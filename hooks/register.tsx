@@ -414,11 +414,18 @@ async function watchTree($: EngineInterface): Promise<void> {
   }
 }
 
+function staleGrep($: EngineInterface): void {
+  if (!grep.key) return
+  grep.key = ''
+  void $.ui.invalidate('ui.render')
+}
+
 async function watched($: EngineInterface): Promise<void> {
   watchTimer = null
   const paths = [...watchQueue]
   watchQueue.clear()
   dropPreviews(paths)
+  if (paths.length) staleGrep($)
   const t = await get($)
   const open = new Set([t.root, ...openDirs(t)])
   const dirs = [...new Set(paths.map(p => dirname(p)).filter(d => open.has(d)))]
@@ -1281,6 +1288,7 @@ async function exists($: EngineInterface, path: string): Promise<boolean> {
 async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
   const reads = queuedReads
   queuedReads = []
+  if (jobs.some(j => !j.readOnly)) staleGrep($)
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
@@ -1375,6 +1383,7 @@ function dropPreviews(paths: string[]): void {
 async function touched($: EngineInterface, paths: string[], tone: string, show: boolean): Promise<void> {
   if (tone !== 'purple') dropPreviews(paths)
   if (tone !== 'purple') markStale($, paths)
+  if (tone !== 'purple') staleGrep($)
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
