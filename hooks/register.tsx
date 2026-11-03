@@ -1661,7 +1661,7 @@ async function considerWork($: EngineInterface): Promise<void> {
       try {
         await $.command.run({ command: 'cd', args: repo })
         void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
-        $.clock.after(400, () => void followCwd($))
+        $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
       } catch (error) {
         void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
       }
