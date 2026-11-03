@@ -10,6 +10,8 @@ export const FOCUS_KEYS: readonly KeyWant[] = [
 
 type Block = { context: string; bindings: Record<string, unknown> }
 
+const shown = (v: unknown): string => typeof v === 'string' ? v : JSON.stringify(v)
+
 export type KeyClash = KeyWant & { readonly where: string; readonly spelled: string; readonly bound: string }
 
 export type KeyPlan =
@@ -68,11 +70,11 @@ export const planKeys = (text: string | undefined, wants: readonly KeyWant[] = F
   for (const want of wants) {
     const own = boundIn(blocks, want.context, want.key)
     if (own) {
-      if (own[1] !== want.action) clash.push({ ...want, where: want.context, spelled: own[0], bound: own[1] === null ? 'null (unbound)' : String(own[1]) })
+      if (own[1] !== want.action) clash.push({ ...want, where: want.context, spelled: own[0], bound: own[1] === null ? 'null (unbound)' : shown(own[1]) })
       continue
     }
     const shadow = (want.shadows ?? []).map(context => ({ context, found: boundIn(blocks, context, want.key) })).find(s => s.found && s.found[1] !== null && s.found[1] !== want.action)
-    if (shadow?.found) clash.push({ ...want, where: shadow.context, spelled: shadow.found[0], bound: String(shadow.found[1]) })
+    if (shadow?.found) clash.push({ ...want, where: shadow.context, spelled: shadow.found[0], bound: shown(shadow.found[1]) })
     else add.push(want)
   }
   if (add.length === 0 && clash.length === 0) return { kind: 'done' }
