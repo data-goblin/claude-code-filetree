@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.6.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -130,6 +130,7 @@ Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
+Long file:        500 | a line count | off
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off

@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -100,6 +100,12 @@
         "loc",
         "files"
       ]
+    },
+    "long": {
+      "type": "string",
+      "title": "Long file",
+      "description": "In the loc column, a file with more lines than this number shows its line count in red. off: never. Default 500.",
+      "default": "500"
     },
     "hints": {
       "type": "string",

@@ -3574,6 +3574,29 @@ test('a LOC scan that the engine aborts is retried, so the folder still shows it
   await ui.unmount()
 })
 
+for (const [long, red] of [[undefined, ['big.ts']], ['50', ['big.ts', 'mid.ts']], ['off', []]] as const) {
+  test(`loc column: Long file ${long ?? 'default'} draws the line count of longer files in red`, { timeoutMs: 20_000, options: { column: 'loc', ...(long ? { long } : {}) } }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, {
+      os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [['big.ts', 'file'], ['mid.ts', 'file'], ['small.ts', 'file']] },
+      loc: { [`${root} 1`]: `${root}/big.ts:600\n${root}/mid.ts:80\n${root}/small.ts:12\n`, [root]: `${root}/big.ts:600\n${root}/mid.ts:80\n${root}/small.ts:12\n` },
+    }, [])
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await clock.advance(100)
+    await clock.settle()
+    const rows = treeRows(await ui.drawn()).rows
+    for (const name of ['big.ts', 'mid.ts', 'small.ts']) {
+      const cell = rows.find(r => r.id === `${root}/${name}`)?.right.find(x => /\d/.test(x.t))
+      expect(cell?.c === 'ansi256(1)').toBe((red as readonly string[]).includes(name))
+    }
+    await ui.unmount()
+  })
+}
+
 test('desktop: in a 1000-row tree End and a reveal at row 900 both draw their target row', { timeoutMs: 30_000 }, async ($, on) => {
   const root = '/Users/k/huge'
   const names = Array.from({ length: 1000 }, (_, i): [string, 'file'] => [`f${String(i).padStart(4, '0')}.txt`, 'file'])

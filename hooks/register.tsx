@@ -184,6 +184,7 @@ let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
+let longFile = 500
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -2527,6 +2528,7 @@ export const register: Register = (on, options) => {
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
   sortHeader = options?.headers !== 'off'
+  longFile = options?.long === 'off' ? 0 : typeof options?.long === 'string' && /^\d+$/.test(options.long.trim()) ? Number(options.long.trim()) : 500
   autoCollapseDefault = options?.collapse === 'on'
   shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
   shortcutsShown = shortcutsSetting === 'always'
@@ -3167,6 +3169,7 @@ export const register: Register = (on, options) => {
     const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: ink(theme.fg, DESK.fg) } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
+    const isLong = (n: FileNode): boolean => longFile > 0 && t.column === 'loc' && n.kind === 'file' && (locCache.get(n.id) ?? 0) > longFile
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
       const loc = t.diff[n.id]
       const metric = t.column === 'loc'
@@ -3203,7 +3206,7 @@ export const register: Register = (on, options) => {
       if (counts && counts[0] > 0) cells['?'] = { t: `?:${counts[0]}`, c: gitColors['?'] ?? addColor }
       if (counts && counts[1] > 0) cells.M = { t: `M:${counts[1]}`, c: gitColors.M ?? 'ansi256(3)' }
       if (counts && counts[2] > 0) cells.D = { t: `D:${counts[2]}`, c: theme.urgent }
-      if (metric) cells.metric = { t: metric, c: theme.muted }
+      if (metric) cells.metric = { t: metric, c: isLong(n) ? delColor : theme.muted }
       return cells
     }
     const tailRows = desk ? drawn : [...pinned, ...shown]
@@ -3237,7 +3240,7 @@ export const register: Register = (on, options) => {
       const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
       const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const cells = cellsOf(n)
-      if (cells.metric && gitColor && !isIgnored) cells.metric = { ...cells.metric, c: gitColor }
+      if (cells.metric && gitColor && !isIgnored && !isLong(n)) cells.metric = { ...cells.metric, c: gitColor }
       const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
       const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
