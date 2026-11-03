@@ -1906,7 +1906,7 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
       if (made.exitCode === EXIT_LOCKED) return { state: 'failed', note: 'encrypted' }
       if (made.exitCode === EXIT_FAILED) return { state: 'failed', note: `could not decode${why ? `: ${why}` : ''}` }
       const [out = '', count = ''] = made.stdout.trim().split('\n')
-      if (made.exitCode !== 0 || !out.startsWith('/')) return { state: 'failed', note: why || `could not decode, exit ${made.exitCode}` }
+      if (made.exitCode !== 0 || !isAbsolute(out)) return { state: 'failed', note: why || `could not decode, exit ${made.exitCode}` }
       file = out
       pages = Number(count) || 0
       sessionDir = dirname(file)

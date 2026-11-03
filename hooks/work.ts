@@ -21,10 +21,12 @@ export function shellPaths(command: string, cwd: string, home: string): string[]
   const lead = /^\s*cd\s+("[^"]+"|'[^']+'|\S+)/.exec(command)
   for (const raw of [lead?.[1], ...command.split(/[\s;&|()<>=]+/)]) {
     if (!raw) continue
-    const token = raw.replace(/^["']|["']$/g, '').replace(/[,:]+$/, '')
+    const token = raw.replace(/^["']|["']$/g, '').replace(/[,:]+$/, '').replace(/\\/g, '/')
+    const base = cwd.replace(/\/+$/, '')
     if (token.startsWith('~/') && home) out.push(`${home}${token.slice(1)}`)
-    else if (token.startsWith('/') && token.length > 1 && !token.startsWith('//')) out.push(token)
-    else if (raw === lead?.[1] && cwd) out.push(`${cwd.replace(/\/+$/, '')}/${token}`)
+    else if (/^(\/[^/]|[A-Za-z]:\/)/.test(token)) out.push(token)
+    else if (raw === lead?.[1] && cwd) out.push(`${base}/${token}`)
+    else if (cwd && token.includes('/') && /^[\w.@][\w./@-]*$/.test(token)) out.push(`${base}/${token}`)
   }
   return [...new Set(out.map(p => p.replace(/\/+$/, '') || '/'))]
 }

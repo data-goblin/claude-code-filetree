@@ -8,6 +8,7 @@ import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
+import { shellPaths } from '../hooks/work'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -3877,4 +3878,12 @@ test('x on a guarded path seen from the parent folder lifts the guard set inside
   expect(await glyph(`${root}/secret`)).toBe('■ ')
   expect((await edit()).decision).toBe('allow')
   await ui.unmount()
+})
+
+test('Follow work reads shell commands: absolute, home, drive-letter and relative paths with a slash count, flags and bare words do not', () => {
+  expect(shellPaths('touch src/a.ts && sed -i s/x/y/ ../b/c.ts', '/home/k/a', '/home/k')).toEqual(['/home/k/a/src/a.ts', '/home/k/a/s/x/y', '/home/k/a/../b/c.ts'])
+  expect(shellPaths('cat /etc/hosts ~/notes.md -n README', '/home/k/a', '/home/k')).toEqual(['/etc/hosts', '/home/k/notes.md'])
+  expect(shellPaths('Get-Content C:\\Users\\k\\b\\x.ts; type D:/data/y.csv', 'C:/Users/k/a', 'C:/Users/k')).toEqual(['C:/Users/k/b/x.ts', 'D:/data/y.csv'])
+  expect(shellPaths('cd lib', '/home/k/a', '/home/k')).toEqual(['/home/k/a/lib'])
+  expect(shellPaths('curl https://x.test/a -o out', '/home/k/a', '/home/k')).toEqual([])
 })
