@@ -54,6 +54,7 @@ import {
   type Row,
 } from './tree'
 import { compileRegex, toEre } from './regex'
+import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
@@ -68,7 +69,6 @@ const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
 const NO_REPO_DEPTH = 4
 const DOUBLE_MS = 450
-const SHORTCUTS_MS = 10_000
 const FIND_LIMIT = 200
 const GREP_LIMIT = 200
 const MARK_LIMIT = 100
@@ -218,7 +218,9 @@ let collapseTimer: { cancel: () => void } | null = null
 let collapseAt = 0
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
-let shortcutsTimer = 0
+let shortcutsTop = 0
+let shortcutsMax = 0
+let shortcutsPage = 1
 let treemapSetting: 'auto' | 'image' | 'cells' | 'off' = 'auto'
 let kittyTerm = false
 let imageDenied = false
@@ -1920,7 +1922,7 @@ function jumpClose($: EngineInterface, refocus = false): void {
   zjump.rows = []
   zjump.seq += 1
   void $.ui.invalidate('ui.render')
-  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, treeKey()))
+  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, 'hk-tree'))
 }
 
 async function repoOf($: EngineInterface, path: string): Promise<string | null> {
@@ -2479,24 +2481,37 @@ async function mapKey($: EngineInterface, key: string): Promise<boolean> {
   return true
 }
 
-function treeKey(): string {
-  return shortcutsSetting === 'always' ? 'nav-o' : 'hk-tree'
-}
-
 function focusPane($: EngineInterface, root: string, key: string): void {
   void $.ui.open({ id: PANE, title: `Files: ${root.split('/').pop() || root}`, focus: true }).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
 }
 
-function toggleShortcuts($: EngineInterface): void {
-  if (shortcutsSetting !== 'auto') return
-  const mine = ++shortcutsTimer
-  shortcutsShown = !shortcutsShown
-  if (shortcutsShown) $.clock.after(SHORTCUTS_MS, () => {
-    if (mine !== shortcutsTimer) return
-    shortcutsShown = false
-    void $.ui.invalidate('ui.render')
-  })
+function toggleShortcuts($: EngineInterface, open = !shortcutsShown): void {
+  shortcutsShown = open
+  shortcutsTop = 0
   void $.ui.invalidate('ui.render')
+}
+
+function scrollShortcuts($: EngineInterface, by: number): void {
+  const top = Math.max(0, Math.min(shortcutsMax, shortcutsTop + by))
+  if (top === shortcutsTop) return
+  shortcutsTop = top
+  void $.ui.invalidate('ui.render')
+}
+
+function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): boolean {
+  if (key === '?') {
+    toggleShortcuts($)
+    return true
+  }
+  if (!shortcutsShown) return false
+  if (SCROLL_KEYS.has(key)) {
+    const page = Math.max(1, shortcutsPage - 1)
+    const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, b: -page, pagedown: page, f: page, home: -Infinity, end: Infinity }
+    if (surface !== 'desktop') scrollShortcuts($, by[key] ?? 0)
+    return true
+  }
+  toggleShortcuts($, false)
+  return false
 }
 
 async function toggleSplit($: EngineInterface): Promise<void> {
@@ -2538,7 +2553,7 @@ function parkPreview($: EngineInterface): void {
 
 async function closePreview($: EngineInterface): Promise<void> {
   await patch($, () => ({ preview: '', previewTop: 0 }))
-  $.clock.after(100, async () => focusPane($, (await get($)).root, treeKey()))
+  $.clock.after(100, async () => focusPane($, (await get($)).root, 'hk-tree'))
 }
 
 async function jumpDiff($: EngineInterface, dir: 1 | -1): Promise<void> {
@@ -2740,6 +2755,7 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
+  if (shortcutKey($, key, surface)) return
   if (key === 'z') return jumpOpen($)
   if (grepOn(await get($)) && ((await grepNav($, key, surface)) || (await grepAct($, key, shift, surface)))) return
   await steer($, key, shift, surface)
@@ -2771,7 +2787,6 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'pagedown') await move(10)
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
-  else if (key === '?') toggleShortcuts($)
   else if (key === 'i') {
     const dir = cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root
     await scopeSearch($, dir === t.root ? '' : dir)
@@ -3253,6 +3268,10 @@ export const register: Register = (on, options) => {
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && zjump.on) jumpClose($)
+    if (e.id === PANE) {
+      shortcutsShown = shortcutsSetting === 'always'
+      shortcutsTop = 0
+    }
     return next(e)
   })
 
@@ -3275,6 +3294,10 @@ export const register: Register = (on, options) => {
     }
     if (t.split && overPeek) {
       scrollSplit($, peekTop + Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
+      return {}
+    }
+    if (shortcutsShown && !zjump.on) {
+      scrollShortcuts($, Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
       return {}
     }
     if (grepOn(t) && grep.rows.length) {
@@ -3596,7 +3619,7 @@ export const register: Register = (on, options) => {
     if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
-    const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsShown || shortcutsSetting === 'auto' ? 1 : 0)
+    const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsSetting === 'auto' ? 1 : 0)
     const spare = body - chrome - 5
     const splitRows = t.split && !nativeScroll && spare >= 6 && (treemapSetting !== 'off' || Boolean(peekTarget(t))) ? Math.min(Math.max(6, Math.floor(body * 0.45)), spare) : 0
     splitShown = splitRows > 0
@@ -4221,7 +4244,7 @@ export const register: Register = (on, options) => {
     const split = await peek()
 
     const paging = splitShown && Boolean(peekPath) && (pictureKind(peekPath) === 'pdf' || (pictureKind(peekPath) === 'office' && Boolean(Image) && !imageDenied && !inTmux && !inHerdr))
-    const park = () => focusPane($, t.root, paging ? 'rows' : treeKey())
+    const park = () => focusPane($, t.root, paging ? 'rows' : 'hk-tree')
     const footerLink = footer && links.has(footer) ? linkStates.get(footer) : undefined
     if (footer && links.has(footer) && !linkStates.has(footer)) void classifyLink($, footer)
     const footerName = footer === t.root ? t.root.split('/').filter(Boolean).pop() || t.root : footer ? (inside(t.root, footer) ? footer.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(footer)) : ''
@@ -4229,7 +4252,7 @@ export const register: Register = (on, options) => {
       { key: 'jkhl', label: 'move', act: () => undefined },
       { key: 'o', label: 'open', act: () => void navigate($, 'return') },
       { key: 'd', label: 'diff', act: () => void navigate($, 'd') },
-      { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
+      { key: 's', label: 'search', act: () => void navigate($, 's', false, e.surface) },
       { key: 'i', label: 'in folder', act: () => void navigate($, 'i', false, e.surface) },
       { key: 'a', label: 'auto-collapse', act: () => void navigate($, 'a', false, e.surface).then(park) },
       { key: 'z', label: 'jump', act: () => void navigate($, 'z', false, e.surface) },
@@ -4246,24 +4269,40 @@ export const register: Register = (on, options) => {
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
-      ...(shortcutsSetting === 'auto' ? [{ key: '?', label: 'hide', act: () => undefined }] : []),
     ]
-    const picked = new Set<string>()
-    if (shortcutsShown) {
-      let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'v', 'u', 't', 'c', 'r', 'a', 'n', 'g', 'm']) {
-        const k = allKeys.find(x => x.key === key)
-        if (!k) continue
-        const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
-        if (w > room) continue
-        room -= w
-        picked.add(key)
-      }
+    const overlay = shortcutsShown && !zjump.on
+    const keyRows = overlay && !desk ? shortcutRows(theme.accent, theme.muted) : []
+    shortcutsPage = room
+    shortcutsMax = Math.max(0, keyRows.length - room)
+    shortcutsTop = Math.min(shortcutsTop, shortcutsMax)
+    const deskShortcuts = () => {
+      const groups = shortcutGroups(true)
+      const keyCols = Math.max(...groups.flatMap(g => g.keys.map(k => k.key.length))) + 2
+      return (
+        <Box key="keys-panel" flexDirection="column" marginTop={1} marginX={1} paddingX={1} paddingY={1} backgroundColor={DESK.field}>
+          <Box key="keys-head" flexDirection="row" alignItems="center">
+            {Svg ? <Svg key="keys-panel-icon" source={iconSvg('keyboard', accentInk, 16)} alt="keyboard shortcuts" width={16} height={16} /> : null}
+            <Box marginLeft={1} flexShrink={1}><Text bold>Keyboard shortcuts</Text></Box>
+            <Box flexGrow={1} />
+            <Button key="keys-close" plain dimColor hover={{ dimColor: false }} label="Close" onPress={() => { toggleShortcuts($, false); park() }} />
+          </Box>
+          {groups.map(g => (
+            <Box key={`keys-${g.title}`} flexDirection="column" marginTop={1}>
+              <Text key={`keys-title-${g.title}`} bold color={mutedInk}>{g.title}</Text>
+              {g.keys.map(k => (
+                <Box key={`keys-${g.title}-${k.key}`} flexDirection="row">
+                  <Box width={keyCols} flexShrink={0}><Text mono color={accentInk}>{k.key}</Text></Box>
+                  <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{k.label}</Text></Box>
+                </Box>
+              ))}
+            </Box>
+          ))}
+        </Box>
+      )
     }
-    const keys = allKeys.filter(k => picked.has(k.key))
     const hidden: [string, () => void][] = zjump.on ? [] : [
       ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
-      ...allKeys.filter(k => /^[a-z]$/.test(k.key) && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
+      ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
 
@@ -4273,7 +4312,7 @@ export const register: Register = (on, options) => {
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
               <Svg key="root-icon" source={rowSvg(0, 'open', t.top === t.root ? 'folder-git' : 'folder-open', accentInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
-              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
                 <Text bold>{header}</Text>
               </Button>
             </Box>
@@ -4285,7 +4324,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row">
             <Box flexDirection="row" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? rowColors.activeBg || undefined : undefined}>
-              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
                 <Text color={theme.accent}>{`${rootGlyph} `}</Text>
                 <Text bold color={theme.accent}>{header}</Text>
               </Button>
@@ -4358,28 +4397,18 @@ export const register: Register = (on, options) => {
           </Box>
         )}
         {sortHeader ? headerRow() : searchGap ? <Text key="gap-below"> </Text> : null}
-        {desk ? deskTree() : (
+        {desk ? (overlay ? deskShortcuts() : deskTree()) : (
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
         {splitAt === 'bottom' ? split : null}
-        {(footer || latest || tipText || shortcutsShown || shortcutsSetting === 'auto') && (
+        {(footer || latest || tipText || shortcutsSetting === 'auto') && (
           <Box flexDirection="row" height={1} overflow="hidden">
-            {keys.length ? (
-              <Box flexDirection="row" flexShrink={0} gap={2}>
-                {keys.map(k => k.key === 'jkhl'
-                  ? <Text key="nav-move" dimColor><Text color={theme.accent}>j k h l</Text>: move</Text>
-                  : k.key === '[ ]'
-                  ? <Button key="nav-page" plain dimColor label={`[ ]: ${k.label}`} onPress={k.act}><Text color={theme.accent}>[ ]</Text>{`: ${k.label}`}</Button>
-                  : k.key === '?'
-                  ? <Button key="nav-help" plain dimColor label={`?: ${k.label}`} onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>{`: ${k.label}`}</Button>
-                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={!zjump.on && /^[a-z]$/.test(k.key) ? k.key : undefined} label={/^[a-z]$/.test(k.key) ? k.label : `${k.key}: ${k.label}`} onPress={k.act} />)}
-              </Box>
-            ) : shortcutsSetting === 'auto' ? (
+            {shortcutsSetting === 'auto' ? (
               desk && Svg ? (
                 <Box key="keys" flexShrink={0} flexDirection="row" alignItems="center">
                   <Svg key="keys-icon" source={rowSvg(0, null, 'keyboard', mutedInk)} alt="keyboard shortcuts" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
@@ -4408,7 +4437,7 @@ export const register: Register = (on, options) => {
           </Box>
         )}
         <Box key="hotkeys" height={0} overflow="hidden" flexDirection="row">
-          {shortcutsSetting === 'always' ? null : <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} />}
+          <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} />
           {hidden.map(([k, act]) => <Button key={`hk-${k}`} plain hotkey={k} label={k} onPress={act} />)}
         </Box>
       </Box>

@@ -122,7 +122,7 @@ w:            list the files Claude wrote outside the repo this session (shown o
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
 v / V:        mark or unmark the entry under the cursor / clear all marks
-"?":          show the shortcuts in the footer for 10 seconds
+"?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); any key that acts closes it first (? typed in the search field searches file contents instead)
 Space:        Quick Look on macOS
 ```
 
@@ -147,7 +147,7 @@ Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off
 Auto-collapse:    off | on
-Shortcut row:     auto | always | off
+Shortcuts:        auto | always | off
 Open with:        empty | editor | preview | a command with {path} and {dir}
 Binary files:     Open with | default app
 Edit with:        empty | a command with {path} and {line}
