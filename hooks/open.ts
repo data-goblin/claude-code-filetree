@@ -97,13 +97,17 @@ export function tmuxOpenCommand(editor: string, target: string, line?: number, w
   }
 }
 
+export function herdrSplit(herdr: string, dir: string, where: Target = 'auto', workspace = ''): string[] {
+  return [herdr, ...(where === 'tab' ? ['tab', 'create', ...(workspace ? ['--workspace', workspace] : [])] : where === 'workspace' ? ['workspace', 'create'] : ['pane', 'split', '--current', '--direction', where === 'pane below' ? 'down' : 'right']), '--focus', '--cwd', dir]
+}
+
 export function herdrOpenCommand(herdr: string, editor: string, target: string, line?: number, where: Target = 'auto', workspace = '') {
   const argv = words(editor)
   if (!argv[0]) throw new Error('Editor command is empty')
   const dir = target.slice(0, target.lastIndexOf('/')) || '/'
   const command = [...argv, ...(line ? [`+${line}`] : [])].map(w => `'${w.replace(/'/g, "'\\''")}'`).join(' ')
   return {
-    split: [herdr, ...(where === 'tab' ? ['tab', 'create', ...(workspace ? ['--workspace', workspace] : [])] : where === 'workspace' ? ['workspace', 'create'] : ['pane', 'split', '--current', '--direction', where === 'pane below' ? 'down' : 'right']), '--focus', '--cwd', dir, '--env', `PANE_OPEN_TARGET=${target}`],
+    split: [...herdrSplit(herdr, dir, where, workspace), '--env', `PANE_OPEN_TARGET=${target}`],
     run: (pane: string) => [herdr, 'pane', 'run', pane, `exec ${command} "$PANE_OPEN_TARGET"`],
     init: { timeoutMs: 10_000 },
   }

@@ -64,7 +64,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
 - `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name
-- Open files in their default app, an editor in a tmux or herdr pane, or any command
+- Open files in their default app, an editor in a tmux or herdr pane, or any command, and `t` opens a shell in a folder in a new tmux or herdr pane (where Terminal target says)
 - Changes made outside Claude show at once on Linux through `inotifywait`
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
 - Symlinks show an arrow after the name: muted when the target is in the tree, yellow when it is outside, red when it is missing or the link is circular; the footer names the target and which of these it is for the selected row
@@ -115,6 +115,7 @@ p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
 d:            diff of the entry under the cursor
+t:            open a shell in the folder under the cursor (or the file's folder) in a new tmux or herdr pane
 x:            guard or unguard the entry under the cursor (off limits to Claude's edits)
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line

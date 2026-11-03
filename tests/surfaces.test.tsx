@@ -4125,3 +4125,30 @@ test('symlinks show an arrow, and the footer says where they lead: inside, outsi
   await desktop.unmount()
   await ui.unmount()
 })
+
+for (const [surface, env, want] of [
+  ['terminal', { HOME: '/home/k', TMUX: '/tmp/tmux-1000/default,1,0', SHELL: '/bin/zsh' }, ['tmux', 'new-window', '-c', '/home/k/proj/src', '--', '/bin/zsh']],
+  ['terminal', { HOME: '/home/k', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr' }, ['/opt/herdr', 'pane', 'split', '--current', '--direction', 'right', '--focus', '--cwd', '/home/k/proj/src']],
+  ['desktop', { HOME: '/home/k' }, null],
+] as const) {
+  test(`t opens a shell in the folder of the cursor on the ${surface}${'TMUX' in env ? ' in tmux' : 'HERDR_ENV' in env ? ' in herdr' : ', or says it needs tmux or herdr'}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] } }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await ui.post({ press: `${root}/src` }, zone(`${root}/src`))
+    await clock.settle()
+    await ui.post({ press: `${root}/src/a.ts` }, zone(`${root}/src/a.ts`))
+    await clock.settle()
+    if (surface === 'desktop') await ui.press({ key: 'hk-t' })
+    else await ui.post({ key: 't' }, zone(`${root}/src/a.ts`))
+    await clock.settle()
+    if (want) expect(ran).toContainEqual([...want])
+    else expect(ran).toContainEqual(['toast', 't opens a shell in a new tmux or herdr pane; run Claude Code inside tmux or herdr to use it'])
+    await ui.unmount()
+  })
+}
