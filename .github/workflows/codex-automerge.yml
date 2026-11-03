@@ -4,10 +4,7 @@ on:
   issue_comment:
     types: [created, edited]
 
-permissions:
-  contents: write
-  pull-requests: write
-  checks: read
+permissions: {}
 
 concurrency:
   group: codex-automerge-${{ github.event.issue.number }}
@@ -20,6 +17,11 @@ jobs:
       github.event.comment.user.login == 'chatgpt-codex-connector[bot]' &&
       contains(github.event.comment.body, 'codex-review-state:v1')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -58,9 +60,11 @@ jobs:
 
       - name: Merge
         if: steps.verdict.outputs.ok == 'true'
+        env:
+          SHA: ${{ steps.verdict.outputs.sha }}
         run: |
           for attempt in 1 2 3 4 5; do
-            gh pr merge "$PR" --merge --delete-branch --match-head-commit "${{ steps.verdict.outputs.sha }}" && exit 0
+            gh pr merge "$PR" --merge --delete-branch --match-head-commit "$SHA" && exit 0
             sleep $((attempt * 10))
           done
           exit 1
