@@ -104,8 +104,10 @@ function world(on: On, w: World, ran: Ran) {
       return { value: { kind: 'file', size: w.theme.toml.length, mtimeMs: w.theme.mtimeMs, isLink: false } }
     }
     const said = norm(e.path)
-    const alias = Object.keys(w.real ?? {}).find(k => said === k || said.startsWith(`${k}/`))
-    const p = alias ? `${w.real?.[alias]}${said.slice(alias.length)}` : said
+    const drive = /^[A-Za-z]:/.exec(said)?.[0] ?? ''
+    const bare = said.slice(drive.length)
+    const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
+    const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
     const hit = dirOf(p) ? 'dir' : dirOf(parent)?.find(([n]) => n === name)?.[1]
@@ -3928,4 +3930,22 @@ test('failed shell calls into another repo never count as work: neither Claude n
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
   expect(await root()).toBe(`${a}/src`)
   await ui.unmount()
+})
+
+test('Follow work starts over in a new or resumed session: reads from the last session never add up to a move', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const w = WORK_WORLD(a, b)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const { ui, clock } = await workSession($, on, w, ran)
+  for (const f of ['b.ts', 'c.ts', 'd.ts']) await $.tool.call({ tool: 'Read', file_path: `${b}/${f}` })
+  await clock.settle()
+  await ui.unmount()
+  await $.session.end({ reason: 'resume', sessionId: 'test-session', resume: { id: 'other-session' } })
+  await $.session.start({ cwd: a, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.tool.call({ tool: 'Read', file_path: `${b}/e.ts` })
+  await clock.advance(1000)
+  await clock.settle()
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
 })

@@ -2622,6 +2622,8 @@ export const register: Register = (on, options) => {
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
     outside = []
+    workTouches = []
+    workLast = 0
     guardsLoaded = null
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
