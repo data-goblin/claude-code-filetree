@@ -1747,6 +1747,8 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
   if (key in by) {
     grep.sel = Math.max(0, Math.min(last, grep.sel + (by[key] ?? 0)))
     void $.ui.invalidate('ui.render')
+    const row = grep.rows[grep.sel]
+    if (surface === 'desktop' && row) void $.ui.scroll({ to: { key: `grep-row:${grepId(row)}` }, in: PANE, block: 'nearest' }).catch(() => undefined)
     return true
   }
   if (key !== 'return' && key !== 'enter' && key !== 'o') return false
