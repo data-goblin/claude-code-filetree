@@ -10,7 +10,7 @@ const dir = mkdtempSync(join(tmpdir(), 'pane-open-'))
 const bin = join(dir, 'bin')
 const data = join(dir, 'data with spaces')
 const run = (script: string, args: string[], env = process.env) => spawnSync('/bin/sh', ['-c', script, 'sh', ...args], { encoding: 'utf8', env, timeout: 5000 })
-const dry = LINUX_OPEN.replace(/exec (gio launch [^\n]+|gio open \"\$f\"|xdg-open \"\$f\")/g, '{ echo $1; exit 0; }')
+const dry = LINUX_OPEN.replace(/exec (gio launch [^\n]+|gio open "\$f"|xdg-open "\$f")/g, '{ echo $1; exit 0; }')
 const sockets: ReturnType<typeof createServer>[] = []
 try {
   mkdirSync(bin)

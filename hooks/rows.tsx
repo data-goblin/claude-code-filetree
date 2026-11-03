@@ -115,7 +115,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
           <Column flexDirection="column" flexShrink={0}>
             {Array.from({ length: p.rows }, (_, i) => {
               const on = i >= bar.pos && i < bar.pos + bar.size
-              return <Title color={(on ? bar.thumb : bar.track) || undefined} dimColor={!on && !bar.track}>{on ? '┃' : '│'}</Title>
+              return <Title key={`bar-${i}`} color={(on ? bar.thumb : bar.track) || undefined} dimColor={!on && !bar.track}>{on ? '┃' : '│'}</Title>
             })}
           </Column>
         ) : null}
@@ -150,7 +150,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     return (
       <Text bold={s.b}>
         {chars.map((ch, i) => (
-          <Text color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
+          <Text key={`ch-${i}`} color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
         ))}
       </Text>
     )

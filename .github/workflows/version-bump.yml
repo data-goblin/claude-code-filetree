@@ -10,10 +10,12 @@ permissions:
 jobs:
   version-bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Version is above the base branch and matches the README badge
         run: |
           base=$(git show "origin/$GITHUB_BASE_REF:.claude-plugin/plugin.json" | jq -r .version)

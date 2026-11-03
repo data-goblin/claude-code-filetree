@@ -225,7 +225,7 @@ export function readOnly(command: string): boolean {
       const i = gitVerb(tokens)
       return gitReadOnly(tokens[i] ?? '', tokens.slice(i + 1))
     }
-    if (head === 'sed') return !tokens.some(t => /^-i/.test(t))
+    if (head === 'sed') return !tokens.some(t => t.startsWith('-i'))
     if (head === 'find' || head === 'fd' || head === 'fdfind') return !tokens.some(t => WRITE_FLAGS.test(t))
     return READERS.has(head)
   })
@@ -243,7 +243,7 @@ export function readTargets(command: string, sessionCwd: string, stdout: string,
       continue
     }
     if (!READERS.has(head)) continue
-    if (head === 'sed' && tokens.some(t => /^-i/.test(t))) continue
+    if (head === 'sed' && tokens.some(t => t.startsWith('-i'))) continue
     if (OUTPUT_PATHS.has(head)) listsPaths = true
     const args = tokens.slice(1)
     let skipPattern = PATTERN_FIRST.has(head) && !args.some(t => t === '-e' || t === '-f' || t === '--files')

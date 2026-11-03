@@ -1,0 +1,4 @@
+paths:
+  .github/workflows/platforms.yml:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2016:.+'

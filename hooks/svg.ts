@@ -1,6 +1,7 @@
 import type { FileNode } from '../types'
 
-import { rgbOf } from './pixmap'
+import { isMemory } from './icons'
+import { type Rgb, ratio, rgbOf } from './pixmap'
 
 const NS = 'http://www.w3.org/2000/svg'
 
@@ -59,6 +60,8 @@ export const ICONS = {
   globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
   archive: 'M3 3h18v5H3zM4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4',
   undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
+  brain: 'M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18ZM12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18ZM15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4M17.599 6.5a3 3 0 0 0 .399-1.375M6.003 5.125A3 3 0 0 0 6.401 6.5M3.477 10.896a4 4 0 0 1 .585-.396M19.938 10.5a4 4 0 0 1 .585.396M6 18a4 4 0 0 1-1.967-.516M19.967 17.484A4 4 0 0 1 18 18',
+  warning: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01',
   tag: 'M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4zM7.5 6.5a1 1 0 1 0 0 2 1 1 0 1 0 0-2',
 } as const
 
@@ -118,9 +121,10 @@ const EXT_GROUPS: [IconName, string][] = [
 
 const EXTS: Record<string, IconName> = Object.fromEntries(EXT_GROUPS.flatMap(([icon, list]) => list.split(' ').map(ext => [ext, icon])))
 
-export function nodeIcon(n: FileNode, open: boolean, isRepo: boolean): IconName {
+export function nodeIcon(n: FileNode, isRepo: boolean): IconName {
   if (n.kind === 'dir') return isRepo ? 'folder-git' : n.hidden ? 'folder-line' : 'folder'
   if (n.kind === 'link') return 'file-link'
+  if (isMemory(n)) return 'brain'
   const lower = n.name.toLowerCase()
   const named = NAMES[lower]
   if (named) return named
@@ -231,23 +235,16 @@ export function barSvg(color: string): string {
 
 const SELECTION_MIN = 1.3
 
-function lumOf(hex: string): number {
-  const [r, g, b] = rgbOf(hex).map(c => {
-    const v = c / 255
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
-}
-
-function shade(bg: string, light: boolean): string {
+function shade(bg: string, rgb: Rgb, light: boolean): string {
   if (!light) return lighten(bg, 0.14)
-  return `#${rgbOf(bg).map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('')}`
+  return `#${rgb.map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('')}`
 }
 
 export function selectionOn(selection: string, bg: string, light: boolean): string {
   const fallback = light ? 'ansi256(252)' : 'ansi256(238)'
-  if (!selection || selection === 'ansi256(0)') return /^#[0-9a-f]{6}$/i.test(bg) ? shade(bg, light) : fallback
-  if (!/^#[0-9a-f]{6}$/i.test(selection) || !/^#[0-9a-f]{6}$/i.test(bg)) return selection
-  const [hi, lo] = [lumOf(selection), lumOf(bg)].sort((x, y) => y - x)
-  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05) >= SELECTION_MIN ? selection : shade(bg, light)
+  const back = rgbOf(bg)
+  if (!selection || selection === 'ansi256(0)') return back ? shade(bg, back, light) : fallback
+  const sel = rgbOf(selection)
+  if (!sel || !back) return selection
+  return ratio(sel, back) >= SELECTION_MIN ? selection : shade(bg, back, light)
 }

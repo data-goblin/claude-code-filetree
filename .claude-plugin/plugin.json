@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -58,6 +58,16 @@
         "tree"
       ]
     },
+    "work": {
+      "type": "string",
+      "title": "Follow work",
+      "description": "on: when Claude or its subagents keep reading and writing in another git repo for a few minutes, the session moves there with /cd at the end of a turn (or while idle) and the tree follows; at most once every two minutes, never while several repos are equally busy, and never into temp folders, ~/.claude, ~/.config or the agents vault. off: the session stays where you put it. With Jump moves Claude set to tree, only the tree moves.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "start": {
       "type": "string",
       "title": "Open at start",
@@ -90,6 +100,12 @@
         "loc",
         "files"
       ]
+    },
+    "long": {
+      "type": "string",
+      "title": "Long file",
+      "description": "In the loc column, a file with more lines than this number shows its line count in red. off: never. Default 500.",
+      "default": "500"
     },
     "hints": {
       "type": "string",

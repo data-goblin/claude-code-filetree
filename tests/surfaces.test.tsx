@@ -8,6 +8,7 @@ import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex } from '../hooks/regex'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
+import { shellPaths, workIgnored } from '../hooks/work'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
 
 type World = {
@@ -46,6 +47,8 @@ type World = {
   newestDelay?: number
   newestAbortOnce?: string[]
   locAbortOnce?: string[]
+  tops?: Record<string, string>
+  real?: Record<string, string>
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -100,12 +103,16 @@ function world(on: On, w: World, ran: Ran) {
       if (!w.theme) throw new Error(`ENOENT ${e.path}`)
       return { value: { kind: 'file', size: w.theme.toml.length, mtimeMs: w.theme.mtimeMs, isLink: false } }
     }
-    const p = norm(e.path)
+    const said = norm(e.path)
+    const drive = /^[A-Za-z]:/.exec(said)?.[0] ?? ''
+    const bare = said.slice(drive.length)
+    const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
+    const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
     const hit = dirOf(p) ? 'dir' : dirOf(parent)?.find(([n]) => n === name)?.[1]
     if (!hit) throw new Error(`ENOENT ${e.path}`)
-    return { value: { kind: hit, size: 1, mtimeMs: w.mtimes?.[p.replace(/^[A-Za-z]:/, '')] ?? (name === 'a.ts' ? 1_800_000_000_500 : 1_700_000_000_000), isLink: false } }
+    return { value: { kind: hit, size: 1, mtimeMs: w.mtimes?.[p.replace(/^[A-Za-z]:/, '')] ?? (name === 'a.ts' ? 1_800_000_000_500 : 1_700_000_000_000), isLink: false, ...(e.resolve && w.real ? { realPath: p } : {}) } }
   })
   on('process.run', async (_$, e) => {
     const argv: string[] = [...e.argv]
@@ -151,6 +158,11 @@ function world(on: On, w: World, ran: Ran) {
       if (verb === 'hash-object') return ok('4b825dc642cb6eb9a060e54bf8d69288fbee4904\n')
       if (verb === 'rev-parse' && argv.includes('--verify') && w.unborn) return { value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok(`${(w.heads && w.heads.length > 1 ? w.heads.shift() : w.heads?.[0]) ?? ''}\n`)
+      if (verb === 'rev-parse' && w.tops) {
+        const dir = norm(argv[3] ?? '')
+        const top = Object.keys(w.tops).filter(k => dir === k || dir.startsWith(`${k}/`)).sort((x, y) => y.length - x.length)[0]
+        return top ? ok(`\n${w.tops[top]}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
+      }
       if (verb === 'rev-parse') return w.top ? ok(`\n${w.top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
       if (verb === 'status') return ok(w.status)
       if (verb === 'diff' && argv.includes('--no-index')) return ok(w.untrackedPatch ?? '')
@@ -1191,7 +1203,7 @@ test('binary files: default app sends images and documents to the default app, i
   await ui.post({ press: `${root}/${files[0]}` }, { in: 'rows' })
   await ui.post({ press: `${root}/${files[0]}` }, { in: 'rows' })
   await clock.settle()
-  for (const f of files.slice(1)) {
+  for (let i = 1; i < files.length; i++) {
     await ui.post({ key: 'down' }, { in: 'rows' })
     await ui.post({ key: 'return' }, { in: 'rows' })
     await clock.settle()
@@ -1451,7 +1463,7 @@ test('a listing error keeps the cached rows and says so', { timeoutMs: 20_000 },
   await ui.unmount()
 })
 
-test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', async () => {
+test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', () => {
   const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, size: 0, loaded })
   const file = (id: string) => ({ ...dir(id, false), kind: 'file' as const })
   const nodes = [dir('/r/a', true), dir('/r/b', true), file('/r/a/x'), dir('/r/b/y', true), file('/r/b/y/z')]
@@ -1740,7 +1752,7 @@ test('a light theme setting only changes the activity colours; the tree keeps th
   await desktop.unmount()
 })
 
-test('formatSize: at most three digits, unit glued on, ? for unknown', async () => {
+test('formatSize: at most three digits, unit glued on, ? for unknown', () => {
   expect(formatSize(0)).toBe('0B')
   expect(formatSize(980)).toBe('980B')
   expect(formatSize(1023)).toBe('1.0K')
@@ -1751,7 +1763,7 @@ test('formatSize: at most three digits, unit glued on, ? for unknown', async () 
   expect(formatSize(-1)).toBe('?')
 })
 
-test('age: now, minutes, hours and days, then the day past a week and the year past a year', async () => {
+test('age: now, minutes, hours and days, then the day past a week and the year past a year', () => {
   const now = new Date(2026, 9, 12, 10, 42).getTime()
   const ago = (s: number) => now - s * 1000
   expect(age(0, now)).toBe('')
@@ -2113,9 +2125,9 @@ for (const os of ['linux', 'win32'] as const) {
 test('Windows: a commit run through the PowerShell tool shows as git activity', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = 'C:/Users/k/proj'
-  const w: World = { os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\Users\k' }, cwd: 'C:\Users\k\proj', top: root, dirs: { [root]: [['a.txt', 'file']] }, status: '## main\0', numstat: '', heads: ['abc1234def0', 'fed4321cba9'] }
+  const w: World = { os: 'win32', env: { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k' }, cwd: 'C:\\Users\\k\\proj', top: root, dirs: { [root]: [['a.txt', 'file']] }, status: '## main\0', numstat: '', heads: ['abc1234def0', 'fed4321cba9'] }
   const clock = world(on, w, ran)
-  await $.session.start({ cwd: 'C:\Users\k\proj', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: 'C:\\Users\\k\\proj', surface: 'desktop', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await $.tool.call(hostTool({ tool: 'PowerShell', command: 'git commit -m real' }))
@@ -2206,9 +2218,9 @@ test('the ignore setting applies before the reveal cap on a commit and on a Grep
 
 test('a second /filetree closes the tree', async ($, on) => {
   const closed: string[] = []
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: true, isFocused: false, isPlaced: true }] }))
-  on('ui.close', ($, e) => {
+  on('ui.close', (_$, e) => {
     closed.push(e.id)
     return { value: undefined }
   })
@@ -2220,9 +2232,9 @@ test('a second /filetree closes the tree', async ($, on) => {
 
 test('/filetree open keeps an open tree open', async ($, on) => {
   const closed: string[] = []
-  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('ui.panes', () => ({ value: [{ id: 'filetree', title: 'Files', isShown: false, isFocused: false, isPlaced: true }] }))
-  on('ui.close', ($, e) => {
+  on('ui.close', (_$, e) => {
     closed.push(e.id)
     return { value: undefined }
   })
@@ -3574,6 +3586,29 @@ test('a LOC scan that the engine aborts is retried, so the folder still shows it
   await ui.unmount()
 })
 
+for (const [long, red] of [[undefined, ['big.ts']], ['50', ['big.ts', 'mid.ts']], ['off', []]] as const) {
+  test(`loc column: Long file ${long ?? 'default'} draws the line count of longer files in red`, { timeoutMs: 20_000, options: { column: 'loc', ...(long ? { long } : {}) } }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, {
+      os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [['big.ts', 'file'], ['mid.ts', 'file'], ['small.ts', 'file']] },
+      loc: { [`${root} 1`]: `${root}/big.ts:600\n${root}/mid.ts:80\n${root}/small.ts:12\n`, [root]: `${root}/big.ts:600\n${root}/mid.ts:80\n${root}/small.ts:12\n` },
+    }, [])
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await clock.advance(100)
+    await clock.settle()
+    const rows = treeRows(await ui.drawn()).rows
+    for (const name of ['big.ts', 'mid.ts', 'small.ts']) {
+      const cell = rows.find(r => r.id === `${root}/${name}`)?.right.find(x => /\d/.test(x.t))
+      expect(cell?.c === 'ansi256(1)').toBe((red as readonly string[]).includes(name))
+    }
+    await ui.unmount()
+  })
+}
+
 test('desktop: in a 1000-row tree End and a reveal at row 900 both draw their target row', { timeoutMs: 30_000 }, async ($, on) => {
   const root = '/Users/k/huge'
   const names = Array.from({ length: 1000 }, (_, i): [string, 'file'] => [`f${String(i).padStart(4, '0')}.txt`, 'file'])
@@ -3616,4 +3651,301 @@ test('desktop: in LOC mode a window past the first 400 rows still measures and d
   expect(shown).toContain('"children":["LOC"]')
   expect(row).toContain('"children":["42"]')
   await ui.unmount()
+})
+
+const MEMORY_WORLD = (root: string): World => ({
+  os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root,
+  dirs: { [root]: [['.claude', 'dir'], ['AGENTS.md', 'file'], ['CLAUDE.md', 'file'], ['README.md', 'file']], [`${root}/.claude`]: [['rules', 'dir']], [`${root}/.claude/rules`]: [['x.md', 'file']] },
+  status: '## main\0', numstat: '',
+})
+
+for (const [set, surface, brain, markdown] of [['nerd', 'terminal', '\u{f09d1} ', '\u{f0354} '], ['plain', 'terminal', '§ ', '∙ '], ['auto', 'desktop', '', '']] as const) {
+  test(`${surface} ${set} glyphs: AGENTS.md, CLAUDE.md and .claude/rules/*.md draw a brain, README.md keeps the markdown icon`, { timeoutMs: 20_000, options: { glyphs: set } }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, MEMORY_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await $.tool.call({ tool: 'Read', file_path: `${root}/.claude/rules/x.md` })
+    await clock.settle()
+    const tree = await ui.drawn()
+    const memory = [`${root}/AGENTS.md`, `${root}/CLAUDE.md`, `${root}/.claude/rules/x.md`]
+    if (surface === 'terminal') {
+      const glyph = (id: string) => treeRows(tree).rows.find(r => r.id === id)?.left[2]?.t
+      for (const id of memory) expect([id, glyph(id)]).toEqual([id, brain])
+      expect(glyph(`${root}/README.md`)).toBe(markdown)
+    } else {
+      const icon = (name: string) => svgs(tree).find(s => s.alt === `file ${name}`)?.source ?? ''
+      for (const name of ['AGENTS.md', 'CLAUDE.md', 'x.md']) expect([name, icon(name).includes(ICONS.brain)]).toEqual([name, true])
+      expect(icon('README.md')).toContain(ICONS['file-text'])
+      expect(icon('README.md')).not.toContain(ICONS.brain)
+    }
+    await ui.unmount()
+  })
+}
+
+const GUARD_WORLD = (root: string): World => ({
+  os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root,
+  dirs: { [root]: [['secret', 'dir'], ['src', 'dir'], ['notes.md', 'file']], [`${root}/secret`]: [['key.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']], '/home/k/other': [['out.md', 'file']] },
+  status: '## main\0', numstat: '',
+})
+
+test('x guards the folder under the cursor: an x glyph, kept across sessions, Edit and Write under it denied naming it, Bash naming it asks, x again lifts it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, GUARD_WORLD(root), [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const start = async () => {
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    return ui
+  }
+  const glyph = async (ui: Awaited<ReturnType<typeof start>>, id: string) => treeRows(await ui.drawn()).rows.find(r => r.id === id)?.left[2]
+  let ui = await start()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('■ ')
+  expect(await ui.find({ key: 'nav-x' })).toBeUndefined()
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect(await glyph(ui, `${root}/secret`)).toEqual({ t: '× ', c: 'ansi256(1)' })
+  expect((await glyph(ui, `${root}/src`))?.t).toBe('■ ')
+  await ui.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 'test-session', resume: { id: 'test-session' } })
+  ui = await start()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('× ')
+  const edit = await $.tool.check({ tool: 'Edit', input: { file_path: `${root}/secret/key.ts`, old_string: 'a', new_string: 'b' } })
+  expect(edit.decision).toBe('deny')
+  expect(edit.reason).toContain('~/proj/secret is guarded')
+  const write = await $.tool.check({ tool: 'Write', input: { file_path: 'secret/new.ts', content: 'x' } })
+  expect(write.decision).toBe('deny')
+  expect((await $.tool.check({ tool: 'Write', input: { file_path: `${root}/src/a.ts`, content: 'x' } })).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'Write', input: { file_path: `${root}/secretive.ts`, content: 'x' } })).decision).toBe('allow')
+  const bash = await $.tool.check({ tool: 'Bash', input: { command: 'sed -i s/a/b/ secret/key.ts' } })
+  expect(bash.decision).toBe('ask')
+  expect(bash.reason).toContain('only reads the command text')
+  expect((await $.tool.check({ tool: 'Bash', input: { command: `cat ${root}/secret` } })).decision).toBe('ask')
+  expect((await $.tool.check({ tool: 'Bash', input: { command: 'ls src secrets' } })).decision).toBe('allow')
+  await clock.advance(1000)
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect((await glyph(ui, `${root}/secret`))?.t).toBe('■ ')
+  expect((await $.tool.check({ tool: 'Edit', input: { file_path: `${root}/secret/key.ts`, old_string: 'a', new_string: 'b' } })).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('desktop: a guarded file draws the vector x icon in red', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, GUARD_WORLD(root), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/notes.md` }, { in: `hit:${root}/notes.md` })
+  await clock.settle()
+  await ui.press({ key: 'hk-x' })
+  await clock.settle()
+  const icon = svgs(await ui.drawn()).find(s => s.alt === 'guarded file notes.md')?.source ?? ''
+  expect(icon).toContain(ICONS.x)
+  expect(icon).toContain('#ef5350')
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: Edit, Write and NotebookEdit outside the repo, by Claude or a subagent, count in a header badge with one toast, and the badge lists the paths`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, GUARD_WORLD(root), ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await $.tool.call({ tool: 'Write', file_path: `${root}/src/a.ts`, content: 'x' })
+    await $.tool.call({ tool: 'Bash', command: 'echo x > /home/k/other/shell.md' })
+    await clock.settle()
+    expect(await ui.find({ key: 'button-outside' })).toBeUndefined()
+    await $.tool.call({ tool: 'Write', file_path: '/home/k/other/out.md', content: 'x' })
+    await clock.settle()
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([['toast', 'Claude wrote outside ~/proj: ~/other/out.md. w lists these writes.']])
+    if (surface === 'terminal') expect(clientProps(await ui.drawn(), 'button-outside')).toEqual({ id: 'outside', label: '⚠ 1', dim: false, color: 'ansi256(3)' })
+    else expect(svgs(await ui.drawn()).some(s => s.alt === 'outside button' && s.source.includes(ICONS.warning))).toBe(true)
+    await $.tool.call({ tool: 'Edit', file_path: '/home/k/other/out.md', old_string: 'x', new_string: 'y' })
+    await $.tool.call({ tool: 'NotebookEdit', notebook_path: '/home/k/other/nb.ipynb', new_source: 'x', agentId: 'sub-1' } as unknown as Parameters<Engine['tool']['call']>[0])
+    await clock.settle()
+    expect(ran.filter(a => a[0] === 'toast').length).toBe(1)
+    if (surface === 'terminal') expect(clientProps(await ui.drawn(), 'button-outside')).toMatchObject({ label: '⚠ 2' })
+    else expect(JSON.stringify(await ui.drawn())).toContain('"children":["2 "]')
+    await (surface === 'desktop' ? tap(ui, 'outside') : ui.post({ key: 'w' }, { in: 'rows' }))
+    await clock.settle()
+    const listed = await texts(ui)
+    expect(listed).toContain('~/other/out.md\\n~/other/nb.ipynb')
+    expect(listed).toContain('2 files Claude wrote outside the repo this session')
+    expect(listed).not.toContain('shell.md')
+    expect(await ui.find({ key: 'pv-d' })).toBeUndefined()
+    await ui.unmount()
+  })
+}
+
+const WORK_WORLD = (a: string, b: string, os: World['os'] = 'linux'): World => ({
+  os, env: os === 'win32' ? { OS: 'Windows_NT', USERPROFILE: 'C:\\Users\\k' } : { HOME: '/home/k' }, cwd: a, top: a,
+  dirs: { [a]: [['src', 'dir'], ['a.ts', 'file']], [`${a}/src`]: [['x.ts', 'file']], [b]: [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']] },
+  status: '## main\0', numstat: '', tops: { [a]: a, [b]: b },
+})
+
+async function workSession($: Engine, on: On, w: World, ran: Ran) {
+  const clock = world(on, w, ran)
+  on('command.run', async (_$, e, next) => {
+    if (e.command !== 'cd') return next(e)
+    ran.push(['cd', e.args])
+    w.cwd = e.args
+    return {}
+  })
+  await $.session.start({ cwd: w.cwd, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const root = async () => treeRows(await ui.drawn()).rows[0]?.id ?? ''
+  const reads = async (dir: string) => {
+    for (const f of ['b.ts', 'c.ts', 'd.ts', 'e.ts']) await $.tool.call({ tool: 'Read', file_path: `${dir}/${f}` })
+    await clock.advance(1000)
+    await clock.settle()
+  }
+  return { clock, ui, root, reads }
+}
+
+test('Follow work from a pinned root: four reads in another repo move Claude there with /cd and re-root the tree, though /filetree pinned it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { ui, root, reads, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
+  await $.command.run({ command: 'filetree', args: `${a}/src`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await clock.settle()
+  expect(await root()).toBe(`${a}/src/x.ts`)
+  await reads(b)
+  expect(ran).toContainEqual(['cd', b])
+  expect(await root()).toBe(`${b}/b.ts`)
+  await ui.unmount()
+})
+
+test('Follow work with Jump moves Claude set to tree: the tree moves to the busy repo and back again, and Claude never moves', { timeoutMs: 20_000, options: { glyphs: 'plain', jump: 'tree' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w = WORK_WORLD(a, b)
+  w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
+  const ran: Ran = []
+  const { ui, root, reads, clock } = await workSession($, on, w, ran)
+  await reads(b)
+  expect(await root()).toBe(`${b}/b.ts`)
+  await clock.advance(200_000)
+  await reads(a)
+  expect(await root()).toBe(`${a}/b.ts`)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  await ui.unmount()
+})
+
+test('Follow work on Windows: reads under another drive-letter repo count as work and move Claude there', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = 'C:/Users/k/a', b = 'C:/Users/k/b'
+  const ran: Ran = []
+  const { ui, reads } = await workSession($, on, WORK_WORLD(a, b, 'win32'), ran)
+  await reads(b)
+  expect(ran).toContainEqual(['cd', b])
+  await ui.unmount()
+})
+
+test('x on a guarded path seen from the parent folder lifts the guard set inside the repo, instead of adding a second one', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w = GUARD_WORLD(root)
+  w.dirs['/home/k'] = [['proj', 'dir'], ['other', 'dir']]
+  w.tops = { [root]: root }
+  const clock = world(on, w, [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const glyph = async (id: string) => treeRows(await ui.drawn()).rows.find(r => r.id === id)?.left[2]?.t
+  const edit = () => $.tool.check({ tool: 'Edit', input: { file_path: `${root}/secret/key.ts`, old_string: 'a', new_string: 'b' } })
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect((await edit()).decision).toBe('deny')
+  await $.command.run({ command: 'filetree', args: '/home/k', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
+  await clock.settle()
+  await ui.post({ press: root }, { in: 'rows' })
+  await ui.post({ key: 'l' }, { in: 'rows' })
+  await clock.settle()
+  expect(await glyph(`${root}/secret`)).toBe('× ')
+  await clock.advance(1000)
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  expect(await glyph(`${root}/secret`)).toBe('■ ')
+  expect((await edit()).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('Follow work reads shell commands: absolute, home, drive-letter and relative paths with a slash count, flags and bare words do not', () => {
+  expect(shellPaths('touch src/a.ts && sed -i s/x/y/ ../b/c.ts', '/home/k/a', '/home/k')).toEqual(['/home/k/a/src/a.ts', '/home/k/a/s/x/y', '/home/k/a/../b/c.ts'])
+  expect(shellPaths('cat /etc/hosts ~/notes.md -n README', '/home/k/a', '/home/k')).toEqual(['/etc/hosts', '/home/k/notes.md'])
+  expect(shellPaths('Get-Content C:\\Users\\k\\b\\x.ts; type D:/data/y.csv', 'C:/Users/k/a', 'C:/Users/k')).toEqual(['C:/Users/k/b/x.ts', 'D:/data/y.csv'])
+  expect(shellPaths('cd lib', '/home/k/a', '/home/k')).toEqual(['/home/k/a/lib'])
+  expect(shellPaths('curl https://x.test/a -o out', '/home/k/a', '/home/k')).toEqual([])
+})
+
+test('Follow work ignores temporary folders on Linux, macOS and Windows', () => {
+  for (const p of ['/tmp/x/repo', '/var/folders/ab/T/repo', 'C:/Users/k/AppData/Local/Temp/repo', 'C:/Windows/Temp/repo']) expect(workIgnored(p, p.startsWith('C:') ? 'C:/Users/k' : '/home/k')).toBe(true)
+  for (const p of ['/home/k/a', 'C:/Users/k/a', 'D:/Temp/repo']) expect(workIgnored(p, p.startsWith('/') ? '/home/k' : 'C:/Users/k')).toBe(false)
+})
+
+test('a guard holds through a symlink into a folder that does not exist yet, so Write cannot create files inside the guarded folder by an alias', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w = GUARD_WORLD(root)
+  w.real = { '/home/k/alias': `${root}/secret` }
+  const clock = world(on, w, [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/secret` }, { in: 'rows' })
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  const write = (file_path: string) => $.tool.check({ tool: 'Write', input: { file_path, content: 'x' } })
+  expect((await write('/home/k/alias/key.ts')).decision).toBe('deny')
+  expect((await write('/home/k/alias/new/deeper/file.txt')).decision).toBe('deny')
+  expect((await write('/home/k/other/new/file.txt')).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('failed shell calls into another repo never count as work: neither Claude nor the tree moves', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w = WORK_WORLD(a, b)
+  w.tool = e => (e.tool === 'Bash' ? { isError: true, result: 'Exit code 1' } : undefined)
+  const ran: Ran = []
+  const { ui, root, clock } = await workSession($, on, w, ran)
+  for (let i = 0; i < 6; i++) await $.tool.call({ tool: 'Bash', command: `touch ${b}/b.ts ${b}/c.ts` })
+  await clock.advance(1000)
+  await clock.settle()
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(await root()).toBe(`${a}/src`)
+  await ui.unmount()
+})
+
+test('Follow work starts over in a new or resumed session: reads from the last session never add up to a move', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const w = WORK_WORLD(a, b)
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const { ui, clock } = await workSession($, on, w, ran)
+  for (const f of ['b.ts', 'c.ts', 'd.ts']) await $.tool.call({ tool: 'Read', file_path: `${b}/${f}` })
+  await clock.settle()
+  await ui.unmount()
+  await $.session.end({ reason: 'resume', sessionId: 'test-session', resume: { id: 'other-session' } })
+  await $.session.start({ cwd: a, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.tool.call({ tool: 'Read', file_path: `${b}/e.ts` })
+  await clock.advance(1000)
+  await clock.settle()
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
 })

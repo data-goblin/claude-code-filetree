@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.6.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -65,6 +65,9 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Open files in their default app, an editor in a tmux or herdr pane, or any command
 - Changes made outside Claude show at once on Linux through `inotifywait`
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
+- `AGENTS.md`, `CLAUDE.md`, their `.local.md` variants and Markdown files under any `.claude/rules/` folder draw a brain instead of the Markdown icon (`§` in plain glyphs)
+- `x` guards a file or folder: it draws a red x, and Claude's Edit, Write and NotebookEdit calls on it or anything under it are refused with a reason naming the guard. A Bash or PowerShell command whose text names a guarded path asks you first; that check reads only the command text, so it can miss a path the command builds itself. Guards are kept per repo in filetree's own store under your Claude configuration, never in the repo
+- When Claude or a subagent writes a file outside the repo (or outside the tree root when there is no repo) with Edit, Write or NotebookEdit, a warning badge with the count shows in the header and a toast says so the first time in a session; the badge or `w` lists those files. Writes from Bash are not counted, since a shell command's targets cannot be known for sure
 
   <img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
 
@@ -109,6 +112,8 @@ p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
 d:            diff of the entry under the cursor
+x:            guard or unguard the entry under the cursor (off limits to Claude's edits)
+w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path
 "?":          show the shortcuts in the footer for 10 seconds
 Space:        Quick Look on macOS
@@ -126,9 +131,11 @@ All settings are in `/config` under filetree, each with its own description ther
 Claude activity:  reads and writes | writes | reads | none
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
+Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
+Long file:        500 | a line count | off
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off
@@ -145,6 +152,8 @@ Treemap:          auto | image | cells | off
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
+
+Follow work moves the session to where the work is. When Claude or its subagents read and write in another git repo for a few minutes (two or more writes there, or four reads with no writes, and clearly more than anywhere else), filetree runs `/cd` to that repo at the end of the turn, or right away while Claude is idle, and the tree follows. It moves at most once every two minutes, stays put while several repos are equally busy, and skips temp folders, `~/.claude`, `~/.config`, `~/Library` and the agents vault. A `z` jump counts as a move, so it is not undone straight away.
 
 <img src="docs/media/text-glyphs.gif" alt="Glyphs set to text spells the header buttons out as words" width="800">
 

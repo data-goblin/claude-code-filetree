@@ -1,0 +1,48 @@
+name: credits
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  acknowledgements:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Contributors and reporters are in ACKNOWLEDGEMENTS.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          OWNER: ${{ github.repository_owner }}
+          CLOSING: 'query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){closingIssuesReferences(first:20){nodes{number author{login}}}}}}'
+        run: |
+          set -euo pipefail
+          missing=0
+          flag() { echo "::error file=ACKNOWLEDGEMENTS.md::$1"; missing=1; }
+          staff() { [ "$1" = "$OWNER" ] || [[ "$1" == *"[bot]" ]]; }
+          need() {
+            staff "$1" && return 0
+            if ! grep -q "github.com/$1)" ACKNOWLEDGEMENTS.md || ! grep -q "/$2/$3)" ACKNOWLEDGEMENTS.md; then
+              flag "credit @$1 for #$3 with a line linking https://github.com/$1 and .../$2/$3"
+            fi
+          }
+          need "$(gh pr view "$PR" -R "$REPO" --json author -q .author.login)" pull "$PR"
+          while read -r who; do
+            if ! staff "$who" && ! grep -q "github.com/$who)" ACKNOWLEDGEMENTS.md; then
+              flag "@$who wrote commits in this pull request and has no line"
+            fi
+          done < <(gh api "repos/$REPO/pulls/$PR/commits" --paginate -q '.[].author.login // empty' | sort -u)
+          while read -r who n; do
+            need "$who" issues "$n"
+          done < <(gh api graphql -f query="$CLOSING" \
+            -F o="${REPO%/*}" -F r="${REPO#*/}" -F n="$PR" -q '.data.repository.pullRequest.closingIssuesReferences.nodes[] | "\(.author.login) \(.number)"')
+          exit "$missing"

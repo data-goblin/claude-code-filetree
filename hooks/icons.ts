@@ -5,8 +5,18 @@ const cp = (n: number) => String.fromCodePoint(n)
 export const CHEVRON_OPEN = '▾'
 export const CHEVRON_CLOSED = '▸'
 
+export const BRAIN = { nerd: cp(0xf09d1), plain: '§' }
+export const GUARD = { nerd: cp(0xea76), plain: '×' }
+
+const MEMORY = new Set(['agents.md', 'claude.md', 'agents.local.md', 'claude.local.md'])
+
+export function isMemory(n: FileNode): boolean {
+  if (n.kind !== 'file') return false
+  const lower = n.name.toLowerCase()
+  return MEMORY.has(lower) || (lower.endsWith('.md') && n.id.replace(/\\/g, '/').includes('/.claude/rules/'))
+}
+
 const NAMES: Record<string, number> = {
-  'agents.md': 0xf0354,
   'changelog.md': 0xf0354,
   'contributing.md': 0xf0354,
   'todo.md': 0xf0354,
@@ -106,6 +116,7 @@ const EXTS: Record<string, number> = {
 export function fileIcon(n: FileNode, open: boolean, isRepo: boolean): string {
   if (n.kind === 'link') return cp(0xf481)
   if (n.kind === 'dir') return cp(isRepo ? 0xf02a2 : open ? 0xe5fe : 0xe5ff)
+  if (isMemory(n)) return BRAIN.nerd
   const lower = n.name.toLowerCase()
   const named = NAMES[lower]
   if (named) return cp(named)

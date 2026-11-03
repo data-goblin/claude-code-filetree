@@ -8,6 +8,7 @@ import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffWindow, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
@@ -16,7 +17,8 @@ import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
-import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
+import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
+import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
 import {
   age,
   ancestorsOf,
@@ -94,6 +96,8 @@ const SIZE_TIMEOUT_MS = 15_000
 const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
+const GUARDS = 'guards'
+const OUTSIDE = 'writes outside the repo'
 
 let blink: Timer | null = null
 let cached: FileTree | null = null
@@ -121,6 +125,12 @@ let previewed: Preview | null = null
 let previewRows = 20
 let splitAt: 'bottom' | 'top' = 'bottom'
 let jumpMovesClaude = true
+let followWork = true
+let workTouches: Touch[] = []
+let workLast = 0
+let mainBusy = false
+let workDeciding = false
+const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let peekPath = ''
 let peekRows = 8
@@ -177,6 +187,10 @@ let focusOnOpen = true
 let ignoreNames: string[] = []
 let searchGap = true
 let sortHeader = true
+let longFile = 500
+let guards: Guards = {}
+let guardsLoaded: Promise<void> | null = null
+let outside: string[] = []
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -273,18 +287,19 @@ async function readThemeSetting($: EngineInterface): Promise<void> {
   void $.ui.invalidate('ui.render')
 }
 
-async function get(_$: EngineInterface): Promise<FileTree> {
+function get(_$: EngineInterface): Promise<FileTree> {
   cached ??= emptyTree('')
-  return cached
+  return Promise.resolve(cached)
 }
 
-async function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
+function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
   cached = fn(cached ?? emptyTree(''))
   snapshot ??= $.clock.after(1_000, () => {
     snapshot = null
     if (cached) void $.state.set(TREE, cached)
   })
-  await $.ui.invalidate('ui.render')
+  $.ui.invalidate('ui.render')
+  return Promise.resolve()
 }
 
 function patch($: EngineInterface, fn: (t: FileTree) => Partial<FileTree>) {
@@ -714,7 +729,10 @@ function pumpCounts($: EngineInterface): void {
     const epoch = sizeEpoch
     counting.add(dir)
     void (async () => {
-      if ((await osName($)) === 'win32') return fileCounts.set(dir, -1)
+      if ((await osName($)) === 'win32') {
+        fileCounts.set(dir, -1)
+        return
+      }
       const t = await get($)
       const run = await $.process.run(['find', scanFrom(dir), ...pruneArgs(t.root), '-type', 'f', '-print'], { timeoutMs: SIZE_TIMEOUT_MS })
       if (epoch !== sizeEpoch) return
@@ -943,7 +961,7 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
   blink = $.clock.after(FLASH_MS, () => {
     if (generation !== mine) return
     blink = null
-    void patch($, cur => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
+    void patch($, () => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
   })
 }
 
@@ -1596,8 +1614,66 @@ function jumpClose($: EngineInterface, refocus = false): void {
   if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, treeKey()))
 }
 
+async function repoOf($: EngineInterface, path: string): Promise<string | null> {
+  const known = workRepos.get(path)
+  if (known) return known
+  const found = (async () => {
+    for (const dir of [path, dirname(path)]) {
+      try {
+        const run = await git($, dir, ['rev-parse', '--show-toplevel'], 3_000)
+        if (run.exitCode === 0 && run.stdout.trim()) return posix(run.stdout.trim())
+      } catch {}
+    }
+    return null
+  })()
+  workRepos.set(path, found)
+  if (workRepos.size > 2_000) workRepos.delete(workRepos.keys().next().value ?? path)
+  return found
+}
+
+async function noteWork($: EngineInterface, paths: string[], write: boolean): Promise<void> {
+  if (!followWork || paths.length === 0) return
+  const vault = home ? [`${home}/Git/agents`, `${home}/Desktop/Git/agents`, `${home}/git/agents`, `${home}/vault`] : []
+  const kept = [...new Set(paths.map(posix))].filter(p => isAbsolute(p) && !workIgnored(p, home, vault)).slice(0, 40)
+  const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', home, vault)))
+  if (repos.size === 0) return
+  const now = await $.clock.now()
+  workTouches = [...workTouches.filter(t => now - t.at < 180_000), ...[...repos].map(repo => ({ repo, write, at: now }))].slice(-400)
+  if (!mainBusy) void considerWork($)
+}
+
+async function considerWork($: EngineInterface): Promise<void> {
+  if (!followWork || workDeciding) return
+  workDeciding = true
+  try {
+    const base = jumpMovesClaude ? await cwdOf($) : (await get($)).root
+    const current = (await repoOf($, base)) ?? base
+    const now = await $.clock.now()
+    const repo = pickRepo(workTouches, current, now, workLast)
+    if (!repo || inside(repo, base)) return
+    workLast = now
+    if (!jumpMovesClaude) {
+      follow = false
+      await reset($, repo)
+      return
+    }
+    $.clock.after(0, async () => {
+      try {
+        await $.command.run({ command: 'cd', args: repo })
+        void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
+        $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
+      } catch (error) {
+        void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+  } finally {
+    workDeciding = false
+  }
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
   jumpClose($, true)
+  workLast = await $.clock.now()
   follow = false
   await reset($, dir)
   if (!jumpMovesClaude || (await cwdOf($)) === dir) return
@@ -1717,6 +1793,7 @@ async function docText($: EngineInterface, path: string, page: number): Promise<
 }
 
 async function readPreview($: EngineInterface, path: string, page = 1): Promise<Preview> {
+  if (path === OUTSIDE) return { path, text: outside.map(shortPath).join('\n'), note: `${outside.length} file${outside.length === 1 ? '' : 's'} Claude wrote outside the repo this session` }
   let text = ''
   let note = ''
   try {
@@ -1829,7 +1906,7 @@ async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture
       if (made.exitCode === EXIT_LOCKED) return { state: 'failed', note: 'encrypted' }
       if (made.exitCode === EXIT_FAILED) return { state: 'failed', note: `could not decode${why ? `: ${why}` : ''}` }
       const [out = '', count = ''] = made.stdout.trim().split('\n')
-      if (made.exitCode !== 0 || !out.startsWith('/')) return { state: 'failed', note: why || `could not decode, exit ${made.exitCode}` }
+      if (made.exitCode !== 0 || !isAbsolute(out)) return { state: 'failed', note: why || `could not decode, exit ${made.exitCode}` }
       file = out
       pages = Number(count) || 0
       sessionDir = dirname(file)
@@ -2277,7 +2354,7 @@ async function toggle($: EngineInterface, n: FileNode): Promise<void> {
   if (n.kind === 'dir' && !(await get($)).expanded.includes(n.id)) await loadDirs($, [n.id])
   await patch($, t => {
     const open = new Set(t.expanded)
-    if (n.kind === 'dir') open.has(n.id) ? open.delete(n.id) : open.add(n.id)
+    if (n.kind === 'dir' && !open.delete(n.id)) open.add(n.id)
     return { expanded: [...open], cursor: n.id, selected: n.id }
   })
   void watchTree($)
@@ -2377,6 +2454,8 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
+  else if (key === 'w') await showOutside($)
+  else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
@@ -2426,6 +2505,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
     await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
     if (!autoCollapseOn(await get($))) clearAutoCollapse()
@@ -2437,6 +2517,70 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'sort-metric') await sortBy($, 'metric')
   else if (id === 'case') await searchFlag($, 'searchCase')
   else if (id === 'regex') await searchFlag($, 'searchRegex')
+}
+
+function loadGuards($: EngineInterface): Promise<void> {
+  guardsLoaded ??= $.store.get(GUARDS).then(v => {
+    guards = parseGuards(v)
+  }, () => undefined)
+  return guardsLoaded
+}
+
+async function toggleGuard($: EngineInterface, path: string): Promise<void> {
+  await loadGuards($)
+  const t = await get($)
+  const over = guardOver(allGuards(guards), path)
+  if (over && over !== path) {
+    $.ui.toast(`${shortPath(path)} is already guarded by ${shortPath(over)}`)
+    return
+  }
+  const owner = over === path ? Object.keys(guards).find(k => guards[k]?.includes(path)) : undefined
+  const key = owner ?? (t.top && inside(t.top, path) ? t.top : t.root)
+  const own = toggled(guards[key] ?? [], path)
+  const next = { ...guards }
+  if (own.length) next[key] = own
+  else delete next[key]
+  guards = next
+  void $.ui.invalidate('ui.render')
+  await $.store.set(GUARDS, guards)
+}
+
+async function realOf($: EngineInterface, path: string): Promise<string> {
+  const rest: string[] = []
+  for (let dir = path; ; ) {
+    const st = await $.fs.stat(dir, { resolve: true }).catch(() => undefined)
+    if (st?.realPath) return rest.length ? join(posix(st.realPath), rest.join('/')) : posix(st.realPath)
+    const up = dirname(dir)
+    if (up === dir || rest.length > 64) return path
+    rest.unshift(dir.slice(dir.lastIndexOf('/') + 1))
+    dir = up
+  }
+}
+
+async function guardFor($: EngineInterface, path: string): Promise<string | undefined> {
+  const list = allGuards(guards)
+  const hit = guardOver(list, path)
+  if (hit) return hit
+  const real = await realOf($, path)
+  for (const g of list) if (inside(g, real) || inside(await realOf($, g), real)) return g
+  return undefined
+}
+
+async function noteOutside($: EngineInterface, file: string): Promise<void> {
+  const t = await get($)
+  const abs = resolve(await cwdOf($), posix(file), home)
+  if (!outsideOf(t.top || t.root, abs) || outside.includes(abs)) return
+  outside = [...outside, abs]
+  if (outside.length === 1) $.ui.toast(`Claude wrote outside ${shortPath(t.top || t.root)}: ${shortPath(abs)}. w lists these writes.`)
+  if (previewed?.path === OUTSIDE) previewed = null
+  void $.ui.invalidate('ui.render')
+}
+
+async function showOutside($: EngineInterface): Promise<void> {
+  if (!outside.length) return
+  await loadPreview($, OUTSIDE)
+  await patch($, () => ({ preview: OUTSIDE, previewTop: 0 }))
+  $.clock.after(100, () => parkPreview($))
 }
 
 async function selectRoot($: EngineInterface): Promise<void> {
@@ -2454,6 +2598,7 @@ export const register: Register = (on, options) => {
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
   followClaude = options?.follow !== 'off'
+  followWork = options?.work !== 'off'
   columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
@@ -2461,6 +2606,7 @@ export const register: Register = (on, options) => {
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
   sortHeader = options?.headers !== 'off'
+  longFile = options?.long === 'off' ? 0 : typeof options?.long === 'string' && /^\d+$/.test(options.long.trim()) ? Number(options.long.trim()) : 500
   autoCollapseDefault = options?.collapse === 'on'
   shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
   shortcutsShown = shortcutsSetting === 'always'
@@ -2475,6 +2621,11 @@ export const register: Register = (on, options) => {
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
+    outside = []
+    workTouches = []
+    workLast = 0
+    guardsLoaded = null
+    void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open] (no path = cwd, open = never hide)', immediate: true })
     if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
@@ -2587,6 +2738,7 @@ export const register: Register = (on, options) => {
         scheduleScan($, { ...job, actions: proven(pending, results) })
       })()
       if (follow && /(^|[;&|\s])(cd|pushd|popd)(\s|$)/.test(command)) $.clock.after(400, () => void followCwd($))
+      if (!result.isError) void noteWork($, shellPaths(command, cwd, home), shellWrites(command))
     } else {
       const file =
         'file_path' in e && typeof e.file_path === 'string'
@@ -2595,13 +2747,37 @@ export const register: Register = (on, options) => {
             ? e.notebook_path
             : ''
       if (file) void touched($, [file], 'orange', showWrites)
+      if (file) void noteWork($, [file], true)
+      if (file) void noteOutside($, file)
     }
     return result
   })
 
+  on('tool.check', { tool: /^(Edit|Write|NotebookEdit|Bash|PowerShell)$/ }, async ($, e, next) => {
+    await loadGuards($)
+    const list = allGuards(guards)
+    if (!list.length) return next(e)
+    const input = has(e.input, 'file_path') ? e.input.file_path : has(e.input, 'notebook_path') ? e.input.notebook_path : has(e.input, 'command') ? e.input.command : undefined
+    if (typeof input !== 'string' || !input) return next(e)
+    const cwd = await cwdOf($)
+    if ((GUARD_TOOLS as readonly string[]).includes(e.tool)) {
+      const path = resolve(cwd, posix(input), home)
+      const hit = await guardFor($, path)
+      if (!hit) return next(e)
+      return { decision: 'deny', reason: `${shortPath(hit)} is guarded in the file tree, so ${e.tool} on ${shortPath(path)} is refused. Leave it alone, or ask the user to unguard it with x in the tree.` }
+    }
+    const hit = guardIn(input, list, cwd, home)
+    if (!hit) return next(e)
+    const verdict = await next(e)
+    if (verdict.decision === 'deny') return verdict
+    return { decision: 'ask', decider: 'person', reason: `This command names ${shortPath(hit)}, which is guarded in the file tree. The check only reads the command text, so it can be a false alarm and can miss a path the command builds itself.` }
+  })
+
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
     const result = await next(e)
-    if (result.deny || result.isError || e.tool !== 'Read' || !showReads) return result
+    if (result.deny || result.isError || e.tool !== 'Read') return result
+    void noteWork($, [posix(e.file_path)], false)
+    if (!showReads) return result
     void touched($, [posix(e.file_path)], 'purple', true)
     return result
   })
@@ -2609,13 +2785,29 @@ export const register: Register = (on, options) => {
   for (const tool of [/^Grep$/, /^Glob$/])
     on('tool.call', { tool }, async ($, e, next) => {
       const result = await next(e)
-      if (result.deny || result.isError || !showReads) return result
+      if (result.deny || result.isError) return result
       const names = strings(has(result.result, 'filenames') ? result.result.filenames : undefined)
       if (names.length === 0) return result
       const cwd = await cwdOf($)
+      void noteWork($, names.slice(0, 40).map(f => resolve(cwd, posix(f), home)), false)
+      if (!showReads) return result
       void touched($, names.map(f => resolve(cwd, posix(f), home)), 'purple', true)
       return result
     })
+
+  on('turn.start', async (_$, e, next) => {
+    if (!e.agentId) mainBusy = true
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (!e.agentId) {
+      mainBusy = false
+      void considerWork($)
+    }
+    return result
+  })
 
   on('ui.message', async ($, e, next) => {
     if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
@@ -2684,6 +2876,7 @@ export const register: Register = (on, options) => {
       const page = Math.max(1, previewRows - 2)
       const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, f: page, b: -page, pageup: -page, pagedown: page, home: -Infinity, end: Infinity }
       if (data.key === 'left' || data.key === 'h') await closePreview($)
+      else if (t.preview === OUTSIDE && (data.key === 'e' || data.key === 'd')) return {}
       else if (data.key === 'e') await editPreview($, t.preview)
       else if (data.key === 'd') await diffFile($, t.preview)
       else if (previewed?.diff && (data.key === 'j' || data.key === 'k')) await jumpDiff($, data.key === 'j' ? 1 : -1)
@@ -2697,6 +2890,8 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     cached = null
+    guards = {}
+    guardsLoaded = null
     watcher?.stop()
     watcher = null
     snapshot?.cancel()
@@ -2797,6 +2992,9 @@ export const register: Register = (on, options) => {
     const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
+    const warnColor = gitColors.M ?? 'ansi256(3)'
+    await loadGuards($)
+    const guarded = new Set(allGuards(guards))
     const deskDiff = (source: string, key: string) => {
       const rows: { kind: ' ' | '+' | '-' | '@'; text: string; old: number; new: number }[] = []
       let old = 0
@@ -2867,12 +3065,13 @@ export const register: Register = (on, options) => {
     const deskHover = palette.hover ?? DESK.hover
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
-        <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
+        <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
+        {b.id === 'outside' ? <Text key="outside-count" color={glow(ink(warnColor, DESK_GIT.M ?? DESK.accent), b.id)} tabular>{`${outside.length} `}</Text> : null}
         <Box position="absolute" top={0} left={0} right={0} bottom={0}>
           <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: '', dim: b.dim } satisfies ButtonProps} width="100%" height="100%" />
         </Box>
       </Box>
-    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : {}) } satisfies ButtonProps} />
+    ) : <Client key={`button-${b.id}`} module="./button.tsx" props={{ id: b.id, label: b.label, dim: b.dim, ...(TOGGLES.includes(b.id) ? { color: theme.accent } : b.id === 'outside' ? { color: warnColor } : {}) } satisfies ButtonProps} />
     const hint = (buttons: { id: string; label: string; hint: string; dim: boolean }[], title: number) => {
       const over = buttons.find(b => b.id === hovered)
       const text = over?.hint
@@ -2891,23 +3090,23 @@ export const register: Register = (on, options) => {
       const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
       previewLine = win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      const listing = t.preview === OUTSIDE
       const external = { id: 'external', label: glyphSetting === 'text' ? 'open' : unicode ? '↗' : '\u{eb14}', dim: true, hint: 'open in default app' }
       if (desk && Svg) {
         const step = p?.diff ? (p.diff.some(l => l.kind === '@') ? 'file' : 'hunk') : ''
         const toTree = t.nodes.find(n => n.id === t.preview)?.kind === 'dir'
-        const edits = editWithSetting || inTmux || inHerdr
+        const edits = !listing && (editWithSetting || inTmux || inHerdr)
         previewDesk = true
         const acts: { id: string; key: string; icon: IconName; hint: string; run: () => Promise<void> }[] = [
           { id: 'pv-k', key: 'k', icon: 'arrow-up', hint: step ? `previous ${step}` : 'up a line', run: () => (step ? jumpDiff($, -1) : scrollPreview($, -1)) },
           { id: 'pv-j', key: 'j', icon: 'arrow-down', hint: step ? `next ${step}` : 'down a line', run: () => (step ? jumpDiff($, 1) : scrollPreview($, 1)) },
           { id: 'pv-b', key: 'b', icon: 'page-up', hint: 'page up', run: () => scrollPreview($, 2 - previewRows) },
           { id: 'pv-f', key: 'f', icon: 'page-down', hint: 'page down', run: () => scrollPreview($, previewRows - 2) },
-          { id: 'pv-d', key: 'd', icon: p?.diff ? (toTree ? 'folder' : 'file') : 'diff', hint: p?.diff ? (toTree ? 'back to the tree' : 'back to the file') : 'diff against HEAD', run: () => diffFile($, t.preview) },
+          ...(listing ? [] : [{ id: 'pv-d', key: 'd', icon: (p?.diff ? (toTree ? 'folder' : 'file') : 'diff') as IconName, hint: p?.diff ? (toTree ? 'back to the tree' : 'back to the file') : 'diff against HEAD', run: () => diffFile($, t.preview) }]),
           ...(edits ? [{ id: 'pv-e', key: 'e', icon: 'pencil' as const, hint: `edit at line ${previewLine}`, run: () => editPreview($, t.preview) }] : []),
-          { id: 'external', key: '', icon: 'external-link', hint: 'open in default app', run: () => pressHeader($, 'external') },
+          ...(listing ? [] : [{ id: 'external', key: '', icon: 'external-link' as const, hint: 'open in default app', run: () => pressHeader($, 'external') }]),
         ]
         previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
-        const { Code } = elements
         const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
         return (
           <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
@@ -2937,7 +3136,7 @@ export const register: Register = (on, options) => {
                     <Box key={`pv-seg-${i}`} flexDirection="column" marginBottom={1}>
                       {g.title ? (
                         <Box key={`pv-seg-head-${i}`} flexDirection="row" alignItems="center">
-                          <Svg key={`pv-seg-icon-${i}`} source={rowSvg(0, null, nodeIcon(node, false, false), mutedInk)} alt={`file ${g.title}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                          <Svg key={`pv-seg-icon-${i}`} source={rowSvg(0, null, nodeIcon(node, false), mutedInk)} alt={`file ${g.title}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
                           <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{g.title}</Text></Box>
                           {counts[0] ? <Text color={dc(addColor)} tabular>{` +${counts[0]}`}</Text> : null}
                           {counts[1] ? <Text color={dc(delColor)} tabular>{` -${counts[1]}`}</Text> : null}
@@ -2965,8 +3164,8 @@ export const register: Register = (on, options) => {
             <Box flexShrink={1} flexGrow={1}>
               <Text bold wrap="truncate-start">{name}</Text>
             </Box>
-            {hint([external], 8 + name.length)}
-            {button(external)}
+            {listing ? null : hint([external], 8 + name.length)}
+            {listing ? null : button(external)}
           </Box>
           <Box flexDirection="row" gap={2}>
             {([['j', '↓', '\u{ea9a}', 1], ['k', '↑', '\u{eaa1}', -1], ['f', 'page ↓', '\u{ea9a} page', previewRows - 2], ['b', 'page ↑', '\u{eaa1} page', 2 - previewRows]] as const).map(([k, plain, nerd, by]) => {
@@ -2974,8 +3173,8 @@ export const register: Register = (on, options) => {
               const label = step ? `${unicode ? plain : nerd} ${step}` : unicode ? plain : nerd
               return <Button key={`pv-${k}`} plain dimColor hotkey={k} label={label} onPress={() => void (step ? jumpDiff($, by > 0 ? 1 : -1) : scrollPreview($, by)).then(() => parkPreview($))} />
             })}
-            <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? (t.nodes.find(n => n.id === t.preview)?.kind === 'dir' ? 'tree' : 'file') : 'diff'} onPress={() => void diffFile($, t.preview)} />
-            {editWithSetting || inTmux || inHerdr ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
+            {listing ? null : <Button key="pv-d" plain dimColor hotkey="d" label={p?.diff ? (t.nodes.find(n => n.id === t.preview)?.kind === 'dir' ? 'tree' : 'file') : 'diff'} onPress={() => void diffFile($, t.preview)} />}
+            {!listing && (editWithSetting || inTmux || inHerdr) ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text {...mutedText}>{p.note}</Text> : null}
           {nativeScroll ? directPreview(elements, win, t.preview, markdown, theme.accent) : (
@@ -3053,6 +3252,7 @@ export const register: Register = (on, options) => {
     }
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
+      ...(outside.length ? [{ id: 'outside', label: `${unicode ? '⚠' : '\u{ea6c}'} ${outside.length}`, dim: false, hint: `${outside.length} file${outside.length === 1 ? '' : 's'} written outside the repo`, icon: 'warning' as const }] : []),
       ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
       { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
@@ -3063,7 +3263,7 @@ export const register: Register = (on, options) => {
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'fold' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
     ]
-    const wordButtons = plainButtons.map(b => ({ ...b, label: WORDS[b.id] ?? b.label }))
+    const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${outside.length}` : (WORDS[b.id] ?? b.label) }))
     const wordWidth = wordButtons.reduce((w, b) => w + b.label.length + 1, 1)
     const buttons = glyphSetting === 'text' && e.props.bodyColumns - wordWidth >= 8 ? wordButtons : plainButtons
     const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
@@ -3081,6 +3281,7 @@ export const register: Register = (on, options) => {
     const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: ink(theme.fg, DESK.fg) } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
+    const isLong = (n: FileNode): boolean => longFile > 0 && t.column === 'loc' && n.kind === 'file' && (locCache.get(n.id) ?? 0) > longFile
     const cellsOf = (n: FileNode): Partial<Record<Col, Seg>> => {
       const loc = t.diff[n.id]
       const metric = t.column === 'loc'
@@ -3117,7 +3318,7 @@ export const register: Register = (on, options) => {
       if (counts && counts[0] > 0) cells['?'] = { t: `?:${counts[0]}`, c: gitColors['?'] ?? addColor }
       if (counts && counts[1] > 0) cells.M = { t: `M:${counts[1]}`, c: gitColors.M ?? 'ansi256(3)' }
       if (counts && counts[2] > 0) cells.D = { t: `D:${counts[2]}`, c: theme.urgent }
-      if (metric) cells.metric = { t: metric, c: theme.muted }
+      if (metric) cells.metric = { t: metric, c: isLong(n) ? delColor : theme.muted }
       return cells
     }
     const tailRows = desk ? drawn : [...pinned, ...shown]
@@ -3148,10 +3349,11 @@ export const register: Register = (on, options) => {
       const isBright = bright.has(n.id)
       const isDim = !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
-      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
+      const isGuard = guarded.has(n.id)
+      const iconColor = isGuard ? theme.urgent : isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
       const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const cells = cellsOf(n)
-      if (cells.metric && gitColor && !isIgnored) cells.metric = { ...cells.metric, c: gitColor }
+      if (cells.metric && gitColor && !isIgnored && !isLong(n)) cells.metric = { ...cells.metric, c: gitColor }
       const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
       const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
@@ -3159,7 +3361,7 @@ export const register: Register = (on, options) => {
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
-      const glyph = unicode ? (n.kind === 'dir' ? '■' : '∙') : fileIcon(n, r.open, isRepo)
+      const glyph = isGuard ? (unicode ? GUARD.plain : GUARD.nerd) : unicode ? (n.kind === 'dir' ? '■' : isMemory(n) ? BRAIN.plain : '∙') : fileIcon(n, r.open, isRepo)
       const lit = isBright || isDim
       const left: Seg[] = [
         { t: '  '.repeat(r.depth) },
@@ -3173,7 +3375,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo }
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -3237,9 +3439,9 @@ export const register: Register = (on, options) => {
     const deskRow = (p: ReturnType<typeof rowParts>) => {
       const r = p.r
       const n = p.n
-      const icon = nodeIcon(n, r.open, p.isRepo)
+      const icon = p.isGuard ? 'x' : nodeIcon(n, p.isRepo)
       const tone = tones[p.tone]
-      const iconInk = p.lit ? (tone?.solid ?? accentInk) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
+      const iconInk = p.lit ? (tone?.solid ?? accentInk) : p.isGuard ? ink(theme.urgent, DESK.urgent) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
@@ -3247,7 +3449,7 @@ export const register: Register = (on, options) => {
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
-          {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+          {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
@@ -3350,8 +3552,8 @@ export const register: Register = (on, options) => {
             {desk ? tailCols(branchCells, 'branch', GIT_COLS) : null}
             {!desk && totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
             {!desk && totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
-            {desk ? null : rootCounts.map(c => (
-              <Text color={c.c}>{c.t}</Text>
+            {desk ? null : rootCounts.map((c, i) => (
+              <Text key={`root-count-${i}`} color={c.c}>{c.t}</Text>
             ))}
             {!desk && rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text {...mutedText}> clean</Text>}
           </Box>
@@ -3587,6 +3789,8 @@ export const register: Register = (on, options) => {
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
+      ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
@@ -3595,7 +3799,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
@@ -3678,7 +3882,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : <>{scopeChip()}</>}
+            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : scopeChip()}
             <Box flexGrow={1}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
