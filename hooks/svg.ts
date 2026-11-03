@@ -1,6 +1,6 @@
 import type { FileNode } from '../types'
 
-import { rgbOf } from './pixmap'
+import { type Rgb, ratio, rgbOf } from './pixmap'
 
 const NS = 'http://www.w3.org/2000/svg'
 
@@ -118,7 +118,7 @@ const EXT_GROUPS: [IconName, string][] = [
 
 const EXTS: Record<string, IconName> = Object.fromEntries(EXT_GROUPS.flatMap(([icon, list]) => list.split(' ').map(ext => [ext, icon])))
 
-export function nodeIcon(n: FileNode, open: boolean, isRepo: boolean): IconName {
+export function nodeIcon(n: FileNode, isRepo: boolean): IconName {
   if (n.kind === 'dir') return isRepo ? 'folder-git' : n.hidden ? 'folder-line' : 'folder'
   if (n.kind === 'link') return 'file-link'
   const lower = n.name.toLowerCase()
@@ -231,23 +231,16 @@ export function barSvg(color: string): string {
 
 const SELECTION_MIN = 1.3
 
-function lumOf(hex: string): number {
-  const [r, g, b] = rgbOf(hex).map(c => {
-    const v = c / 255
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
-  })
-  return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
-}
-
-function shade(bg: string, light: boolean): string {
+function shade(bg: string, rgb: Rgb, light: boolean): string {
   if (!light) return lighten(bg, 0.14)
-  return `#${rgbOf(bg).map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('')}`
+  return `#${rgb.map(c => Math.round(c * 0.86).toString(16).padStart(2, '0')).join('')}`
 }
 
 export function selectionOn(selection: string, bg: string, light: boolean): string {
   const fallback = light ? 'ansi256(252)' : 'ansi256(238)'
-  if (!selection || selection === 'ansi256(0)') return /^#[0-9a-f]{6}$/i.test(bg) ? shade(bg, light) : fallback
-  if (!/^#[0-9a-f]{6}$/i.test(selection) || !/^#[0-9a-f]{6}$/i.test(bg)) return selection
-  const [hi, lo] = [lumOf(selection), lumOf(bg)].sort((x, y) => y - x)
-  return ((hi ?? 0) + 0.05) / ((lo ?? 0) + 0.05) >= SELECTION_MIN ? selection : shade(bg, light)
+  const back = rgbOf(bg)
+  if (!selection || selection === 'ansi256(0)') return back ? shade(bg, back, light) : fallback
+  const sel = rgbOf(selection)
+  if (!sel || !back) return selection
+  return ratio(sel, back) >= SELECTION_MIN ? selection : shade(bg, back, light)
 }

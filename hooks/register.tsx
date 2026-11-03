@@ -3025,7 +3025,7 @@ export const register: Register = (on, options) => {
                     <Box key={`pv-seg-${i}`} flexDirection="column" marginBottom={1}>
                       {g.title ? (
                         <Box key={`pv-seg-head-${i}`} flexDirection="row" alignItems="center">
-                          <Svg key={`pv-seg-icon-${i}`} source={rowSvg(0, null, nodeIcon(node, false, false), mutedInk)} alt={`file ${g.title}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                          <Svg key={`pv-seg-icon-${i}`} source={rowSvg(0, null, nodeIcon(node, false), mutedInk)} alt={`file ${g.title}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
                           <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{g.title}</Text></Box>
                           {counts[0] ? <Text color={dc(addColor)} tabular>{` +${counts[0]}`}</Text> : null}
                           {counts[1] ? <Text color={dc(delColor)} tabular>{` -${counts[1]}`}</Text> : null}
@@ -3326,7 +3326,7 @@ export const register: Register = (on, options) => {
     const deskRow = (p: ReturnType<typeof rowParts>) => {
       const r = p.r
       const n = p.n
-      const icon = nodeIcon(n, r.open, p.isRepo)
+      const icon = nodeIcon(n, p.isRepo)
       const tone = tones[p.tone]
       const iconInk = p.lit ? (tone?.solid ?? accentInk) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
       const strike = p.status === 'D' && n.kind !== 'dir'
