@@ -4464,6 +4464,47 @@ test('content search in a tree rooted in a repository subdirectory joins hits to
   await ui.unmount()
 })
 
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a content-search hit past the preview character budget opens at its line with real line numbers, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const pad = (n: number) => `line ${n} `.padEnd(99, 'x')
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+      dirs: { [root]: [['big.txt', 'file']] },
+      files: { [`${root}/big.txt`]: Array.from({ length: 2000 }, (_, i) => pad(i + 1)).join('\n') },
+      grep: `big.txt\x001500\x00${pad(1500)}\n`,
+    }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await ui.input({ key: 'q', text: '?line 1500', kind: 'change' })
+    await clock.settle()
+    await clock.advance(200)
+    await clock.settle()
+    const id = `grep:1500:${root}/big.txt`
+    await ui.post({ press: id }, { in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await clock.settle()
+    await clock.advance(100)
+    await clock.settle()
+    const drawn = await ui.drawn()
+    if (surface === 'desktop') {
+      const code = every(drawn, n => has(n, 'type') && n.type === 'Code').map(n => propsOf(n))
+      const at = code.find(c => has(c, 'startLine') && c.startLine === 1498)
+      expect(has(at, 'source') && String(at.source).startsWith('line 1498 ')).toBe(true)
+      const above = code.find(c => has(c, 'source') && String(c.source).includes('line 1497 '))
+      expect(has(above, 'startLine') && has(above, 'source') && Number(above.startLine) + String(above.source).split('\n').length).toBe(1498)
+    } else {
+      const peek = peekOf(drawn).preview
+      expect(peek.startLine).toBe(1498)
+      expect(peek.text.startsWith('line 1498 ')).toBe(true)
+      expect(JSON.stringify(drawn)).toContain('1498–')
+    }
+    await ui.unmount()
+  })
+}
+
 test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
   expect(toEre('a.*?b\\s[\\w-]')).toBe('a.*b[[:space:]][[:alnum:]_-]')

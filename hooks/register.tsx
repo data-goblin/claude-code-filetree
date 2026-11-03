@@ -147,7 +147,8 @@ type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: strin
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
 let peekWant: { path: string; top: number } | null = null
-let deskLine: { path: string; top: number; scrolled: boolean } | null = null
+let peekAt: { path: string; line: number; jumped: boolean } | null = null
+let deskLine: { path: string; top: number; scrolled: boolean; line: number } | null = null
 type GrepHit = { path: string; line: number; text: string }
 const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
 let peekPath = ''
@@ -254,7 +255,7 @@ const listLatest = new Map<string, number>()
 const unreadable = new Set<string>()
 const background = new Map<string, Background>()
 
-type Preview = { path: string; text: string; note: string; diff?: DiffLine[]; page?: number }
+type Preview = { path: string; text: string; note: string; diff?: DiffLine[]; page?: number; first?: number }
 type Scan = { dir: string; loc: boolean; items: Usage[]; total: number; done: boolean; stale: boolean; stopped: boolean; stop: () => void }
 const scans = new Map<string, Scan>()
 let mapLock: { anchor: string; pick: string; cursor: string } | null = null
@@ -1695,14 +1696,15 @@ async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface):
   const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
   const top = Math.max(0, line - 3)
   if (surface === 'desktop' || nativeScroll) {
-    await loadPreview($, h.path)
-    deskLine = { path: h.path, top, scrolled: false }
-    await patch($, () => ({ preview: h.path, previewTop: top, selected: h.path }))
+    await loadPreview($, h.path, line)
+    deskLine = { path: h.path, top, scrolled: false, line }
+    await patch($, () => ({ preview: h.path, previewTop: Math.max(0, top - (previewed?.first ?? 0)), selected: h.path }))
     $.clock.after(100, () => parkPreview($))
     return
   }
   await revealPaths($, [h.path])
-  if (peekPath === h.path) peekTop = top
+  peekAt = { path: h.path, line, jumped: false }
+  if (peekPath === h.path) peeked = null
   else peekWant = { path: h.path, top }
   overPeek = false
   await patch($, cur => ({ split: true, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
@@ -2068,8 +2070,8 @@ function fitSerialized(lines: string[], max: number): string[] {
   return lines
 }
 
-async function loadPreview($: EngineInterface, path: string): Promise<void> {
-  previewed = await readPreview($, path)
+async function loadPreview($: EngineInterface, path: string, line?: number): Promise<void> {
+  previewed = await readPreview($, path, 1, line)
 }
 
 function stopStream(stream: HookStream<unknown, ProcessSpawnResult>): void {
@@ -2108,7 +2110,19 @@ async function docText($: EngineInterface, path: string, page: number): Promise<
   return run?.exitCode === 0 ? run.stdout.replace(/\f/g, '\n').trimEnd() : ''
 }
 
-async function readPreview($: EngineInterface, path: string, page = 1): Promise<Preview> {
+function previewWindow(text: string, line: number): { text: string; first: number } {
+  const clean = text.replace(/\r\n?/g, '\n')
+  let at = 0
+  for (let n = 1; n < line && at >= 0; n++) at = clean.indexOf('\n', at) + 1 || -1
+  if (at <= 0) return { text, first: 0 }
+  const back = clean.lastIndexOf('\n', Math.max(0, at - Math.floor(PREVIEW_CHARS / 4)) - 1) + 1
+  const from = Math.min(back, at)
+  let first = 0
+  for (let i = clean.indexOf('\n'); i >= 0 && i < from; i = clean.indexOf('\n', i + 1)) first++
+  return { text: clean.slice(from), first }
+}
+
+async function readPreview($: EngineInterface, path: string, page = 1, line?: number): Promise<Preview> {
   if (path === OUTSIDE) return { path, text: outside.map(shortPath).join('\n'), note: `${outside.length} file${outside.length === 1 ? '' : 's'} Claude wrote outside the repo this session` }
   let text = ''
   let note = ''
@@ -2136,12 +2150,16 @@ async function readPreview($: EngineInterface, path: string, page = 1): Promise<
     note = `could not read: ${messageOf(err).split('\n')[0]}`
   }
   const total = text.length
+  const win = line && total > PREVIEW_CHARS ? previewWindow(text, line) : { text, first: 0 }
+  const first = win.first
+  text = win.text
   let lines = text.slice(0, PREVIEW_CHARS).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').split('\n')
-  if (lines.length > 1 && (total > PREVIEW_CHARS || lines.at(-1) === '')) lines.pop()
+  if (lines.length > 1 && (text.length > PREVIEW_CHARS || lines.at(-1) === '')) lines.pop()
   lines = lines.map(l => (l.length > PREVIEW_LINE ? `${l.slice(0, PREVIEW_LINE)}…` : l))
   const fit = fitSerialized(lines, PREVIEW_CHARS)
-  if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
-  return { path, text: fit.join('\n'), note, page }
+  if (first) note = `lines ${(first + 1).toLocaleString('en')}–${(first + fit.length).toLocaleString('en')} of ${total.toLocaleString('en')} characters`
+  else if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
+  return { path, text: fit.join('\n'), note, page, ...(first ? { first } : {}) }
 }
 
 async function loadDiff($: EngineInterface, path: string, folder: boolean): Promise<boolean> {
@@ -3473,14 +3491,15 @@ export const register: Register = (on, options) => {
       return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
     }
     if (t.preview) {
-      if (previewed?.path !== t.preview) await loadPreview($, t.preview)
+      if (previewed?.path !== t.preview) await loadPreview($, t.preview, deskLine?.path === t.preview ? deskLine.line : undefined)
       const p = previewed
+      const first = p?.diff ? 0 : (p?.first ?? 0)
       const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(t.preview)
       const all = p?.diff?.length ?? (p?.text ?? '').split('\n').length
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 4 : 3))
       const start = nativeScroll ? 0 : p?.diff ? Math.min(t.previewTop, Math.max(0, all - 1)) : Math.min(t.previewTop, Math.max(0, all - previewRows))
       const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
-      previewLine = win.top + 1
+      previewLine = first + win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const listing = t.preview === OUTSIDE
       const external = { id: 'external', label: glyphSetting === 'text' ? 'open' : unicode ? '↗' : '\u{eb14}', dim: true, hint: 'open in default app' }
@@ -3548,7 +3567,7 @@ export const register: Register = (on, options) => {
               </Box>
             ) : deskLine?.path === t.preview && deskLine.top > 0 && !p?.diff ? (() => {
               const lines = (p?.text ?? '').split('\n')
-              const at = Math.min(deskLine.top, Math.max(0, lines.length - 1))
+              const at = Math.max(0, Math.min(deskLine.top - first, lines.length - 1))
               if (!deskLine.scrolled) {
                 deskLine.scrolled = true
                 $.clock.after(50, () => void $.ui.scroll({ to: { key: 'pv-line' }, in: PANE, block: 'start' }).catch(() => undefined))
@@ -3557,11 +3576,11 @@ export const register: Register = (on, options) => {
               const [above, below] = markdown ? markdownSplit(p?.text ?? '', at) : [lines.slice(0, at).join('\n'), lines.slice(at).join('\n')]
               return (
                 <Box key="pv-split" flexDirection="column">
-                  {markdown ? <Markdown key="pv-above" text={above} /> : <Code key="pv-above" source={above} path={t.preview} startLine={1} wrap="truncate-end" />}
-                  {markdown ? <Markdown key="pv-line" text={below} /> : <Code key="pv-line" source={below} path={t.preview} startLine={at + 1} wrap="truncate-end" />}
+                  {markdown ? <Markdown key="pv-above" text={above} /> : <Code key="pv-above" source={above} path={t.preview} startLine={first + 1} wrap="truncate-end" />}
+                  {markdown ? <Markdown key="pv-line" text={below} /> : <Code key="pv-line" source={below} path={t.preview} startLine={first + at + 1} wrap="truncate-end" />}
                 </Box>
               )
-            })() : directPreview(elements, win, t.preview, markdown, theme.accent)}
+            })() : directPreview(elements, { ...win, top: first + win.top }, t.preview, markdown, theme.accent)}
             <Box key="pv-hotkeys" height={0} overflow="hidden" flexDirection="row">
               {acts.filter(a => a.key).map(a => <Button key={`pv-hk-${a.key}`} plain hotkey={a.key} label={a.key} onPress={() => previewActs.get(a.id)?.()} />)}
             </Box>
@@ -3591,11 +3610,11 @@ export const register: Register = (on, options) => {
             {!listing && (editWithSetting || inTmux || inHerdr) ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text {...mutedText}>{p.note}</Text> : null}
-          {nativeScroll ? directPreview(elements, win, t.preview, markdown, theme.accent) : (
+          {nativeScroll ? directPreview(elements, { ...win, top: first + win.top }, t.preview, markdown, theme.accent) : (
             <Client
               key="rows"
               module="./rows.tsx"
-              props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+              props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: first + win.top + 1, markdown } } satisfies RowsProps}
             />
           )}
         </Box>
@@ -4069,6 +4088,7 @@ export const register: Register = (on, options) => {
         peeked = null
         peekTop = peekWant?.path === target ? peekWant.top : 0
         peekWant = null
+        if (peekAt?.path !== target) peekAt = null
         overPeek = false
       }
       let start = peekTop
@@ -4211,18 +4231,26 @@ export const register: Register = (on, options) => {
             }))
           }
           if (peeked?.path !== target) peeked = { path: target, text: '', note: 'reading…', page }
-        } else if (peeked?.path !== target) peeked = await readPreview($, target)
+        } else if (peeked?.path !== target) {
+          const at = peekAt?.path === target ? peekAt : null
+          peeked = await readPreview($, target, 1, at?.line)
+          if (at && !at.jumped) {
+            at.jumped = true
+            start = peekTop = Math.max(0, at.line - 3 - (peeked.first ?? 0))
+          }
+        }
+        const first = peeked.first ?? 0
         const lines = peeked.text.split('\n')
         const last = Math.max(0, lines.length - peekRows)
         start = Math.min(start, last)
         const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(target)
         const win = previewLines(peeked.text, start, peekRows, markdown)
-        status = `${docKind === 'pdf' ? `p ${page}${docCounts.has(target) ? `/${docCounts.get(target)}` : ''} ` : ''}${peeked.text ? `${start + 1}–${Math.min(lines.length, start + peekRows)}/${lines.length}` : ''}`.trim()
+        status = `${docKind === 'pdf' ? `p ${page}${docCounts.has(target) ? `/${docCounts.get(target)}` : ''} ` : ''}${peeked.text ? `${first + start + 1}–${first + Math.min(lines.length, start + peekRows)}/${first + lines.length}` : ''}`.trim()
         const size = Math.max(1, Math.round((peekRows * peekRows) / Math.max(1, lines.length)))
         const bar = lines.length > peekRows ? { pos: last ? Math.round((start / last) * (peekRows - size)) : 0, size, thumb: theme.accent, track: theme.muted } : undefined
         if (!peeked.text) overPeek = false
         content = peeked.text
-          ? <Client key="peek" module="./rows.tsx" props={{ rows: [], active: '', ...rowColors, pointer, ...(bar ? { bar } : {}), preview: { text: win.text, path: target, startLine: win.top + 1, markdown, rows: peekRows } } satisfies RowsProps} />
+          ? <Client key="peek" module="./rows.tsx" props={{ rows: [], active: '', ...rowColors, pointer, ...(bar ? { bar } : {}), preview: { text: win.text, path: target, startLine: first + win.top + 1, markdown, rows: peekRows } } satisfies RowsProps} />
           : <Text {...mutedText}>{raw?.state === 'pending' ? 'converting…' : peeked.note || 'empty file'}</Text>
       }
       const title = (
