@@ -59,6 +59,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
 - The selected file goes to Claude as context, and `@path` in a prompt reveals that file
+- `v` marks up to 100 files and folders: marked rows show a dot, `y` / `Y` copy all their paths and the marked paths go to Claude as context
 - Right column cycles date, size, lines of code and number of files from the header button, with git counts in their own columns beside it; a folder's date is its newest file
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
@@ -115,7 +116,8 @@ f / b:        scroll the preview a page
 d:            diff of the entry under the cursor
 x:            guard or unguard the entry under the cursor (off limits to Claude's edits)
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
-y / Y:        copy the relative / absolute path
+y / Y:        copy the relative / absolute path, or of every marked entry, one per line
+v / V:        mark or unmark the entry under the cursor / clear all marks (Esc also clears them)
 "?":          show the shortcuts in the footer for 10 seconds
 Space:        Quick Look on macOS
 ```

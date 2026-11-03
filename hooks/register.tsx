@@ -67,6 +67,7 @@ const DOUBLE_MS = 450
 const SHORTCUTS_MS = 10_000
 const FIND_LIMIT = 200
 const GREP_LIMIT = 200
+const MARK_LIMIT = 100
 const GREP_MS = 15_000
 const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
@@ -136,6 +137,7 @@ let mainBusy = false
 let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
+let marks: string[] = []
 let peekWant: { path: string; top: number } | null = null
 type GrepHit = { path: string; line: number; text: string }
 const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
@@ -503,6 +505,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   timeQueue = []
   lastRoot = root
   hintRoot = ''
+  marks = []
   searchIndex = null
   sizeEpoch += 1
   sizeQueue = []
@@ -1178,11 +1181,28 @@ async function sync($: EngineInterface, force = false): Promise<void> {
   if (t.top) await refreshGit($)
 }
 
-async function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
+async function copyPaths($: EngineInterface, ids: string[], how: 'relative' | 'absolute' | 'name', surface?: RenderSurface): Promise<void> {
   const t = await get($)
-  const text = !absolute && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id
+  const one = (id: string) => (how === 'name' ? id.slice(id.lastIndexOf('/') + 1) || id : how === 'relative' && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id)
+  const text = ids.map(one).join('\n')
   const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
-  $.ui.toast(done.isCopied ? `Copied ${text}` : 'Could not copy the path')
+  $.ui.toast(!done.isCopied ? `Could not copy the ${how === 'name' ? 'name' : 'path'}${ids.length > 1 ? 's' : ''}` : ids.length > 1 ? `Copied ${ids.length} ${how === 'name' ? 'names' : 'paths'}` : `Copied ${text}`)
+}
+
+function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
+  return copyPaths($, [id], absolute ? 'absolute' : 'relative', surface)
+}
+
+function toggleMark($: EngineInterface, id: string): void {
+  if (marks.includes(id)) marks = marks.filter(m => m !== id)
+  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V or Esc clears them`)
+  else marks = [...marks, id]
+  void $.ui.invalidate('ui.render')
+}
+
+function clearMarks($: EngineInterface): void {
+  marks = []
+  void $.ui.invalidate('ui.render')
 }
 
 async function exists($: EngineInterface, path: string): Promise<boolean> {
@@ -2617,7 +2637,9 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'w') await showOutside($)
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
-  else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
+  else if (key === 'V' || (key === 'v' && shift) || (key === 'escape' && marks.length)) clearMarks($)
+  else if (cur && key === 'v') toggleMark($, cur.id)
+  else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
@@ -3112,6 +3134,8 @@ export const register: Register = (on, options) => {
     if (!(await followCwd($))) void sync($)
     const t = await get($)
     const context = [...(e.context ?? [])]
+    const marked = (await Promise.all(marks.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
+    if (marked.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${marked.join('\n')}`)
     if (t.selected && (await exists($, t.selected))) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${t.selected}`)
     const mentions = [...e.text.matchAll(/@([^\s"'`]+)/g)]
       .map(m => (m[1] ?? '').replace(/[.,;:!?)]+$/, ''))
@@ -3527,7 +3551,8 @@ export const register: Register = (on, options) => {
       if (cells.metric && gitColor && !isIgnored && !isLong(n)) cells.metric = { ...cells.metric, c: gitColor }
       const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
-      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
+      const isMarked = marks.includes(n.id)
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0))
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
@@ -3539,6 +3564,7 @@ export const register: Register = (on, options) => {
         { t: caret, c: isCur ? theme.accent : theme.muted, b: isCur || undefined },
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
         lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' },
+        ...(isMarked ? [{ t: ' ●', c: theme.accent }] : []),
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
         const cell = cells[c]
@@ -3546,7 +3572,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard }
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -3622,6 +3648,7 @@ export const register: Register = (on, options) => {
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
+          {p.isMarked && Svg ? <Svg key={`mark:${n.id}`} source={iconSvg('mark', accentInk, 12)} alt={`marked ${n.name}`} width={12} height={12} /> : null}
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
             {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
@@ -4002,6 +4029,7 @@ export const register: Register = (on, options) => {
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'v', label: 'mark', act: () => void navigate($, 'v', false, e.surface).then(park) },
       { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
       ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
@@ -4012,7 +4040,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'v', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
@@ -4159,6 +4187,7 @@ export const register: Register = (on, options) => {
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
+            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Box> : null}
             {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
             {footerName && !tipText ? (
               <Box flexShrink={1}>

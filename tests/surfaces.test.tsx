@@ -4014,3 +4014,45 @@ test('? searches file contents, groups matches per file, opens the split at the 
   await desktop.unmount()
   await ui.unmount()
 })
+
+test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc clear them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  for (const name of ['a.txt', 'src']) {
+    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
+    await clock.advance(1000)
+    await ui.post({ key: 'v' }, { in: 'rows' })
+  }
+  await clock.settle()
+  const marked = (rows: RowSpec[]) => rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
+  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([`${root}/src`, `${root}/a.txt`])
+  expect(JSON.stringify(await ui.drawn())).toContain('2 marked')
+  for (const key of ['y', 'Y']) await ui.post({ key }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['a.txt\nsrc', `${root}/a.txt\n${root}/src`])
+  const sent = await $.prompt.submit({ text: 'compare these', wait: false, origin: { kind: 'composer' } })
+  expect(JSON.stringify(sent)).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/a.txt\\n${root}/src`)
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([])
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await desktop.post({ press: `${root}/b.txt` }, { in: `hit:${root}/b.txt` })
+  await desktop.post({ key: 'v' }, { in: `hit:${root}/b.txt` })
+  await clock.settle()
+  expect(svgs(await desktop.drawn()).filter(s => s.alt.startsWith('marked ')).map(s => s.alt)).toEqual(['marked b.txt'])
+  await desktop.post({ key: 'V' }, { in: `hit:${root}/b.txt` })
+  await clock.settle()
+  expect(svgs(await desktop.drawn()).some(s => s.alt.startsWith('marked '))).toBe(false)
+  await desktop.unmount()
+  await ui.unmount()
+})
