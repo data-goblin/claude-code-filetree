@@ -65,6 +65,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Open files in their default app, an editor in a tmux or herdr pane, or any command
 - Changes made outside Claude show at once on Linux through `inotifywait`
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
+- `AGENTS.md`, `CLAUDE.md`, their `.local.md` variants and Markdown files under any `.claude/rules/` folder draw a brain instead of the Markdown icon (`§` in plain glyphs)
 
   <img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
 

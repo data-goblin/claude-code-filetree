@@ -17,7 +17,7 @@ import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
-import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
+import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, isMemory } from './icons'
 import {
   age,
   ancestorsOf,
@@ -3251,7 +3251,7 @@ export const register: Register = (on, options) => {
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
       const isRepo = n.kind === 'dir' && n.id === t.top
-      const glyph = unicode ? (n.kind === 'dir' ? '■' : '∙') : fileIcon(n, r.open, isRepo)
+      const glyph = unicode ? (n.kind === 'dir' ? '■' : isMemory(n) ? BRAIN.plain : '∙') : fileIcon(n, r.open, isRepo)
       const lit = isBright || isDim
       const left: Seg[] = [
         { t: '  '.repeat(r.depth) },

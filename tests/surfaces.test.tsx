@@ -3640,3 +3640,36 @@ test('desktop: in LOC mode a window past the first 400 rows still measures and d
   expect(row).toContain('"children":["42"]')
   await ui.unmount()
 })
+
+const MEMORY_WORLD = (root: string): World => ({
+  os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root,
+  dirs: { [root]: [['.claude', 'dir'], ['AGENTS.md', 'file'], ['CLAUDE.md', 'file'], ['README.md', 'file']], [`${root}/.claude`]: [['rules', 'dir']], [`${root}/.claude/rules`]: [['x.md', 'file']] },
+  status: '## main\0', numstat: '',
+})
+
+for (const [set, surface, brain, markdown] of [['nerd', 'terminal', '\u{f09d1} ', '\u{f0354} '], ['plain', 'terminal', '§ ', '∙ '], ['auto', 'desktop', '', '']] as const) {
+  test(`${surface} ${set} glyphs: AGENTS.md, CLAUDE.md and .claude/rules/*.md draw a brain, README.md keeps the markdown icon`, { timeoutMs: 20_000, options: { glyphs: set } }, async ($, on) => {
+    const root = '/Users/k/proj'
+    const clock = world(on, MEMORY_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await $.tool.call({ tool: 'Read', file_path: `${root}/.claude/rules/x.md` })
+    await clock.settle()
+    const tree = await ui.drawn()
+    const memory = [`${root}/AGENTS.md`, `${root}/CLAUDE.md`, `${root}/.claude/rules/x.md`]
+    if (surface === 'terminal') {
+      const glyph = (id: string) => treeRows(tree).rows.find(r => r.id === id)?.left[2]?.t
+      for (const id of memory) expect([id, glyph(id)]).toEqual([id, brain])
+      expect(glyph(`${root}/README.md`)).toBe(markdown)
+    } else {
+      const icon = (name: string) => svgs(tree).find(s => s.alt === `file ${name}`)?.source ?? ''
+      for (const name of ['AGENTS.md', 'CLAUDE.md', 'x.md']) expect([name, icon(name).includes(ICONS.brain)]).toEqual([name, true])
+      expect(icon('README.md')).toContain(ICONS['file-text'])
+      expect(icon('README.md')).not.toContain(ICONS.brain)
+    }
+    await ui.unmount()
+  })
+}
+
