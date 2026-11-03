@@ -126,7 +126,7 @@ v / V:        mark or unmark the entry under the cursor / clear all marks
 Space:        Quick Look on macOS
 ```
 
-<img src="docs/media/shortcuts.gif" alt="? shows the shortcuts in the footer, and k from the first row selects the root" width="800">
+<img src="docs/media/shortcuts.gif" alt="? opens the grouped shortcuts overlay over the tree, and ? closes it" width="800">
 
 Resize the pane with the mouse or the `pane:grow` and `pane:shrink` keybindings.
 
