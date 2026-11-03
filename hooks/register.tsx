@@ -286,13 +286,14 @@ function get(_$: EngineInterface): Promise<FileTree> {
   return Promise.resolve(cached)
 }
 
-async function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
+function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
   cached = fn(cached ?? emptyTree(''))
   snapshot ??= $.clock.after(1_000, () => {
     snapshot = null
     if (cached) void $.state.set(TREE, cached)
   })
-  await $.ui.invalidate('ui.render')
+  $.ui.invalidate('ui.render')
+  return Promise.resolve()
 }
 
 function patch($: EngineInterface, fn: (t: FileTree) => Partial<FileTree>) {
@@ -2346,7 +2347,7 @@ async function toggle($: EngineInterface, n: FileNode): Promise<void> {
   if (n.kind === 'dir' && !(await get($)).expanded.includes(n.id)) await loadDirs($, [n.id])
   await patch($, t => {
     const open = new Set(t.expanded)
-    if (n.kind === 'dir') open.has(n.id) ? open.delete(n.id) : open.add(n.id)
+    if (n.kind === 'dir' && !open.delete(n.id)) open.add(n.id)
     return { expanded: [...open], cursor: n.id, selected: n.id }
   })
   void watchTree($)
@@ -3441,8 +3442,8 @@ export const register: Register = (on, options) => {
             {desk ? tailCols(branchCells, 'branch', GIT_COLS) : null}
             {!desk && totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
             {!desk && totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
-            {desk ? null : rootCounts.map(c => (
-              <Text color={c.c}>{c.t}</Text>
+            {desk ? null : rootCounts.map((c, i) => (
+              <Text key={`root-count-${i}`} color={c.c}>{c.t}</Text>
             ))}
             {!desk && rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text {...mutedText}> clean</Text>}
           </Box>

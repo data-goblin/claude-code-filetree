@@ -150,7 +150,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     return (
       <Text bold={s.b}>
         {chars.map((ch, i) => (
-          <Text color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
+          <Text key={`ch-${i}`} color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
         ))}
       </Text>
     )
