@@ -5,7 +5,7 @@ import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
-import { compileRegex } from '../hooks/regex'
+import { compileRegex, toEre } from '../hooks/regex'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
@@ -111,8 +111,9 @@ function world(on: On, w: World, ran: Ran) {
     const bare = said.slice(drive.length)
     const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
     const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
-    if (w.loops?.includes(p)) throw new Error(`ELOOP: too many symbolic links encountered, stat '${p}'`)
-    const to = w.linkTo?.[p]
+    const key = p.replace(/^[A-Za-z]:/, '')
+    if (w.loops?.includes(key)) throw new Error(`ELOOP: too many symbolic links encountered, stat '${p}'`)
+    const to = w.linkTo?.[key]
     if (to !== undefined) {
       if (!to) throw new Error(`ENOENT ${e.path}`)
       return { value: { kind: 'file', size: 1, mtimeMs: 1_700_000_000_000, isLink: false, ...(e.resolve ? { realPath: to } : {}) } }
@@ -4247,3 +4248,29 @@ for (const [surface, groups, want] of [
     await ui.unmount()
   })
 }
+
+test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
+  expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
+  expect(toEre('a.*?b\\s[\\w-]')).toBe('a.*b[[:space:]][[:alnum:]_-]')
+  expect(toEre('[^\\D]')).toBeNull()
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['a.ts', 'file']] },
+    grep: 'a.ts\x001\x00ddd\na.ts\x002\x00width 42\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: '?\\d+', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '[0-9]+', '--', '.'])
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`])
+  await ui.unmount()
+})

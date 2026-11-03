@@ -308,3 +308,51 @@ export function compileRegex(src: string, ignoreCase: boolean): ((text: string) 
     throw err
   }
 }
+
+const ERE_IN: Record<string, string> = { d: '0-9', w: '[:alnum:]_', s: '[:space:]' }
+const ERE_OUT: Record<string, string> = { d: '[0-9]', D: '[^0-9]', w: '[[:alnum:]_]', W: '[^[:alnum:]_]', s: '[[:space:]]', S: '[^[:space:]]' }
+
+export function toEre(src: string): string | null {
+  let out = ''
+  let inClass = false
+  let quant = false
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i] ?? ''
+    if (c === '\\' && i + 1 < src.length) {
+      const e = src[++i] ?? ''
+      quant = false
+      if (inClass) {
+        if (e in ERE_IN) out += ERE_IN[e]
+        else if (e in ERE_OUT) return null
+        else out += LITERAL_ESCAPES[e] ?? (e === ']' || e === '\\' || e === '-' || e === '^' ? `\\${e}` : e)
+      } else out += ERE_OUT[e] ?? LITERAL_ESCAPES[e] ?? `\\${e}`
+      continue
+    }
+    if (inClass) {
+      out += c
+      if (c === ']') inClass = false
+      continue
+    }
+    if (c === '[') {
+      inClass = true
+      out += c
+      if (src[i + 1] === '^') out += src[++i]
+      if (src[i + 1] === ']') out += src[++i]
+      quant = false
+      continue
+    }
+    if (c === '(' && src[i + 1] === '?' && src[i + 2] === ':') {
+      out += '('
+      i += 2
+      quant = false
+      continue
+    }
+    if (c === '?' && quant) {
+      quant = false
+      continue
+    }
+    quant = c === '*' || c === '+' || c === '?' || c === '}'
+    out += c
+  }
+  return out
+}

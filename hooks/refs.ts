@@ -1,6 +1,6 @@
 export type FileRef = { path: string; line: number; end: number }
 
-const REF = /(?<![\w.@~+\/\\:-])((?:[A-Za-z]:[\\/])?[\w.@~+\/\\-]+)(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?)(?![\w])/g
+const REF = /(?<![\w.@~+/\\:-])((?:[A-Za-z]:[\\/])?[\w.@~+/\\-]+)(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?)(?![\w])/g
 const LIMIT = 20
 
 export function fileRefs(text: string): FileRef[] {

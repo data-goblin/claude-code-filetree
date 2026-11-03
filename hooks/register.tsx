@@ -53,6 +53,7 @@ import {
   collator,
   type Row,
 } from './tree'
+import { compileRegex, toEre } from './regex'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
@@ -1577,7 +1578,7 @@ function grepClear(): void {
 }
 
 function grepArgv(t: FileTree, q: string): string[] {
-  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', q]
+  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (toEre(q) ?? '.') : q]
   if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
   const skip = [...PRUNE, ...(broad(t.root) ? HOME_PRUNE : []), ...ignoreNames, ...(t.showHidden ? [] : ['.*'])]
   return ['grep', '-rnIZ', ...skip.map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', t.searchScope || t.root]
@@ -1610,6 +1611,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
     stop()
   })
   const files = new Map<string, GrepHit[]>()
+  const fits = t.searchRegex ? compileRegex(q, !t.searchCase) : null
   let count = 0
   let capped = false
   let rest = ''
@@ -1621,6 +1623,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
     const raw = posix(line.slice(0, cut))
     const path = isAbsolute(raw) ? raw : join(t.root, raw.replace(/^\.\//, ''))
     if (isIgnored(t.root, path) || (!t.showHidden && relative(t.root, path).split('/').some(x => x.startsWith('.')))) return
+    if (fits && !fits(m[2] ?? '')) return
     if (count >= GREP_LIMIT) {
       capped = true
       return
