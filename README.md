@@ -121,7 +121,7 @@ x:            guard or unguard the entry under the cursor (off limits to Claude'
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
-v / V:        mark or unmark the entry under the cursor / clear all marks (Esc also clears them)
+v / V:        mark or unmark the entry under the cursor / clear all marks
 "?":          show the shortcuts in the footer for 10 seconds
 Space:        Quick Look on macOS
 ```
