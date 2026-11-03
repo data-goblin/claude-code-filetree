@@ -29,7 +29,9 @@
 - The release takes the version on `main` at that run; sign a `v<version>` tag on that commit and publish the GitHub release from it. The keeper has no signing key, so it hands the release to an agent on a machine that has one
 - The release notes cover every PR merged since the last release, including versions that never got their own release
 
-## Branch filetree-proactive
+## Branch release/0.7.0
 
-- `filetree-proactive` holds the "Follow work" setting: the session runs `/cd` into the repo where it and its subagents work, with hysteresis (hooks/work.ts). It is under test and not meant for main yet
-- Keep it current with main: after every merge to main, rebase `filetree-proactive` onto `origin/main` and force-push it with `--force-with-lease`; its version stays one patch above main so the pre-push check passes
+- `release/0.7.0` collects the 0.7.0 features: the "Follow work" setting from `filetree-proactive` (the session runs `/cd` into the repo where it and its subagents work, with hysteresis, hooks/work.ts) and the "Long file" setting (red line counts above a threshold in the loc column)
+- Keep it current with main: after every merge to main, merge `origin/main` into `release/0.7.0`
+- It lands on main through one pull request, with the Codex review on its head, and ships in the next morning release after it merges
+- `filetree-proactive` is folded into it and gets no new commits
