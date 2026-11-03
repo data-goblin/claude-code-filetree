@@ -2640,6 +2640,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'V' || (key === 'v' && shift) || (key === 'escape' && marks.length)) clearMarks($)
   else if (cur && key === 'v') toggleMark($, cur.id)
   else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else if ((cur || marks.length) && key === 'u') await copyPaths($, marks.length ? marks : [cur?.id ?? ''], 'name', surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
@@ -4029,6 +4030,7 @@ export const register: Register = (on, options) => {
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'u', label: 'copy name', act: () => void navigate($, 'u', false, e.surface).then(park) },
       { key: 'v', label: 'mark', act: () => void navigate($, 'v', false, e.surface).then(park) },
       { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
       ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
@@ -4040,7 +4042,7 @@ export const register: Register = (on, options) => {
     const picked = new Set<string>()
     if (shortcutsShown) {
       let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'v', 'c', 'r', 'a', 'n', 'g', 'm']) {
+      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'v', 'u', 'c', 'r', 'a', 'n', 'g', 'm']) {
         const k = allKeys.find(x => x.key === key)
         if (!k) continue
         const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4

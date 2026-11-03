@@ -4056,3 +4056,29 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   await desktop.unmount()
   await ui.unmount()
 })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`u copies the bare file name on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['deep.ts', 'file']] } }, [])
+    const copied: string[] = []
+    on('ui.copy', (_$, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true } }
+    })
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await ui.post({ press: `${root}/src` }, zone(`${root}/src`))
+    await clock.settle()
+    await ui.post({ press: `${root}/src/deep.ts` }, zone(`${root}/src/deep.ts`))
+    await clock.settle()
+    if (surface === 'desktop') await ui.press({ key: 'hk-u' })
+    else await ui.post({ key: 'u' }, zone(`${root}/src/deep.ts`))
+    await clock.settle()
+    expect(copied).toEqual(['deep.ts'])
+    await ui.unmount()
+  })
+}
