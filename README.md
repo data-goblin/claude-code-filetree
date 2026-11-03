@@ -54,6 +54,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 ## Features
 
 - File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, and sortable Name, Git and value column headers
+- `?` as the first character of the search searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
@@ -102,7 +103,7 @@ With the tree focused:
 j / k:        move down / up; k on the first row selects the root
 h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
-s:            focus search
+s:            focus search; start the query with ? to search inside files (j / k pick a match, Enter opens it)
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
 z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)

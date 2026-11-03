@@ -66,6 +66,10 @@ const NO_REPO_DEPTH = 4
 const DOUBLE_MS = 450
 const SHORTCUTS_MS = 10_000
 const FIND_LIMIT = 200
+const GREP_LIMIT = 200
+const GREP_MS = 15_000
+const GREP_WAIT_MS = 150
+const GREP_TEXT = 300
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
 const NAME_MIN = 10
@@ -132,6 +136,9 @@ let mainBusy = false
 let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
+let peekWant: { path: string; top: number } | null = null
+type GrepHit = { path: string; line: number; text: string }
+const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
 let peekPath = ''
 let peekRows = 8
 let peekTop = 0
@@ -1436,6 +1443,11 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!(await get($)).query.trim()) searchIndex = null
   await patch($, () => ({ query }))
   const t = await get($)
+  if (query.startsWith('?')) {
+    grep.key = ''
+    return []
+  }
+  if (grep.key) grepClear()
   if (!query.trim()) return []
   const index = await indexPaths($, t)
   const match = matcher(query, Boolean(t.searchCase), Boolean(t.searchRegex))
@@ -1451,6 +1463,148 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const stale = [...new Set(hits.filter(p => !ids.has(p)).map(dirname))].filter(d => inside(shown.root, d))
   if (stale.length) await loadDirs($, stale)
   return hits
+}
+
+function grepOn(t: FileTree): boolean {
+  return t.query.startsWith('?')
+}
+
+function grepKey(t: FileTree): string {
+  return JSON.stringify([t.root, t.top, t.query.slice(1).trim(), Boolean(t.searchCase), Boolean(t.searchRegex), t.searchScope, t.showHidden])
+}
+
+function grepId(h: GrepHit): string {
+  return `grep:${h.line}:${h.path}`
+}
+
+function grepStop(): void {
+  grep.stop?.()
+  grep.stop = null
+}
+
+function grepClear(): void {
+  grepStop()
+  grep.seq += 1
+  grep.key = ''
+  grep.rows = []
+  grep.sel = 0
+  grep.capped = false
+  grep.busy = false
+  grep.note = ''
+}
+
+function grepArgv(t: FileTree, q: string): string[] {
+  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', q]
+  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
+  const skip = [...PRUNE, ...(broad(t.root) ? HOME_PRUNE : []), ...ignoreNames, ...(t.showHidden ? [] : ['.*'])]
+  return ['grep', '-rnIZ', ...skip.map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', t.searchScope || t.root]
+}
+
+function grepRun($: EngineInterface, t: FileTree): void {
+  grepClear()
+  grep.key = grepKey(t)
+  const mine = grep.seq
+  const q = t.query.slice(1).trim()
+  if (!q) return
+  if (badPattern(q, Boolean(t.searchRegex))) {
+    grep.note = 'not a valid pattern'
+    return
+  }
+  grep.busy = true
+  $.clock.after(GREP_WAIT_MS, () => {
+    if (mine === grep.seq) void grepSpawn($, t, q, mine)
+  })
+}
+
+async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: number): Promise<void> {
+  const stream = $.process.spawn({ argv: grepArgv(t, q), ...(t.top ? { env: { GIT_OPTIONAL_LOCKS: '0' } } : {}) })
+  const stop = () => stopStream(stream)
+  grep.stop = stop
+  let note = ''
+  const timer = $.clock.after(GREP_MS, () => {
+    if (grep.seq !== mine) return
+    note = `search stopped after ${GREP_MS / 1000} seconds`
+    stop()
+  })
+  const files = new Map<string, GrepHit[]>()
+  let count = 0
+  let capped = false
+  let rest = ''
+  let err = ''
+  const take = (line: string) => {
+    const cut = line.indexOf('\0')
+    const m = cut < 0 ? null : /^(\d+)[\0:](.*)$/s.exec(line.slice(cut + 1))
+    if (!m) return
+    const raw = posix(line.slice(0, cut))
+    const path = isAbsolute(raw) ? raw : join(t.root, raw.replace(/^\.\//, ''))
+    if (isIgnored(t.root, path) || (!t.showHidden && relative(t.root, path).split('/').some(x => x.startsWith('.')))) return
+    if (count >= GREP_LIMIT) {
+      capped = true
+      return
+    }
+    count += 1
+    const text = (m[2] ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim()
+    const hit = { path, line: Number(m[1]), text: text.length > GREP_TEXT ? `${text.slice(0, GREP_TEXT)}…` : text }
+    const list = files.get(path)
+    if (list) list.push(hit)
+    else files.set(path, [hit])
+  }
+  try {
+    for await (const chunk of stream) {
+      if (grep.seq !== mine) return
+      if (chunk.stream !== 'stdout') {
+        err ||= chunk.text.trim().split('\n')[0] ?? ''
+        continue
+      }
+      const lines = (rest + chunk.text).split('\n')
+      rest = lines.pop() ?? ''
+      for (const line of lines) take(line)
+      if (capped) break
+    }
+    if (rest && !capped) take(rest)
+  } catch (error) {
+    err = /ENOENT|not found|no such file/i.test(messageOf(error)) ? `${t.top ? 'git' : 'grep'} is not installed` : messageOf(error).split('\n')[0] ?? ''
+  } finally {
+    timer.cancel()
+    if (grep.seq === mine) {
+      grep.stop = null
+      grep.busy = false
+      grep.capped = capped
+      grep.rows = [...files.entries()].flatMap(([path, hits]) => [{ path, line: 0, text: String(hits.length) }, ...hits])
+      grep.note = note || (count ? '' : err)
+      void $.ui.invalidate('ui.render')
+    }
+  }
+}
+
+async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface): Promise<void> {
+  const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
+  const top = Math.max(0, line - 3)
+  if (surface === 'desktop' || nativeScroll) {
+    await loadPreview($, h.path)
+    await patch($, () => ({ preview: h.path, previewTop: top, selected: h.path }))
+    $.clock.after(100, () => parkPreview($))
+    return
+  }
+  await revealPaths($, [h.path])
+  if (peekPath === h.path) peekTop = top
+  else peekWant = { path: h.path, top }
+  overPeek = false
+  await patch($, cur => ({ split: true, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
+}
+
+async function grepNav($: EngineInterface, key: string, surface?: RenderSurface): Promise<boolean> {
+  const last = grep.rows.length - 1
+  const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -10, pagedown: 10, home: -Infinity, end: Infinity }
+  if (key in by) {
+    grep.sel = Math.max(0, Math.min(last, grep.sel + (by[key] ?? 0)))
+    void $.ui.invalidate('ui.render')
+    return true
+  }
+  if (key !== 'return' && key !== 'enter' && key !== 'o') return false
+  const hit = grep.rows[grep.sel]
+  if (hit) await openHit($, hit, surface)
+  return true
 }
 
 const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
@@ -1711,7 +1865,12 @@ async function searchFlag($: EngineInterface, flag: 'searchCase' | 'searchRegex'
   if (t.query.trim()) await search($, t.query)
 }
 
-async function jump($: EngineInterface, query: string): Promise<void> {
+async function jump($: EngineInterface, query: string, surface?: RenderSurface): Promise<void> {
+  if (query.startsWith('?')) {
+    const hit = grep.rows[grep.sel]
+    if (hit) await openHit($, hit, surface)
+    return
+  }
   const hits = (await search($, query)).slice(0, 10)
   await patch($, cur => {
     const open = new Set(cur.expanded)
@@ -2412,6 +2571,7 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
   if (key === 'z') return jumpOpen($)
+  if (grepOn(await get($)) && (await grepNav($, key, surface))) return
   await steer($, key, shift, surface)
   if (autoOpened.size) claimMarks((await get($)).cursor)
 }
@@ -2856,6 +3016,15 @@ export const register: Register = (on, options) => {
       if (zjump.rows.includes(data.press)) await jumpTo($, data.press)
       return {}
     }
+    if (typeof data.press === 'string' && data.press.startsWith('grep:')) {
+      const at = grep.rows.findIndex(h => grepId(h) === data.press)
+      const hit = grep.rows[at]
+      if (hit) {
+        grep.sel = at
+        await openHit($, hit, e.surface)
+      }
+      return {}
+    }
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
       if (ghost) {
@@ -3203,6 +3372,8 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = rowsOf(t)
+    const grepping = !zjump.on && grepOn(t)
+    if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
     const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsShown || shortcutsSetting === 'auto' ? 1 : 0)
@@ -3466,7 +3637,19 @@ export const register: Register = (on, options) => {
     const jumpSpecs: RowSpec[] = zjump.rows.length
       ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
       : [note('no matching folder')]
-    const specs: RowSpec[] = zjump.on ? jumpSpecs : [
+    const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
+    const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
+    const grepNode = (path: string): FileNode => ({ id: path, parent: dirname(path), name: path.slice(path.lastIndexOf('/') + 1), kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true })
+    const grepNote = !grepping ? '' : grep.rows.length === 0 ? (grep.busy ? 'searching…' : grep.note || (t.query.slice(1).trim() ? 'no matches' : 'type after ? to search inside files')) : grep.capped ? `first ${GREP_LIMIT} matches; keep typing to narrow` : grep.note
+    const grepRoom = Math.max(1, room - (grepNote ? 1 : 0))
+    const grepFrom = nativeScroll ? 0 : Math.max(0, Math.min(grep.sel - Math.floor(grepRoom / 2), grep.rows.length - grepRoom))
+    const grepSpecs: RowSpec[] = !grepping ? [] : [
+      ...grep.rows.slice(grepFrom, nativeScroll ? undefined : grepFrom + grepRoom).map((h): RowSpec => h.line
+        ? { id: grepId(h), left: clean([{ t: `    ${String(h.line).padStart(grepDigits)}  `, c: theme.muted }, { t: h.text, c: theme.fg || undefined }]), right: [] }
+        : { id: grepId(h), left: clean([{ t: `${unicode ? '∙' : fileIcon(grepNode(h.path), false, false)} `, c: theme.muted }, { t: grepName(h.path), c: theme.fg || undefined, b: true }]), right: [{ t: ` ${h.text} `, c: theme.muted }] }),
+      ...(grepNote ? [note(grepNote)] : []),
+    ]
+    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : [
       ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
@@ -3487,6 +3670,35 @@ export const register: Register = (on, options) => {
       }
     }
     const deskTree = () => {
+      if (grepping) return (
+        <Box key="grep-list" flexDirection="column">
+          {grep.rows.map((g, k) => (
+            <Box key={`grep-row:${grepId(g)}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : undefined} hover={{ backgroundColor: k === grep.sel ? deskSel : deskHover }}>
+              {g.line ? <Box key={`grep-line:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
+                {Svg ? <Svg key={`grep-guide:${grepId(g)}`} source={rowSvg(1, null, null, mutedInk)} alt={`line ${g.line}`} width={STEP_PX * 3 + GAP_PX} height={ROW_PX} /> : null}
+                <Text color={mutedInk} tabular mono>{`${String(g.line).padStart(grepDigits)} `}</Text>
+                <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text mono wrap="truncate-end">{g.text}</Text></Box>
+              </Box> : <Box key={`grep-file:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
+                {Svg ? <Svg key={`grep-icon:${grepId(g)}`} source={rowSvg(0, null, nodeIcon(grepNode(g.path), false), mutedInk)} alt={`file ${grepName(g.path)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+                <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{grepName(g.path)}</Text></Box>
+                <Text color={mutedInk} tabular>{g.text}</Text>
+                <Box width={2} flexShrink={0} />
+              </Box>}
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key={`hit:${grepId(g)}`} module="./hit.tsx" props={{ id: grepId(g) } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ))}
+          {grepNote ? (
+            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+              <Text {...mutedText}>{grepNote}</Text>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ) : null}
+        </Box>
+      )
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
@@ -3517,7 +3729,7 @@ export const register: Register = (on, options) => {
     }
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
-      !nativeScroll && rows.length > shown.length + pinned.length
+      !nativeScroll && !grepping && rows.length > shown.length + pinned.length
         ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
         : undefined
 
@@ -3596,7 +3808,8 @@ export const register: Register = (on, options) => {
       if (target !== peekPath) {
         peekPath = target
         peeked = null
-        peekTop = 0
+        peekTop = peekWant?.path === target ? peekWant.top : 0
+        peekWant = null
         overPeek = false
       }
       let start = peekTop
@@ -3870,7 +4083,7 @@ export const register: Register = (on, options) => {
                 placeholder="Search files..."
                 value={t.query}
                 onInput={onQuery}
-                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+                onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
             {t.query ? <Button key="clear" plain dimColor label="×" onPress={() => void search($, '')} /> : null}
@@ -3894,7 +4107,7 @@ export const register: Register = (on, options) => {
                 submitLabel="go"
                 value={t.query}
                 onInput={onQuery}
-                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+                onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
             {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
@@ -3910,7 +4123,7 @@ export const register: Register = (on, options) => {
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={{ rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />

@@ -49,6 +49,9 @@ type World = {
   locAbortOnce?: string[]
   tops?: Record<string, string>
   real?: Record<string, string>
+  grep?: string
+  linkTo?: Record<string, string>
+  loops?: string[]
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -108,6 +111,12 @@ function world(on: On, w: World, ran: Ran) {
     const bare = said.slice(drive.length)
     const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
     const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
+    if (w.loops?.includes(p)) throw new Error(`ELOOP: too many symbolic links encountered, stat '${p}'`)
+    const to = w.linkTo?.[p]
+    if (to !== undefined) {
+      if (!to) throw new Error(`ENOENT ${e.path}`)
+      return { value: { kind: 'file', size: 1, mtimeMs: 1_700_000_000_000, isLink: false, ...(e.resolve ? { realPath: to } : {}) } }
+    }
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
     const hit = dirOf(p) ? 'dir' : dirOf(parent)?.find(([n]) => n === name)?.[1]
@@ -187,6 +196,7 @@ function world(on: On, w: World, ran: Ran) {
     }
     const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[(argv[1] ?? '').replace(/\/\.$/, '')] ?? '') : ''
     if (out) yield { stream: 'stdout', text: out }
+    if (w.grep !== undefined && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) yield { stream: 'stdout', text: w.grep }
     if (argv[0] === 'sh' && w.poster) yield { stream: 'stdout', text: w.poster(argv) }
     if (argv[0] === 'inotifywait' && w.watch) {
       await clock.sleep(w.watch.after)
@@ -3948,4 +3958,59 @@ test('Follow work starts over in a new or resumed session: reads from the last s
   await clock.advance(1000)
   await clock.settle()
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
+})
+
+test('? searches file contents, groups matches per file, opens the split at the line and caps the results', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['b.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    files: { [`${root}/src/a.ts`]: Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n') },
+    grep: 'src/a.ts\x0040\x00  const needle = 1\nsrc/a.ts\x0045\x00needle()\nb.md\x002\x00a needle\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
+  const rows = treeRows(await ui.drawn()).rows
+  expect(rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:40:${root}/src/a.ts`, `grep:45:${root}/src/a.ts`, `grep:0:${root}/b.md`, `grep:2:${root}/b.md`])
+  expect(rows[1]?.left.map(s => s.t).join('')).toBe('    40  const needle = 1')
+  expect(rows[0]?.right.map(s => s.t).join('')).toContain('2')
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await ui.post({ key: 'return' }, { in: 'rows' })
+  await clock.settle()
+  expect(peekOf(await ui.drawn()).preview.startLine).toBe(38)
+  await ui.post({ press: `grep:45:${root}/src/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  expect(peekOf(await ui.drawn()).preview.startLine).toBe(43)
+  expect(treeRows(await ui.drawn()).active).toBe(`grep:45:${root}/src/a.ts`)
+  w.grep = `${Array.from({ length: 250 }, (_, i) => `b.md\x00${i + 1}\x00needle ${i}`).join('\n')}\n`
+  await ui.input({ key: 'q', text: '?needles', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const capped = treeRows(await ui.drawn()).rows
+  expect(capped.at(-1)?.left[0]?.t).toBe('first 200 matches; keep typing to narrow')
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const drawn = JSON.stringify(await desktop.drawn())
+  expect(drawn).toContain(`hit:grep:1:${root}/b.md`)
+  expect(drawn).toContain('first 200 matches; keep typing to narrow')
+  await desktop.post({ press: `grep:3:${root}/b.md` }, { in: `hit:grep:3:${root}/b.md` })
+  await clock.settle()
+  expect(JSON.stringify(await desktop.drawn())).toContain('pv-head')
+  await desktop.press({ key: 'back' })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.some(r => r.id.startsWith('grep:'))).toBe(false)
+  await desktop.unmount()
+  await ui.unmount()
 })
