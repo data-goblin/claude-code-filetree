@@ -1601,7 +1601,7 @@ async function grepTargets($: EngineInterface, t: FileTree): Promise<string[]> {
 
 function grepArgv(t: FileTree, q: string, targets: string[]): string[] {
   const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (toEre(q) ?? '.') : q]
-  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
+  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--no-full-name', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
   return ['grep', '-rnIZH', ...grepSkip(t).map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
 }
 

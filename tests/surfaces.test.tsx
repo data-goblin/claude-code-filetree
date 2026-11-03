@@ -51,6 +51,7 @@ type World = {
   tops?: Record<string, string>
   real?: Record<string, string>
   grep?: string
+  fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
 }
@@ -198,7 +199,11 @@ function world(on: On, w: World, ran: Ran) {
     }
     const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[(argv[1] ?? '').replace(/\/\.$/, '')] ?? '') : ''
     if (out) yield { stream: 'stdout', text: out }
-    if (w.grep !== undefined && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) yield { stream: 'stdout', text: w.grep }
+    if (w.grep !== undefined && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) {
+      const under = argv[0] === 'git' ? (argv[argv.indexOf('-C') + 1] ?? '').slice(w.top.length + 1) : ''
+      const full = w.fullName && under && !argv.includes('--no-full-name')
+      yield { stream: 'stdout', text: full ? w.grep.replace(/^(?=.)/gm, `${under}/`) : w.grep }
+    }
     if (argv[0] === 'sh' && w.poster) yield { stream: 'stdout', text: w.poster(argv) }
     if (argv[0] === 'inotifywait' && w.watch) {
       await clock.sleep(w.watch.after)
@@ -4165,7 +4170,7 @@ test('? searches file contents, groups matches per file, opens the split at the 
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
-  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--no-full-name', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
   const rows = treeRows(await ui.drawn()).rows
   expect(rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:40:${root}/src/a.ts`, `grep:45:${root}/src/a.ts`, `grep:0:${root}/b.md`, `grep:2:${root}/b.md`])
   expect(rows[1]?.left.map(s => s.t).join('')).toBe('    40  const needle = 1')
@@ -4434,6 +4439,30 @@ for (const [surface, groups, want] of [
     await ui.unmount()
   })
 }
+
+test('content search in a tree rooted in a repository subdirectory joins hits to the root even when git grep.fullName is set', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const top = '/home/k/repo'
+  const root = `${top}/src`
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top, status: '## main\0', numstat: '',
+    dirs: { [top]: [['src', 'dir']], [root]: [['a.txt', 'file']] },
+    grep: 'a.txt\x003\x00a needle\n', fullName: true,
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '?needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const argv = ran.find(a => a[0] === 'git' && a.includes('grep')) ?? []
+  expect(argv[argv.indexOf('-C') + 1]).toBe(root)
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.txt`, `grep:3:${root}/a.txt`])
+  await ui.unmount()
+})
 
 test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
