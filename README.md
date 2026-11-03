@@ -29,7 +29,7 @@
 </table>
 
 > [!NOTE]
-> filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
+> filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
 
 ---
 
@@ -129,6 +129,8 @@ Space:        Quick Look on macOS
 <img src="docs/media/shortcuts.gif" alt="? shows the shortcuts in the footer, and k from the first row selects the root" width="800">
 
 Resize the pane with the mouse or the `pane:grow` and `pane:shrink` keybindings.
+
+`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
 
 ## Settings
 

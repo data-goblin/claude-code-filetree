@@ -1,6 +1,7 @@
 import { type EngineInterface, type HookStream, type ProcessSpawnResult, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
 import { herdrError, herdrOpenCommand, herdrPane, herdrSplit, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, type Target, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
+import { bindKeys } from './keybind'
 import { CACHE_KEEP, cacheName, CLEAN, coderFor, EXIT_FAILED, EXIT_LOCKED, EXIT_MISSING, fitCells, PNG_DIRECT_BYTES, PNG_DIRECT_PIXELS, pictureKind, pngSize, POLICY, POSTER } from './peek'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
@@ -2995,7 +2996,7 @@ export const register: Register = (on, options) => {
     guardsLoaded = null
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
-    await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open] (no path = cwd, open = never hide)', immediate: true })
+    await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
     if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
@@ -3047,6 +3048,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
     const given = (e.args ?? '').trim()
+    if (given === 'keys') return { text: await bindKeys($, home) }
     const mine = given ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
     if (mine?.isShown) {
       noDock = true

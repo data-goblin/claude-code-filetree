@@ -91,6 +91,15 @@ function world(on: On, w: World, ran: Ran) {
     throw new Error('no theme file')
   })
   const dirOf = (p: string) => w.dirs[p] ?? w.dirs[p.replace(/^[A-Za-z]:/, '')]
+  on('fs.exists', (_$, e) => {
+    const file = norm(e.path).replace(/^[A-Za-z]:/, '')
+    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined }
+  })
+  on('fs.write', (_$, e) => {
+    ran.push(['write', e.path])
+    w.files = { ...w.files, [norm(e.path).replace(/^[A-Za-z]:/, '')]: e.text }
+    return { value: undefined }
+  })
   on('fs.list', async (_$, e) => {
     const path = norm(e.path)
     const bare = path.replace(/^[A-Za-z]:/, '')
@@ -161,6 +170,19 @@ function world(on: On, w: World, ran: Ran) {
       const delay = w.duDelays?.shift()
       if (delay) await clock.sleep(delay)
       return ok(w.du?.[argv.at(-1) ?? ''] ?? '')
+    }
+    if (argv[0] === 'mv' && w.files) {
+      const [from, to] = argv.slice(-2)
+      const text = w.files[from ?? '']
+      if (text !== undefined && to) {
+        w.files = { ...w.files, [to]: text }
+        delete w.files[from ?? '']
+      }
+      return ok('')
+    }
+    if (argv[0] === 'rm' && w.files) {
+      delete w.files[argv.at(-1) ?? '']
+      return ok('')
     }
     if (argv[0] === 'uname') return ok(w.os === 'darwin' ? 'Darwin\n' : 'Linux\n')
     if (argv[0] === 'sh') return ok('missing\n')
@@ -2040,7 +2062,7 @@ test('the footer names the entry under the cursor, and ? toggles a grouped short
   await ui.post({ key: '?' }, { in: 'rows' })
   await clock.settle()
   const open = shortcutText(await ui.drawn())
-  for (const word of ['Keyboard shortcuts', 'Move', 'Search', 'Files and actions', 'View', 'Pane', 'v / V', 'y / Y', 'n / g / m', 'c / r', 'f / b', '[ / ]', 'a search starting with ? searches file contents', 'ctrl+x tab', 'give the pane the keyboard', 'Esc', 'back to the prompt']) expect(open).toContain(word)
+  for (const word of ['Keyboard shortcuts', 'Move', 'Search', 'Files and actions', 'View', 'Pane', 'v / V', 'y / Y', 'n / g / m', 'c / r', 'f / b', '[ / ]', 'a search starting with ? searches file contents', 'ctrl+x tab', 'give the pane the keyboard', 'alt+l / alt+h', '/filetree keys sets them up', 'Esc', 'back to the prompt']) expect(open).toContain(word)
   for (const key of ['u', 't', 'x', 'w', 'd', 'z', 'i', 's', 'p', 'a']) expect(open).toMatch(new RegExp(`\n   ${key} +\\S`))
   expect(treeRows(await ui.drawn()).active).toBe('')
   expect(await ui.find({ key: 'nav-d' })).toBeUndefined()
@@ -2166,7 +2188,7 @@ test('on the desktop the Shortcuts button opens a keyboard panel in the pane bod
   await clock.settle()
   const panel = JSON.stringify(await ui.find({ key: 'keys-panel' }))
   for (const word of ['Keyboard shortcuts', 'keyboard shortcuts', 'Move', 'Files and actions', 'v / V', 'n / g / m', 'a search starting with ? searches file contents']) expect(panel).toContain(word)
-  for (const word of ['ctrl+x tab', 'page the preview', 'Quick Look']) expect(panel).not.toContain(word)
+  for (const word of ['ctrl+x tab', 'alt+l / alt+h', 'page the preview', 'Quick Look']) expect(panel).not.toContain(word)
   await ui.press({ key: 'keys-close' })
   await clock.settle()
   expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
@@ -4622,4 +4644,110 @@ test('open content search results refresh after Claude writes a file', { timeout
   await clock.settle()
   expect(await ids()).toEqual([`grep:0:${root}/a.ts`, `grep:1:${root}/a.ts`, `grep:0:${root}/b.ts`, `grep:4:${root}/b.ts`])
   await ui.unmount()
+})
+
+const KEYS_FILE = '/home/k/.claude/keybindings.json'
+const keysRun = { command: 'filetree', args: 'keys', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } } satisfies CommandRunInput
+
+function keysWorld(on: On, text: string | undefined, picks: string[]) {
+  const ran: Ran = []
+  const asked: string[][] = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux',
+    env: { HOME: '/home/k' },
+    cwd: root,
+    top: '',
+    status: '',
+    numstat: '',
+    dirs: { [root]: [['a.txt', 'file']], '/home/k/.claude': text === undefined ? [] : [['keybindings.json', 'file']] },
+    files: text === undefined ? {} : { [KEYS_FILE]: text },
+    linkTo: text === undefined ? {} : { [KEYS_FILE]: KEYS_FILE },
+    tool: e => {
+      if (e.tool !== 'AskUserQuestion' || !has(e, 'questions') || !Array.isArray(e.questions)) return undefined
+      const q: unknown = e.questions[0]
+      if (!has(q, 'question') || typeof q.question !== 'string' || !has(q, 'options') || !Array.isArray(q.options)) return undefined
+      asked.push(q.options.map((o: unknown) => (has(o, 'label') ? String(o.label) : '')))
+      return { result: { questions: [], answers: { [q.question]: picks.shift() ?? '' } } }
+    },
+  }
+  const clock = world(on, w, ran)
+  return { w, ran, asked, clock }
+}
+
+const keysIn = (w: World) => JSON.parse(w.files?.[KEYS_FILE] ?? '{}') as { bindings: { context: string; bindings: Record<string, string | null> }[] }
+
+test('/filetree keys with no keybindings.json asks, then writes alt+l in Chat and alt+h in Pane and PaneField', { timeoutMs: 20_000 }, async ($, on) => {
+  const { w, asked, clock } = keysWorld(on, undefined, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = await $.command.run(keysRun)
+  expect(JSON.stringify(r)).toContain(`Wrote ${KEYS_FILE}`)
+  expect(asked).toEqual([['Add them', 'Cancel']])
+  expect(keysIn(w).bindings).toEqual([
+    { context: 'Chat', bindings: { 'meta+l': 'abovePrompt:focus' } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+  ])
+})
+
+test('/filetree keys keeps existing bindings and other keys, keeps a tab indent, and a second run changes nothing', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = `${JSON.stringify({ $schema: 'https://x/schema.json', bindings: [{ context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor' } }, { context: 'Global', bindings: { 'ctrl+t': null } }] }, null, '\t')}\n`
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.command.run(keysRun)
+  const after = w.files?.[KEYS_FILE] ?? ''
+  expect(after).toContain('\n\t"bindings"')
+  const doc = keysIn(w) as { $schema?: string; bindings: { context: string; bindings: Record<string, string | null> }[] }
+  expect(doc.$schema).toBe('https://x/schema.json')
+  expect(doc.bindings).toEqual([
+    { context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor', 'meta+l': 'abovePrompt:focus' } },
+    { context: 'Global', bindings: { 'ctrl+t': null } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+  ])
+  expect(ran.some(a => a[0] === 'mv' && a.at(-1) === KEYS_FILE)).toBe(true)
+  const writes = ran.filter(a => a[0] === 'write').length
+  const again = await $.command.run(keysRun)
+  expect(JSON.stringify(again)).toContain('Already set')
+  expect(asked.length).toBe(1)
+  expect(ran.filter(a => a[0] === 'write').length).toBe(writes)
+  expect(w.files?.[KEYS_FILE]).toBe(after)
+})
+
+test('/filetree keys asks on a clash, Keep mine leaves the file byte-identical, and a Global alt+l counts as a clash', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = '{\n    "bindings": [\n        { "context": "Global", "bindings": { "alt+l": "app:toggleTodos" } },\n        { "context": "Pane", "bindings": { "meta+h": "pane:shrink" } }\n    ]\n}\n'
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Keep mine', 'Replace'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const kept = await $.command.run(keysRun)
+  expect(JSON.stringify(kept)).toContain('Kept your bindings')
+  expect(asked[0]).toEqual(['Replace', 'Keep mine', 'Add the free ones only'])
+  expect(w.files?.[KEYS_FILE]).toBe(text)
+  expect(ran.some(a => a[0] === 'write')).toBe(false)
+  await $.command.run(keysRun)
+  expect(w.files?.[KEYS_FILE]).toContain('\n    "bindings"')
+  expect(keysIn(w).bindings).toEqual([
+    { context: 'Global', bindings: { 'alt+l': 'app:toggleTodos' } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'Chat', bindings: { 'meta+l': 'abovePrompt:focus' } },
+  ])
+  expect(JSON.stringify(await $.command.run(keysRun))).toContain('Already set')
+})
+
+test('/filetree keys refuses invalid JSON and a read-only file without asking or writing', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = '{ "bindings": [ { "context": "Chat", '
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = JSON.stringify(await $.command.run(keysRun))
+  expect(r).toContain('not valid JSON')
+  expect(r).toContain('Nothing changed')
+  w.files = { [KEYS_FILE]: '{"bindings":[]}' }
+  w.exits = { test: [1, ''] }
+  expect(JSON.stringify(await $.command.run(keysRun))).toContain('is read-only')
+  expect(asked.length).toBe(0)
+  expect(ran.some(a => a[0] === 'write')).toBe(false)
 })
