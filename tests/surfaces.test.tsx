@@ -922,10 +922,31 @@ test('sidebar only: no pane in the default layout, and an inline pane closes its
   const r = await $.command.run({ command: 'filetree', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 200 } })
   expect(JSON.stringify(r)).toContain('/tui fullscreen')
   expect(opened.length).toBe(before)
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), placement: 'inline' } })
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), placement: 'inline' }, viewport: { columns: 200, rows: 40, isFullscreen: false } })
   await clock.settle()
   expect(closed.length).toBeGreaterThan(0)
   await ui.unmount()
+})
+
+test('fullscreen: a terminal narrowed for a moment leaves the pane open, and it draws again once wide', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+  const closed: unknown[] = []
+  on('ui.close', (_$, e) => {
+    closed.push(e)
+    return { value: undefined }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const narrow = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), placement: 'inline' }, viewport: { columns: 90, rows: 40, isFullscreen: true } })
+  await clock.settle()
+  await narrow.unmount()
+  expect(closed).toEqual([])
+  const wide = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60), viewport: { columns: 200, rows: 40, isFullscreen: true } })
+  await clock.settle()
+  expect(await texts(wide)).toContain('a.txt')
+  await wide.unmount()
 })
 
 test('in the desktop app /filetree opens the pane without the terminal layout checks', { timeoutMs: 20_000 }, async ($, on) => {

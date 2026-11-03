@@ -2969,8 +2969,10 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
     if (e.surface === 'terminal' && e.props.placement === 'inline') {
-      noDock = true
-      void $.ui.close({ id: PANE }).catch(() => undefined)
+      if (e.viewport?.isFullscreen === false) {
+        noDock = true
+        void $.ui.close({ id: PANE }).catch(() => undefined)
+      }
       const { Box: Empty } = $.ui.resolve(e)
       return <Empty />
     }
