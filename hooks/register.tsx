@@ -574,8 +574,12 @@ function isIgnored(root: string, path: string): boolean {
   return ignoreNames.length > 0 && relative(root, path).split('/').some(name => ignoreNames.includes(name))
 }
 
+function globLiteral(name: string): string {
+  return name.replace(/[*?[\]\\]/g, '\\$&')
+}
+
 function pruneArgs(root: string, ignored: string[] = []): string[] {
-  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames.map(n => n.replace(/[*?[\]\\]/g, '\\$&'))]
+  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames.map(globLiteral)]
   return ['(', ...names.flatMap((name, i) => (i === 0 ? ['-name', name] : ['-o', '-name', name])), ...ignored.flatMap(p => ['-o', '-path', p]), ')', '-prune', '-o']
 }
 
@@ -1604,8 +1608,8 @@ async function grepTargets($: EngineInterface, t: FileTree): Promise<string[]> {
 
 function grepArgv(t: FileTree, q: string, targets: string[]): string[] {
   const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (toEre(q) ?? '.') : q]
-  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--no-full-name', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
-  return ['grep', '-rnIH', '--null', ...grepSkip(t).map(n => `--exclude-dir=${n}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
+  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--no-column', '--no-full-name', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
+  return ['grep', '-rnIH', '--null', ...grepSkip(t).map(n => `--exclude-dir=${n === '.*' ? n : globLiteral(n)}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
 }
 
 function grepRun($: EngineInterface, t: FileTree): void {

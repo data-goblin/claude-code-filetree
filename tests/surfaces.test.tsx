@@ -4197,7 +4197,7 @@ test('the contents toggle searches file contents, groups matches per file, opens
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
-  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--no-full-name', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--no-column', '--no-full-name', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
   const rows = treeRows(await ui.drawn()).rows
   expect(rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:40:${root}/src/a.ts`, `grep:45:${root}/src/a.ts`, `grep:0:${root}/b.md`, `grep:2:${root}/b.md`])
   expect(rows[1]?.left.map(s => s.t).join('')).toBe('    40  const needle = 1')
@@ -4625,7 +4625,7 @@ test('regex content search hands grep the same pattern in POSIX ERE and keeps on
   await ui.unmount()
 })
 
-test('content search outside a repo in a hidden root with hidden files off searches its visible children, so grep never skips the root itself', { timeoutMs: 20_000 }, async ($, on) => {
+test('content search outside a repo in a hidden root with hidden files off searches its visible children, so grep never skips the root itself', { timeoutMs: 20_000, options: { ignore: 'cache[1]' } }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/.config'
   const w: World = {
@@ -4650,6 +4650,8 @@ test('content search outside a repo in a hidden root with hidden files off searc
   expect(argv.slice(argv.indexOf('--') + 1)).toEqual([`${root}/app`, `${root}/b.toml`])
   expect(argv.slice(1, 3)).toEqual(['-rnIH', '--null'])
   expect(argv.some(a => /^-[a-zA-Z]*Z/.test(a))).toBe(false)
+  expect(argv).toContain('--exclude-dir=cache\\[1\\]')
+  expect(argv).not.toContain('--exclude-dir=cache[1]')
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/app/c.toml`, `grep:3:${root}/app/c.toml`])
   await ui.unmount()
 })
