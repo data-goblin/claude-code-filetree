@@ -61,17 +61,29 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Features
 
-- [Sidebar](docs/sidebar.md): where the pane shows and the `/filetree` commands
-- [File tree](docs/tree.md): columns, collapse and expand all, symlinks, glyphs
-- [Search](docs/search.md): names, file contents and zoxide-style jumps
-- [Git](docs/git.md): status, branch row and Claude's git commands
-- [Claude activity](docs/activity.md): shimmer, reply links, auto-collapse and follow work
-- [Context for Claude](docs/context.md): the selected file, marks and `@path`
-- [Preview and treemap](docs/preview-treemap.md): code, Markdown, images, PDFs and folder sizes
-- [Diff](docs/diff.md): a file or every changed file in a folder
-- [Open files](docs/open.md): default app, editor, tmux and herdr
-- [Guards and outside writes](docs/guards.md): keep Claude's edits off files, and see writes outside the repo
-- [Keys](docs/keys.md): every key and `/filetree keys`
+- File tree of the cwd or a pinned folder, with Git, size, line count and date columns ([tree](docs/tree.md))
+- Collapse all, and expand all up to three levels deep ([tree](docs/tree.md))
+- Symlink arrows, a brain on agent instruction files, and Nerd Font, plain or text glyphs ([tree](docs/tree.md))
+- Search by name across unopened folders, by case or regular expression, scoped to one folder ([search](docs/search.md))
+- Search inside files with `git grep` or `grep -r`, and open a match at its line ([search](docs/search.md))
+- Jump to any folder zoxide style with `z` ([search](docs/search.md))
+- Git status per file and folder, line counts on changed files, and the branch with ahead and behind ([git](docs/git.md))
+- Git and GitHub commands Claude runs show as a status line ([git](docs/git.md))
+- Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
+- File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
+- Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
+- The selected file and up to 100 marked entries go to Claude as context ([context](docs/context.md))
+- Split preview of code, Markdown, images, video frames, PDF and Word pages ([preview and treemap](docs/preview-treemap.md))
+- Treemap of a folder by bytes or lines, with Claude's activity lit ([preview and treemap](docs/preview-treemap.md))
+- Diff of a file or every changed file in a folder, in the pane or your diff tool ([diff](docs/diff.md))
+- Open files in their default app, an editor in a tmux or herdr pane, or any command ([open](docs/open.md))
+- Guard files and folders from Claude's edits, and see files written outside the repo ([guards](docs/guards.md))
+- Keyboard-driven: vim-style moves, a shortcuts overlay, and alt+l / alt+h in the terminal ([keys](docs/keys.md))
+- `/filetree` commands and where the pane shows in the terminal and the Desktop app ([sidebar](docs/sidebar.md))
+
+<img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
+
+<img src="docs/media/preview-media.gif" alt="An image, a video, a PDF turned to page 2 and a Word document in the preview" width="800">
 
 ## Settings
 
