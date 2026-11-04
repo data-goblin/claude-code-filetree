@@ -204,7 +204,7 @@ function compile(node: Node): Op[] {
   return prog
 }
 
-function run(prog: Op[], text: string): boolean {
+function run(prog: Op[], text: string, work: { left: number }): boolean {
   const seen = new Int32Array(prog.length).fill(-1)
   let mark = 0
   const add = (into: number[], pc0: number, at: number): boolean => {
@@ -213,6 +213,7 @@ function run(prog: Op[], text: string): boolean {
       const pc = stack.pop() as number
       if (seen[pc] === mark) continue
       seen[pc] = mark
+      if (--work.left < 0) return false
       const op = prog[pc]
       if (!op) continue
       if (op.op === 'match') return true
@@ -229,6 +230,7 @@ function run(prog: Op[], text: string): boolean {
   let list: number[] = []
   if (add(list, 0, 0)) return true
   for (let at = 0; at < text.length; at++) {
+    if (work.left < 0) return false
     const c = text[at] as string
     mark += 1
     const next: number[] = []
@@ -326,10 +328,10 @@ function buildSpans(src: string, ignoreCase: boolean): ((text: string) => [numbe
   }
 }
 
-export function compileRegex(src: string, ignoreCase: boolean): ((text: string) => boolean) | null {
+export function compileRegex(src: string, ignoreCase: boolean, work: { left: number } = { left: Infinity }): ((text: string) => boolean) | null {
   try {
     const prog = compile(parse(src, ignoreCase))
-    return text => run(prog, text)
+    return text => run(prog, text, work)
   } catch (err) {
     if (err instanceof Unsupported) return null
     throw err

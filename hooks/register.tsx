@@ -76,6 +76,8 @@ const MARK_LIMIT = 100
 const GREP_MS = 15_000
 const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
+const GREP_WORK = 50_000_000
+const GREP_LINE = 10_000
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
 const NAME_MIN = 10
@@ -1646,19 +1648,33 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
     stop()
   })
   const files = new Map<string, GrepHit[]>()
-  const fits = t.searchRegex ? compileRegex(q, !t.searchCase) : null
+  const work = { left: GREP_WORK }
+  const fits = t.searchRegex ? compileRegex(q, !t.searchCase, work) : null
+  const exact = t.searchRegex && toEre(q) !== null
   let count = 0
   let capped = false
+  let costly = false
   let rest = ''
   let err = ''
   const take = (line: string) => {
+    if (costly) return
     const cut = line.indexOf('\0')
     const m = cut < 0 ? null : /^(\d+)[\0:](.*)$/s.exec(line.slice(cut + 1))
     if (!m) return
     const raw = posix(line.slice(0, cut))
     const path = isAbsolute(raw) ? raw : join(t.root, raw.replace(/^\.\//, ''))
     if (isIgnored(t.root, path) || (!t.showHidden && relative(t.root, path).split('/').some(x => x.startsWith('.')))) return
-    if (fits && !fits(m[2] ?? '')) return
+    const body = m[2] ?? ''
+    if (fits && !(exact && body.length > GREP_LINE)) {
+      const ok = fits(body.length > GREP_LINE ? body.slice(0, GREP_LINE) : body)
+      if (work.left < 0) {
+        note ||= 'search stopped: the pattern is too costly'
+        costly = true
+        stop()
+        return
+      }
+      if (!ok) return
+    }
     if (count >= GREP_LIMIT) {
       capped = true
       return
@@ -1680,7 +1696,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
       const lines = (rest + chunk.text).split('\n')
       rest = lines.pop() ?? ''
       for (const line of lines) take(line)
-      if (capped) break
+      if (capped || costly) break
     }
     if (rest && !capped) take(rest)
   } catch (error) {

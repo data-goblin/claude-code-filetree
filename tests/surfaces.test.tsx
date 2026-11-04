@@ -4922,3 +4922,32 @@ test('/filetree keys refuses invalid JSON and a read-only file without asking or
   expect(asked.length).toBe(0)
   expect(ran.some(a => a[0] === 'write')).toBe(false)
 })
+
+function grepWorld(root: string, grep: string, extra: Partial<World> = {}): World {
+  return { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['a.ts', 'file'], ['b.md', 'file']] }, grep, ...extra }
+}
+
+async function contentSearch($: Engine, clock: ReturnType<typeof world>, text: string, regex = false) {
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  if (regex) await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text, kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  return ui
+}
+
+test('a costly regex over long lines stops the content search with a notice instead of freezing', { timeoutMs: 60_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const long = 'a'.repeat(100_000)
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 10 }, (_, i) => `a.ts\x00${i + 1}\x00${long}`).join('\n')}\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const started = Date.now()
+  const ui = await contentSearch($, clock, '(?:a{100}){10}\\s', true)
+  expect(Date.now() - started).toBeLessThan(5_000)
+  expect(JSON.stringify(await ui.drawn())).toContain('search stopped: the pattern is too costly')
+  await ui.unmount()
+})
