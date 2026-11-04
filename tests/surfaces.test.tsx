@@ -4662,11 +4662,11 @@ test('content search outside a repo in a hidden root with hidden files off searc
   await ui.unmount()
 })
 
-test('a Markdown preview opened at a line splits only between blocks outside code fences and keeps link definitions in both halves', () => {
+test('a Markdown preview opened at a line splits between blocks, splits a code fence at the line itself by closing and reopening it, and keeps link definitions in both halves', () => {
   const doc = ['# Title', '', 'See [docs][d].', '', '```ts', 'const a = 1', 'const b = 2', '```', '', 'After', '', '[d]: https://x.test'].join('\n')
   const [above, below] = markdownSplit(doc, 6)
-  expect(above.split('\n').slice(0, 4)).toEqual(['# Title', '', 'See [docs][d].', ''])
-  expect(below.startsWith('```ts\nconst a = 1\nconst b = 2\n```')).toBe(true)
+  expect(above.split('\n').slice(0, 7)).toEqual(['# Title', '', 'See [docs][d].', '', '```ts', 'const a = 1', '```'])
+  expect(below.startsWith('```ts\nconst b = 2\n```')).toBe(true)
   expect(above.endsWith('[d]: https://x.test')).toBe(true)
   expect(below.endsWith('[d]: https://x.test')).toBe(true)
   expect(markdownSplit('a\n\nb\n\nc', 4)[1]).toBe('c')
