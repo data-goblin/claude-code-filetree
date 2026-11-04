@@ -34,6 +34,8 @@ jobs:
         run: oxlint --format github
       - name: Grep rules
         run: sh scripts/ci/greps.sh
+      - name: Version rule test
+        run: sh scripts/ci/version-test.sh
 
   actionlint:
     runs-on: ubuntu-latest
