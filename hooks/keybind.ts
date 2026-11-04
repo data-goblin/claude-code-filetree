@@ -132,7 +132,7 @@ export async function bindKeys($: EngineInterface, home: string): Promise<string
   if (text === null) return `Could not read ${path}; nothing changed.`
   const plan = planKeys(text)
   if (plan.kind === 'invalid') return `${path} is ${plan.reason}; fix it and run /filetree keys again. Nothing changed.`
-  if (plan.kind === 'done') return 'Already set: alt+l moves the keys to the file tree, alt+h (or Escape) gives them back.'
+  if (plan.kind === 'done') return 'Already set: in the terminal, alt+l moves the keys to the file tree and alt+h (or Escape) gives them back. The Desktop app does not read keybindings.json; click the tree there.'
   const place = await placeKeys($, path)
   if ('refused' in place) return `Did not write: ${place.refused}. Nothing changed.`
   const adds = plan.add.map(w => `${w.context} ${w.key}`).join(', ')
@@ -151,5 +151,5 @@ export async function bindKeys($: EngineInterface, home: string): Promise<string
   if (now !== text) return `${path} changed while you were asked; run /filetree keys again. Nothing changed.`
   const refused = await writeKeys($, place, plan.merge(replace)).catch((err: unknown) => (err instanceof Error ? err.message : String(err)))
   if (refused) return `Did not write: ${refused}.`
-  return `Wrote ${path}: alt+l moves the keys to the file tree, alt+h (or Escape) gives them back. Claude Code picks the change up within about 3 seconds.`
+  return `Wrote ${path}: alt+l moves the keys to the file tree, alt+h (or Escape) gives them back in the terminal; the Desktop app does not read keybindings.json. Claude Code picks the change up within about 3 seconds.`
 }

@@ -131,7 +131,7 @@ Space:        Quick Look on macOS
 
 Resize the pane with the mouse or the `pane:grow` and `pane:shrink` keybindings.
 
-`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
+`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. They work in the terminal only: the Desktop app does not read `keybindings.json`. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
 
 ## Settings
 
