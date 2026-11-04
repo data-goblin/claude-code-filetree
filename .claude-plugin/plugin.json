@@ -150,7 +150,7 @@
     "shortcuts": {
       "type": "string",
       "title": "Shortcuts",
-      "description": "? in the tree shows every key, grouped, in place of the tree; ? again or any key that acts closes it, and the key still acts. auto: the footer shows a ?: shortcuts hint. always: the list opens with the pane. off: no hint. ? works in every mode with the tree focused; typed in the search field it is just a character.",
+      "description": "? in the tree shows every key, grouped, in place of the tree; j, k, the arrows, f, b and the page keys scroll it; ? again or any other key that acts closes it, and the key still acts. auto: the footer shows a ?: shortcuts hint. always: the list opens with the pane. off: no hint. ? works in every mode with the tree focused; typed in the search field it is just a character.",
       "default": "auto",
       "options": [
         "auto",
