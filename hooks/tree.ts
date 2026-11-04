@@ -375,11 +375,31 @@ export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => n
   return rows
 }
 
-export function stamp(ms: number): string {
+export type DateFormat = 'year-month-day' | 'day-month' | 'month-day'
+export type Clock = '24h' | '12h'
+
+export function dateFormat(value: unknown): DateFormat {
+  return value === 'day-month' || value === 'month-day' ? value : 'year-month-day'
+}
+
+export function clockSetting(value: unknown): Clock {
+  return value === '12h' ? '12h' : '24h'
+}
+
+export function stamp(ms: number, format: DateFormat = 'year-month-day', clock: Clock = '24h'): string {
   if (!ms) return ''
   const d = new Date(ms)
   const p = (v: number) => String(v).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  const day = format === 'day-month'
+    ? `${p(d.getDate())}-${p(d.getMonth() + 1)}`
+    : format === 'month-day'
+      ? `${p(d.getMonth() + 1)}-${p(d.getDate())}`
+      : `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  const hours = d.getHours()
+  const time = clock === '12h'
+    ? `${String(hours % 12 || 12).padStart(2, ' ')}:${p(d.getMinutes())} ${hours < 12 ? 'AM' : 'PM'}`
+    : `${p(hours)}:${p(d.getMinutes())}`
+  return `${day} ${time}`
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

@@ -48,6 +48,10 @@ import {
   replaceChildren,
   rollUp,
   stamp,
+  dateFormat,
+  clockSetting,
+  type DateFormat,
+  type Clock,
   toNodes,
   underAny,
   visibleRows,
@@ -203,6 +207,8 @@ let listSeq = 0
 let lastRoot = ''
 let columnDefault: Column = 'date'
 let showAge = false
+let dateSetting: DateFormat = 'year-month-day'
+let clock: Clock = '24h'
 let showHints = true
 let showRemote = false
 const ROOT_PRESS = '\u0000root'
@@ -3050,6 +3056,8 @@ export const register: Register = (on, options) => {
   followWork = options?.work !== 'off'
   columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
+  dateSetting = dateFormat(options?.dates)
+  clock = clockSetting(options?.clock)
   showHints = options?.hints !== 'off'
   showRemote = options?.remote === 'on'
   focusOnOpen = options?.focus !== 'off'
@@ -3840,7 +3848,7 @@ export const register: Register = (on, options) => {
             ? humanSize(n.size, sizePad)
             : ''
         : n.kind === 'file' || n.kind === 'dir'
-          ? (when => (when ? (showAge ? age(when, now) : stamp(when)) : ''))(n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime)
+          ? (when => (when ? (showAge ? age(when, now) : stamp(when, dateSetting, clock)) : ''))(n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime)
           : ''
       const counts = n.kind === 'dir' ? t.counts[n.id] : undefined
       const cells: Partial<Record<Col, Seg>> = {}
