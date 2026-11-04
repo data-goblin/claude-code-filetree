@@ -4127,8 +4127,8 @@ export const register: Register = (on, options) => {
             {desk ? null : rootCounts.map((c, i) => (
               <Text key={`root-count-${i}`} color={c.c}>{c.t}</Text>
             ))}
-            {b.upstream ? <Text color={tones.teal?.solid}>{` ↑${b.ahead}`}</Text> : null}
-            {b.upstream ? <Text color={tones.blue?.solid}>{` ↓${b.behind}`}</Text> : null}
+            {b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}
+            {b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}
           </Box>
           {tailCols(branchCells, 'branch', ['metric'])}
           <Box key="branch-tail" width={desk ? 2 : 1} flexShrink={0} />
