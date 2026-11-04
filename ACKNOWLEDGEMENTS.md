@@ -45,3 +45,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Classic hooks skipped on Team and Enterprise accounts: [@QuentinSuckling](https://github.com/QuentinSuckling) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
 - Plain refresh glyph drew as a box in macOS Terminal: [@hamin-apple](https://github.com/hamin-apple) ([#37](https://github.com/data-goblin/claude-code-filetree/issues/37))
 - Desktop tree rows flooded the page with messages: [@DavidHo7](https://github.com/DavidHo7) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
+- Desktop pane mixed light and dark rows in light mode: [@InTheory7](https://github.com/InTheory7) ([#53](https://github.com/data-goblin/claude-code-filetree/issues/53))
