@@ -3302,7 +3302,7 @@ export const register: Register = (on, options) => {
     }
     if (data.press === ROOT_PRESS) {
       await selectRoot($)
-      await focusPane($, (await get($)).root, 'hk-tree')
+      focusPane($, (await get($)).root, 'hk-tree')
       return {}
     }
     if (typeof data.press === 'string') {
