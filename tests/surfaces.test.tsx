@@ -5063,3 +5063,13 @@ test('/filetree keys writes nothing when keybindings.json changes while it asks'
   expect(w.files?.[KEYS_FILE]).toBe(edited)
 })
 
+test('content search results tell Claude about the first highlighted hit as soon as they arrive', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'b.md\x002\x00needle\n'), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, 'needle')
+  const sent = JSON.stringify(await $.prompt.submit({ text: 'edit this', wait: false, origin: { kind: 'composer' } }))
+  expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
+  await ui.unmount()
+})

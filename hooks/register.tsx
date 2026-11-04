@@ -1714,6 +1714,8 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
       grep.rows = [...files.entries()].flatMap(([path, hits]) => [{ path, line: 0, text: String(hits.length) }, ...hits])
       grep.note = note || (count ? '' : err)
       void $.ui.invalidate('ui.render')
+      const row = grep.rows[grep.sel] ?? grep.rows[0]
+      if (row) void patch($, () => ({ selected: row.path }))
     }
   }
 }
