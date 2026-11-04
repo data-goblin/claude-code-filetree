@@ -1,22 +1,13 @@
 #!/bin/sh
 set -e
-git fetch -q --tags origin
-released=$(git tag -l 'v*' --sort=-v:refname | head -n1 | sed 's/^v//')
-[ -n "$released" ] || released=0.0.0
-above() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]; }
-lines=$(for b in $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/release/*'); do printf '%s=%s ' "${b#origin/}" "$(git show "$b:.claude-plugin/plugin.json" | jq -r .version)"; done)
+CLAUDE=claude
+[ -x "$HOME/.local/bin/claude" ] && CLAUDE="$HOME/.local/bin/claude"
+git fetch -q --tags origin 2>/dev/null || echo "pre-push: could not fetch origin, checking against local tags and refs"
 while read -r local_ref local_sha remote_ref remote_sha; do
-  case "$remote_ref" in refs/heads/main|refs/tags/*) continue ;; esac
+  case "$remote_ref" in refs/tags/*) continue ;; esac
   [ "$local_sha" = 0000000000000000000000000000000000000000 ] && continue
-  head=$(git show "$local_sha:.claude-plugin/plugin.json" | jq -r .version)
-  case "$remote_ref" in
-    refs/heads/release/*) above "$head" "$released" || { echo "pre-push: ${remote_ref#refs/heads/} is at $head; a release branch must be above the released $released" >&2; exit 1; } ;;
-    *)
-      if [ -n "$lines" ]; then
-        case " $lines" in *"=$head "*) ;; *) echo "pre-push: ${remote_ref#refs/heads/} is at $head; use the version of the release branch it targets: $lines" >&2; exit 1 ;; esac
-      else
-        above "$head" "$released" || { echo "pre-push: ${remote_ref#refs/heads/} keeps version $head; bump above the released $released" >&2; exit 1; }
-      fi ;;
-  esac
-  git show "$local_sha:README.md" | grep -q "version-$head-blue" || { echo "pre-push: set the README version badge to $head" >&2; exit 1; }
+  sh scripts/ci/version.sh push "$remote_ref" "$local_sha"
 done
+sh scripts/ci/version-test.sh
+out=$("$CLAUDE" plugin test . 2>&1) || { printf '%s\n' "$out"; exit 1; }
+printf '%s\n' "$out" | tail -2

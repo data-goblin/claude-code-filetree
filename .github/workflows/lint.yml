@@ -3,6 +3,7 @@ name: lint
 on:
   workflow_dispatch:
   push:
+    branches: [main, 'release/**']
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
   pull_request:
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
@@ -12,7 +13,7 @@ permissions:
 
 concurrency:
   group: lint-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   code:
@@ -32,18 +33,10 @@ jobs:
         run: bun add --global --exact oxlint@1.88.0 oxlint-tsgolint@7.0.2004
       - name: Oxlint
         run: oxlint --format github
-      - name: No code comments
-        run: |
-          if grep -rnE '^\s*(//|/\*)|\s//\s|\{/\*' hooks tests scripts types --exclude-dir=engine; then
-            echo "::error::remove the code comments listed above"
-            exit 1
-          fi
-      - name: Absolute paths go through isAbsolute
-        run: |
-          if grep -rnE "startsWith\('/'\)|\[0\] === '/'" hooks | grep -vE "^hooks/tree\.ts:|isAbsolute\(path\) && !path\.startsWith"; then
-            echo "::error::use isAbsolute() from hooks/tree.ts so Windows drive paths count as absolute"
-            exit 1
-          fi
+      - name: Grep rules
+        run: sh scripts/ci/greps.sh
+      - name: Version rule test
+        run: sh scripts/ci/version-test.sh
 
   actionlint:
     runs-on: ubuntu-latest

@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
+    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', 'scripts/check-ere.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
   pull_request:
-    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
+    paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', 'scripts/check-ere.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
 
 permissions:
   contents: read
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -43,6 +47,9 @@ jobs:
       - name: Open, tmux and herdr scripts
         if: runner.os == 'Linux'
         run: bun scripts/check-open.ts
+      - name: Regex translation agrees with grep -E and git grep -E
+        if: runner.os == 'Linux'
+        run: bun scripts/check-ere.ts
       - name: Platform commands the mod runs
         run: |
           set -u

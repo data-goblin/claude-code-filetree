@@ -192,7 +192,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 ## Contributing
 
-Turn on the pre-commit hook once per clone; it runs `claude plugin validate` and the plugin tests before each commit that touches the plugin:
+Turn on the git hooks once per clone. The pre-commit hook runs the fast checks in seconds: grep rules, types, oxlint, and `claude plugin validate` when the manifests change. The pre-push hook checks the version against the release branch and runs the plugin tests:
 
 ```bash
 git config core.hooksPath .githooks
