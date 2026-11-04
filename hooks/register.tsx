@@ -17,7 +17,7 @@ import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
-import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
+import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
 import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
@@ -3464,7 +3464,7 @@ export const register: Register = (on, options) => {
     const theme: Theme = { ...DEFAULT_THEME, ...palette.theme }
     const tones = light ? LIGHT_TONES : TONES
     const mutedText = theme.muted ? { color: theme.muted } : { dimColor: true }
-    const gitColors = { ...(desk ? DESK_GIT : GIT_COLOR), ...palette.git }
+    const gitColors = { ...(desk ? DESK_GIT_TEXT : GIT_COLOR), ...palette.git }
     const addColor = palette.add ?? ADD_COLOR
     const delColor = palette.del ?? DEL_COLOR
     const warnColor = gitColors.M ?? 'ansi256(3)'
@@ -3554,7 +3554,7 @@ export const register: Register = (on, options) => {
       const over = buttons.find(b => b.id === hovered)
       const text = over?.hint
       if (!text) return null
-      const tint = over && !over.dim ? accentInk : ink(theme.fg, DESK.fg)
+      const tint = over && !over.dim ? accentInk : theme.fg ? ink(theme.fg, 'text') : 'text'
       const room = e.props.bodyColumns - title - buttons.reduce((w, b) => w + (desk ? DESK_ICON_COLS : b.label.length + 1), 0) - 2
       return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
     }
@@ -3780,7 +3780,7 @@ export const register: Register = (on, options) => {
     const toolGap = desk ? 0 : toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
     const tipButton = buttons.find(b => b.id === hovered)
     const tipText = tipButton?.hint ?? ''
-    const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: ink(theme.fg, DESK.fg) } : theme.fg ? { color: theme.fg } : {}
+    const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: theme.fg ? ink(theme.fg, 'text') : 'text' } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
     const isLong = (n: FileNode): boolean => longFile > 0 && t.column === 'loc' && n.kind === 'file' && (locCache.get(n.id) ?? 0) > longFile

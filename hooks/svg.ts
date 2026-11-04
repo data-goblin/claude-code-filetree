@@ -150,18 +150,17 @@ const GIT_ICONS: Record<string, IconName> = {
 export const activityIcon = (plain: string): IconName => GIT_ICONS[plain] ?? 'git-commit'
 
 export const DESK = {
-  accent: '#4b8ef0',
+  accent: '#3b82f6',
   muted: '#85858c',
-  guide: '#303034',
-  fg: '#d6d6d6',
-  urgent: '#ef5350',
-  selection: '#393c44',
-  hover: '#232427',
-  field: '#252525',
-  edge: '#333336',
-  toolOn: '#2c3442',
-  addBg: '#1d3324',
-  delBg: '#3b2226',
+  guide: '#808080',
+  urgent: '#e5484d',
+  selection: '#80808033',
+  hover: '#8080801f',
+  field: '#8080801a',
+  edge: '#80808040',
+  toolOn: '#3b82f633',
+  addBg: '#3fb9502e',
+  delBg: '#ef53502e',
 } as const
 
 const ANSI: Record<number, string> = {
@@ -181,6 +180,15 @@ export const DESK_GIT: Record<string, string> = {
   C: '#4b8ef0',
   M: '#d99a1e',
   T: '#d99a1e',
+}
+
+export const DESK_GIT_TEXT: Record<string, string> = {
+  A: 'success',
+  '?': 'success',
+  R: 'suggestion',
+  C: 'suggestion',
+  M: 'warning',
+  T: 'warning',
 }
 
 export function lighten(color: string, by = 0.3): string {
@@ -223,7 +231,7 @@ export const STEP_PX = 16
 
 export function rowSvg(depth: number, chevron: 'open' | 'closed' | null, icon: IconName | null, color: string, chevronColor: string = DESK.muted, gap: number = GAP_PX): string {
   const w = depth * STEP_PX + STEP_PX * 2 + gap
-  const guides = Array.from({ length: depth }, (_, i) => `<rect x="${i * STEP_PX + 7.5}" y="0" width="1" height="${ROW_PX}" fill="${DESK.guide}" stroke="none"/>`).join('')
+  const guides = Array.from({ length: depth }, (_, i) => `<rect x="${i * STEP_PX + 7.5}" y="0" width="1" height="${ROW_PX}" fill="${DESK.guide}" fill-opacity="0.35" stroke="none"/>`).join('')
   const x = depth * STEP_PX
   const chev = chevron ? glyph(chevron === 'open' ? 'chevron-down' : 'chevron-right', chevronColor, x + (STEP_PX - CHEVRON_PX) / 2, (ROW_PX - CHEVRON_PX) / 2, CHEVRON_PX, 3.2) : ''
   const pic = icon ? glyph(icon, color, x + STEP_PX, (ROW_PX - 16) / 2, 16) : ''

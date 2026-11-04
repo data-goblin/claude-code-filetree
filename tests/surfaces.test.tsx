@@ -3309,8 +3309,8 @@ test('desktop: a diff draws native rows with old and new line numbers, +/- marke
   const shown = JSON.stringify(await ui.drawn())
   expect(shown).not.toContain('"format":"diff"')
   expect(shown).toContain('"children":["@@ -1,3 +1,3 @@"]')
-  expect(shown).toContain('"backgroundColor":"#1d3324"')
-  expect(shown).toContain('"backgroundColor":"#3b2226"')
+  expect(shown).toContain('"backgroundColor":"#3fb9502e"')
+  expect(shown).toContain('"backgroundColor":"#ef53502e"')
   expect(shown).toContain('"children":["const b = 2"]')
   expect(shown).toContain('"children":["const b = 3"]')
   expect(shown).toMatch(/"children":\["2"\][\s\S]*"children":\["-"\][\s\S]*"children":\["2"\][\s\S]*"children":\["\+"\]/)
@@ -4363,7 +4363,7 @@ test('symlinks show an arrow, and the footer says where they lead: inside, outsi
   await clock.settle()
   const drawn = JSON.stringify(await desktop.drawn())
   expect(drawn.match(/"children":\[" → "\]/g)?.length).toBe(4)
-  expect(drawn).toContain('{"color":"#d99a1e"},"children":[" → "]')
+  expect(drawn).toContain('{"color":"warning"},"children":[" → "]')
   expect(drawn).toContain('loop → loop (circular link)')
   await desktop.unmount()
   await ui.unmount()
@@ -5280,5 +5280,39 @@ test('desktop (#47): a key that reaches every Client in the pane moves the curso
   for (const k of left) await ui.key({ key: 'j', in: k })
   await clock.settle()
   expect(await cursor()).not.toEqual(before)
+  await ui.unmount()
+})
+
+test('desktop (#53): every background is translucent or a theme key and no text color is a fixed light or dark hex, so the pane reads in light and dark mode', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0 M a.ts\0?? b.md\0', numstat: '1\t1\ta.ts\0', dirs: { [root]: [['src', 'dir'], ['a.ts', 'file'], ['b.md', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const bad: string[] = []
+  const lum = (hex: string) => {
+    const v = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * (v[0] ?? 0) + 0.7152 * (v[1] ?? 0) + 0.0722 * (v[2] ?? 0)
+  }
+  const check = (n: unknown): void => {
+    if (Array.isArray(n)) return n.forEach(check)
+    if (!n || typeof n !== 'object') return
+    const o = n as { type?: unknown; props?: { backgroundColor?: unknown; color?: unknown; hover?: { backgroundColor?: unknown } } }
+    for (const bg of [o.props?.backgroundColor, o.props?.hover?.backgroundColor]) if (typeof bg === 'string' && /^#[0-9a-f]{6}$/i.test(bg)) bad.push(`background ${bg}`)
+    const c = o.props?.color
+    if (o.type === 'Text' && typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) && (lum(c) > 0.45 || lum(c) < 0.04)) bad.push(`text ${c}`)
+    Object.values(n).forEach(check)
+  }
+  check(await ui.drawn())
+  await ui.input({ key: 'q', text: 'a', kind: 'change' })
+  await clock.advance(200)
+  await clock.settle()
+  check(await ui.drawn())
+  await ui.input({ key: 'q', text: '', kind: 'change' })
+  await ui.press({ key: 'nav-help' })
+  await clock.settle()
+  check(await ui.drawn())
+  expect([...new Set(bad)]).toEqual([])
   await ui.unmount()
 })
