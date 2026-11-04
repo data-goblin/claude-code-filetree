@@ -1763,10 +1763,15 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
 }
 
 async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
-  if (!['x', 'd', 'v', 't', 'y', 'Y', 'u'].includes(key) || (key === 'v' && shift)) return false
+  if (!['x', 'd', 'v', 't', 'y', 'Y', 'u', 'i'].includes(key) || (key === 'v' && shift)) return false
   const path = grep.rows[grep.sel]?.path
   if (!path) return true
-  if (key === 'x') await toggleGuard($, path)
+  if (key === 'i') {
+    const t = await get($)
+    const dir = dirname(path)
+    await scopeSearch($, dir === t.root ? '' : dir)
+    $.clock.after(50, () => focusPane($, t.root, 'q'))
+  } else if (key === 'x') await toggleGuard($, path)
   else if (key === 'd') await diffFile($, path)
   else if (key === 'v') toggleMark($, path)
   else if (key === 't') await openTerminal($, dirname(path))

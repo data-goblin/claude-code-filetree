@@ -4745,6 +4745,39 @@ test('match highlighting charges every NFA step: nested optional repeats over 20
   expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
 })
 
+test('i on a content search hit scopes the search to the folder of that hit, not the tree cursor', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['lib', 'dir'], ['src', 'dir']], [`${root}/lib`]: [['b.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    grep: 'src/a.ts\x001\x00needle\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'up' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).active).toBe(`${root}/lib`)
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:1:${root}/src/a.ts`])
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  const before = ran.length
+  await ui.post({ key: 'i' }, { in: 'rows' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.slice(before).filter(a => a[0] === 'git' && a.includes('grep')).at(-1)?.slice(-2)).toEqual(['--', 'src'])
+  await ui.unmount()
+})
+
 test('file references with a line include extensionless names like Dockerfile, never bare numbers', () => {
   expect(fileRefs('Edit Dockerfile:12, Makefile#L3-L5 and src/a.ts:7; port 8080:1 is not a file').map(r => `${r.path}:${r.line}-${r.end}`)).toEqual(['Dockerfile:12-12', 'Makefile:3-5', 'src/a.ts:7-7'])
 })
