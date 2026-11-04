@@ -4278,7 +4278,7 @@ test('symlinks show an arrow, and the footer says where they lead: inside, outsi
   await clock.settle()
   const drawn = JSON.stringify(await desktop.drawn())
   expect(drawn.match(/"children":\[" → "\]/g)?.length).toBe(4)
-  expect(drawn).toContain('{"color":"warning"},"children":[" → "]')
+  expect(drawn).toContain('{"color":"#a67c00"},"children":[" → "]')
   expect(drawn).toContain('loop → loop (circular link)')
   await desktop.unmount()
   await ui.unmount()

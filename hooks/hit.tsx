@@ -1,7 +1,7 @@
 import type { ClientModule } from 'claude-code'
 
 export type HitProps = { id: string }
-type Local = { ref: { id: string; unpoint?: () => void; unkey?: () => void } }
+type Local = { ref: { id: string; unpoint?: () => void; unkey?: () => void; untick?: () => void } }
 
 let active: string | null = null
 let last = { key: '', at: 0 }
@@ -14,7 +14,6 @@ const Hit: ClientModule<HitProps, Local> = (props, surface) => {
     const fresh = { ref: { id: props.id } }
     state = fresh
     surface.setState(state)
-    surface.every(500, () => alive.set(fresh.ref.id, Date.now()))
   }
   const ref = state.ref
   ref.id = props.id
@@ -22,6 +21,7 @@ const Hit: ClientModule<HitProps, Local> = (props, surface) => {
     if (e.type === 'down') {
       active = ref.id
       alive.set(ref.id, Date.now())
+      ref.untick ??= surface.every(500, () => alive.set(ref.id, Date.now()))
     }
     if (e.type === 'down' && e.button === 'right') surface.post({ copy: ref.id, shift: Boolean(e.shift) })
     else if (e.type === 'up' && (e.button ?? 'left') === 'left') surface.post({ press: ref.id, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })

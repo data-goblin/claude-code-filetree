@@ -17,7 +17,7 @@ import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
-import { activityIcon, barSvg, edgeSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
+import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
 import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
@@ -3588,7 +3588,7 @@ export const register: Register = (on, options) => {
         previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
         const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
         return (
-          <Box flexDirection="column" position="relative" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+          <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
             <Box key="pv-head" flexDirection="row" alignItems="center">
               <Box key="pv-back" flexDirection="row" alignItems="center" flexShrink={0}>
                 <Svg key="pv-back-icon" source={rowSvg(0, null, 'chevron-left', mutedInk, DESK.muted, 0)} alt="back to files" width={STEP_PX * 2} height={ROW_PX} />
@@ -4102,9 +4102,9 @@ export const register: Register = (on, options) => {
         <Box flexDirection="row" height={desk ? undefined : 1} overflow="hidden" alignItems={desk ? 'center' : undefined}>
           <Box flexDirection="row" flexShrink={0} alignItems={desk ? 'center' : undefined}>
             {desk && Svg
-              ? <Svg key="branch-icon" source={rowSvg(0, null, 'git-branch', isFlash ? (tones[tone]?.solid ?? accentInk) : accentInk)} alt="git branch" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+              ? <Svg key="branch-icon" source={rowSvg(0, null, 'git-branch', isFlash ? (tones[tone]?.solid ?? accentInk) : e.props.isFocused ? accentInk : mutedInk)} alt="git branch" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
               : <Text color={isFlash ? (tones[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>}
-            <Text bold color={isFlash ? (tones[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
+            <Text {...(desk && !e.props.isFocused && !isFlash ? mutedText : { bold: true, color: isFlash ? (tones[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined })}>
               {label}
             </Text>
           </Box>
@@ -4426,17 +4426,12 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
-        {desk && Svg && e.props.isFocused ? (
-          <Box key="focus-edge" position="absolute" top={0} left={0} bottom={0} width={1} overflow="hidden">
-            <Svg key="focus-edge-svg" source={edgeSvg(accentInk)} alt="tree has the keyboard" width={1} height={4000} />
-          </Box>
-        ) : null}
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
-              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', accentInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
+              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
               <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
-                <Text bold>{header}</Text>
+                {e.props.isFocused ? <Text bold color={accentInk}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
               </Button>
             </Box>
             <Box flexGrow={1} />

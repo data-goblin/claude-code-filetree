@@ -189,8 +189,8 @@ export const DESK_GIT_TEXT: Record<string, string> = {
   '?': 'success',
   R: 'suggestion',
   C: 'suggestion',
-  M: 'warning',
-  T: 'warning',
+  M: '#a67c00',
+  T: '#a67c00',
 }
 
 export function lighten(color: string, by = 0.3): string {
@@ -238,10 +238,6 @@ export function rowSvg(depth: number, chevron: 'open' | 'closed' | null, icon: I
   const chev = chevron ? glyph(chevron === 'open' ? 'chevron-down' : 'chevron-right', chevronColor, x + (STEP_PX - CHEVRON_PX) / 2, (ROW_PX - CHEVRON_PX) / 2, CHEVRON_PX, 3.2) : ''
   const pic = icon ? glyph(icon, color, x + STEP_PX, (ROW_PX - 16) / 2, 16) : ''
   return frame(w, ROW_PX, guides + chev + pic)
-}
-
-export function edgeSvg(color: string): string {
-  return `<svg xmlns="${NS}" width="1" height="4000"><rect width="1" height="4000" fill="${color}"/></svg>`
 }
 
 export function lineSvg(color: string, h: number): string {
