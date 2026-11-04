@@ -4567,6 +4567,10 @@ test('regex content search hands grep the same pattern in POSIX ERE and keeps on
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
   expect(toEre('a.*?b\\s[\\w-]')).toBe('a.*b[[:space:]][[:alnum:]_-]')
   expect(toEre('[^\\D]')).toBeNull()
+  expect(toEre('[a\\-z]')).toBeNull()
+  expect(toEre('[\\]]')).toBeNull()
+  expect(toEre('[\\\\x]')).toBeNull()
+  expect(toEre('[\\.]')).toBe('[.]')
   const ran: Ran = []
   const root = '/home/k/proj'
   const w: World = {

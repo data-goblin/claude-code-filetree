@@ -328,7 +328,8 @@ export function toEre(src: string): string | null {
       if (inClass) {
         if (e in ERE_IN) out += ERE_IN[e]
         else if (e in ERE_OUT) return null
-        else out += LITERAL_ESCAPES[e] ?? (e === ']' || e === '\\' || e === '-' || e === '^' ? `\\${e}` : e)
+        else if (']\\-^['.includes(e)) return null
+        else out += LITERAL_ESCAPES[e] ?? e
       } else out += ERE_OUT[e] ?? LITERAL_ESCAPES[e] ?? `\\${e}`
       continue
     }
