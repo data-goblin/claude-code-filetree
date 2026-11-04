@@ -2,7 +2,7 @@
 set -e
 CLAUDE=claude
 [ -x "$HOME/.local/bin/claude" ] && CLAUDE="$HOME/.local/bin/claude"
-git fetch -q --tags origin
+git fetch -q --tags origin 2>/dev/null || echo "pre-push: could not fetch origin, checking against local tags and refs"
 while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in refs/tags/*) continue ;; esac
   [ "$local_sha" = 0000000000000000000000000000000000000000 ] && continue
