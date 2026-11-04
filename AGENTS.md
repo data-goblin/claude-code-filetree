@@ -39,7 +39,7 @@
 ## Branches
 
 - Two release branches exist at all times, both cut from `main` after each release:
-  - `release/<next patch>`, now `release/0.7.1`: fixes and small changes
+  - `release/<next patch>`, now `release/0.7.2`: fixes and small changes
   - `release/<next minor>.0`, now `release/0.8.0`: new features, new settings and behaviour changes
 - A release branch is named after the version it carries; the version check refuses a `release/*` branch whose `.claude-plugin/plugin.json` says otherwise
 - Target every PR at one of them, never at `main`: a fix or small change goes to the patch branch, anything else to the feature branch; when unsure, the feature branch
