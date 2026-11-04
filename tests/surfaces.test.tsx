@@ -4993,3 +4993,16 @@ test('y, Y and u copy the marks while a content search has no matches', { timeou
   expect(copied).toEqual(['a.ts', `${root}/a.ts`, 'a.ts'])
   await search.unmount()
 })
+
+test('moving through content results tells Claude about the highlighted file, not the old tree selection', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00needle\nb.md\x002\x00needle\n'), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, 'needle')
+  for (let i = 0; i < 3; i++) await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  const sent = JSON.stringify(await $.prompt.submit({ text: 'edit this', wait: false, origin: { kind: 'composer' } }))
+  expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
+  await ui.unmount()
+})
