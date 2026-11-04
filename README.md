@@ -15,18 +15,15 @@
   <img src="media/filetree-shimmer.gif" alt="filetree shimmering the file Claude is editing" width="900">
 </p>
 
-<table>
-  <tr>
-    <th>Preview</th>
-    <th>Treemap</th>
-    <th>Diff</th>
-  </tr>
-  <tr>
-    <td><img src="docs/media/preview.gif" alt="Previewing Markdown files under and above the tree" width="300"></td>
-    <td><img src="docs/media/treemap.gif" alt="Selecting and drilling into treemap boxes, and a box lit while Claude reads the file" width="300"></td>
-    <td><img src="docs/media/diff.gif" alt="d shows the diff of a file and of a folder" width="300"></td>
-  </tr>
-</table>
+**Key features:**
+
+* Show/nav all files in a directory (with support for Git status, nvim bindings)
+* Animations show where Claude is reading/working
+* Keyboard shortcuts:
+   * Nav directories with `z` (zoxide-like)
+   * Search with `s` or `i` (in highlighted folder) or `q` (in file contents)
+   * Diff files with `d` or all changed files in a folder
+* Terminal-first features: File previews, directory size treemap, and more
 
 > [!NOTE]
 > filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
