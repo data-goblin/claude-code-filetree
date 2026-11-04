@@ -4422,8 +4422,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const drawn = JSON.stringify(await reply.drawn())
     expect(drawn).toContain(text)
     expect(drawn).toContain(`in the file tree: [src/a.ts:40-42](file://${root}/src/a.ts#L40-L42)  [src/a.ts:50](file://${root}/src/a.ts#L50)"`)
+    const before = opens.length
     await reply.press({ key: 'filetree-refs', link: { href: `file://${root}/src/a.ts#L40-L42` } })
     await clock.settle()
+    expect(opens.slice(before).some(o => has(o, 'id') && o.id === 'filetree')).toBe(true)
     if (surface === 'desktop') {
       expect(JSON.stringify(await pane.drawn())).toMatch(/"source":"line 38\\nline 39[^"]*","path":"\/home\/k\/proj\/src\/a\.ts","startLine":38/)
     } else {

@@ -1738,7 +1738,7 @@ async function openRef($: EngineInterface, href: string, surface: RenderSurface)
   if (!ref) return
   const t = await get($)
   if (!inside(t.root, ref.path)) return
-  if (surface !== 'desktop') void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
+  void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
   await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
 }
 
