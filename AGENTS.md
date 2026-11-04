@@ -33,19 +33,24 @@
 ## Tests
 
 - Run tests with `claude plugin test .`, never `bun test`: `claude-code/testing` only exists inside that harness, so bun fails to resolve it
-- The first PR into a release branch raises the version in `.claude-plugin/plugin.json` and the README badge above the latest `v*` tag; every later PR keeps the release branch's version, so one release never carries two bumps; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
+- A PR keeps the version of the release branch it targets, set when that branch was cut, so one release never carries two bumps; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
 
 ## Branches
 
-- Keep exactly one release branch, `release/0.<minor>.x` (for example `release/0.7.x`), and target every PR at it, never at `main`
-- If no release branch exists, create it from `main` before opening the first PR
-- `main` only takes the release branch's merge, and an emergency hotfix
-- Once that merge is on `main` and its `v<version>` tag is published, delete the release branch, local and remote, and create the next one from `main`
+- Two release branches exist at all times, both cut from `main` after each release:
+  - `release/<major>.<minor>.x`, now `release/0.7.x` at 0.7.1: fixes and small changes, released as the next patch
+  - `release/<major>.<minor+1>.x`, now `release/0.8.x` at 0.8.0: new features, new settings and behaviour changes, released as the next minor
+- Target every PR at one of them, never at `main`: a fix or small change goes to the patch branch, anything else to the feature branch; when unsure, the feature branch
+- The commit that cuts a release branch sets its version in `.claude-plugin/plugin.json` and the README badge (`Clean(release): open 0.7.1`); PRs keep the version of the branch they target, and the version-bump workflow and `.githooks/pre-push` refuse anything else
+- After every merge into the patch branch, merge the patch branch into the feature branch with a merge commit, so fixes reach the next minor
+- `main` only takes release merges and an emergency hotfix; a hotfix is merged into both release branches right after
 
 ## Releases
 
 - Release at most once a day, right after the filetree repo keeper's morning run (06:33 Europe/Brussels); never release right after a merge
 - Everything merged since the last release ships in the next morning release; once today's release is out, new merges wait for tomorrow's
 - Only an emergency hotfix ships the same day: a security issue, a bug that breaks things badly, or a UI that is badly broken
-- The release takes the version on `main` at that run; sign a `v<version>` tag on that commit and publish the GitHub release from it. The keeper has no signing key, so it hands the release to an agent on a machine that has one
+- A release is a PR from a release branch into `main`, merged with a merge commit; sign a `v<version>` tag on that merge and publish the GitHub release from it. The keeper has no signing key, so it hands the release to an agent on a machine that has one
+- After a patch release (v0.7.1): cut a new `release/0.7.x` from `main` at 0.7.2, and merge `main` into `release/0.8.x`
+- After a feature release (v0.8.0): delete both release branches, then cut `release/0.8.x` at 0.8.1 and `release/0.9.x` at 0.9.0 from `main`
 - The release notes cover every PR merged since the last release, including versions that never got their own release
