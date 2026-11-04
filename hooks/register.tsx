@@ -1259,7 +1259,11 @@ async function classifyLink($: EngineInterface, id: string): Promise<void> {
   let state: LinkState
   try {
     const real = (await $.fs.stat(id, { resolve: true })).realPath
-    state = real ? { kind: inside(await realOf($, root), posix(real)) ? 'ok' : 'outside', target: posix(real) } : { kind: 'broken', target: await linkTarget($, id) }
+    if (real) state = { kind: inside(await realOf($, root), posix(real)) ? 'ok' : 'outside', target: posix(real) }
+    else {
+      const target = await linkTarget($, id)
+      state = { kind: (await loops($, id, target)) ? 'circular' : 'broken', target }
+    }
   } catch (err) {
     const target = await linkTarget($, id)
     state = { kind: /ELOOP|too many|loop/i.test(messageOf(err)) || (await loops($, id, target)) ? 'circular' : 'broken', target }

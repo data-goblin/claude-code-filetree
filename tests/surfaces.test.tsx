@@ -123,7 +123,7 @@ function world(on: On, w: World, ran: Ran) {
     const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
     const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
     const key = p.replace(/^[A-Za-z]:/, '')
-    if (w.loops?.includes(key)) throw new Error(`ELOOP: too many symbolic links encountered, stat '${p}'`)
+    if (w.loops?.includes(key)) return { value: { kind: 'file', size: 1, mtimeMs: 1_700_000_000_000, isLink: true } }
     const to = w.linkTo?.[key]
     if (to !== undefined) {
       if (!to) throw new Error(`ENOENT ${e.path}`)
