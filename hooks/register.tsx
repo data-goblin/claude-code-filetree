@@ -224,6 +224,7 @@ let collapseAt = 0
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
 let shortcutsTop = 0
+let deskKeysAt = 0
 let shortcutsMax = 0
 let shortcutsPage = 1
 let treemapSetting: 'auto' | 'image' | 'cells' | 'off' = 'auto'
@@ -2549,6 +2550,7 @@ function focusPane($: EngineInterface, root: string, key: string): void {
 function toggleShortcuts($: EngineInterface, open = !shortcutsShown): void {
   shortcutsShown = open
   shortcutsTop = 0
+  deskKeysAt = 0
   void $.ui.invalidate('ui.render')
 }
 
@@ -2569,6 +2571,12 @@ function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): 
     const page = Math.max(1, shortcutsPage - 1)
     const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, b: -page, pagedown: page, f: page, home: -Infinity, end: Infinity }
     if (surface !== 'desktop') scrollShortcuts($, by[key] ?? 0)
+    else {
+      const titles = shortcutGroups(true).map(g => g.title)
+      const step = by[key] ?? 0
+      deskKeysAt = Math.max(0, Math.min(titles.length - 1, deskKeysAt + (Number.isFinite(step) ? Math.sign(step) * (Math.abs(step) > 1 ? 3 : 1) : step)))
+      void $.ui.scroll({ to: { key: `keys-${titles[deskKeysAt]}` }, in: PANE, block: 'start' }).catch(() => undefined)
+    }
     return true
   }
   toggleShortcuts($, false)
@@ -4381,7 +4389,7 @@ export const register: Register = (on, options) => {
       )
     }
     const hidden: [string, () => void][] = zjump.on ? [] : [
-      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
+      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, shortcutsShown ? e.surface : undefined).then(park)]),
       ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
