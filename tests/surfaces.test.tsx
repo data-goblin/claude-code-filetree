@@ -4428,6 +4428,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(opens.slice(before).some(o => has(o, 'id') && o.id === 'filetree')).toBe(true)
     if (surface === 'desktop') {
       expect(JSON.stringify(await pane.drawn())).toMatch(/"source":"line 38\\nline 39[^"]*","path":"\/home\/k\/proj\/src\/a\.ts","startLine":38/)
+      await pane.press({ key: 'back' })
+      await clock.settle()
+      const term = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+      await clock.settle()
+      expect(treeRows(await term.drawn()).active).toBe(`${root}/src/a.ts`)
+      await term.unmount()
     } else {
       expect(peekOf(await pane.drawn()).preview.startLine).toBe(38)
       expect(treeRows(await pane.drawn()).active).toBe(`${root}/src/a.ts`)

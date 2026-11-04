@@ -1702,9 +1702,10 @@ async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface):
   const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
   const top = Math.max(0, line - 3)
   if (surface === 'desktop' || nativeScroll) {
+    await revealPaths($, [h.path])
     await loadPreview($, h.path, line)
     deskLine = { path: h.path, top, scrolled: false, line }
-    await patch($, () => ({ preview: h.path, previewTop: Math.max(0, top - (previewed?.first ?? 0)), selected: h.path }))
+    await patch($, cur => ({ preview: h.path, previewTop: Math.max(0, top - (previewed?.first ?? 0)), cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
     $.clock.after(100, () => parkPreview($))
     return
   }
