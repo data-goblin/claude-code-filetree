@@ -27,6 +27,7 @@ case "$mode" in
     case "$target" in
       main) exit 0 ;;
       release/*)
+        [ "$head" = "${target#release/}" ] || { echo "version: $target must carry version ${target#release/}, not $head" >&2; exit 1; }
         if git rev-parse -q --verify "refs/remotes/origin/$target" >/dev/null && above "$(version_at "origin/$target")" "$released"; then
           current=$(version_at "origin/$target")
           [ "$head" = "$current" ] || { echo "version: $target is at $current; keep that version, not $head" >&2; exit 1; }
