@@ -13,6 +13,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   base=$(git show "origin/$target:.claude-plugin/plugin.json" | jq -r .version)
   [ -n "$released" ] || released=$base
   head=$(git show "$local_sha:.claude-plugin/plugin.json" | jq -r .version)
+  case "$remote_ref" in refs/heads/release/*) [ "$head" = "$released" ] && [ "$base" = "$released" ] && continue ;; esac
   if above "$base" "$released"; then
     [ "$head" = "$base" ] || { echo "pre-push: $target is already at the unreleased $base; keep that version, not $head" >&2; exit 1; }
   elif ! above "$head" "$released"; then
