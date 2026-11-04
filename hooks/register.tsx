@@ -94,6 +94,7 @@ const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
 const COLLAPSE_MS = 10_000
+const EXPAND_MAX = 150
 const GIT_POLL_MS = 2000
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
@@ -2777,6 +2778,20 @@ async function toggle($: EngineInterface, n: FileNode): Promise<void> {
   void watchTree($)
 }
 
+async function expandAll($: EngineInterface): Promise<void> {
+  const open: string[] = []
+  const t = await get($)
+  let level = t.nodes.filter(x => x.kind === 'dir' && x.parent === t.root && x.name !== '.git').map(x => x.id)
+  for (let depth = 0; depth < 3 && level.length && open.length < EXPAND_MAX; depth++) {
+    const take = level.slice(0, EXPAND_MAX - open.length)
+    const listed = await loadDirs($, take)
+    open.push(...take)
+    level = [...listed.values()].flat().filter(x => x.kind === 'dir' && x.name !== '.git').map(x => x.id)
+  }
+  await patch($, t => ({ expanded: [...new Set([...t.expanded, ...open])] }))
+  void watchTree($)
+}
+
 async function press($: EngineInterface, n: FileNode): Promise<void> {
   const now = await $.clock.now()
   const isDouble = lastPress.key === n.id && now - lastPress.at < DOUBLE_MS
@@ -2924,6 +2939,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
     }
   } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
   else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
+  else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
@@ -3771,7 +3787,7 @@ export const register: Register = (on, options) => {
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
       { id: 'size', label: unicode ? '◫' : '\u{ea90}', dim: t.column === 'date', hint: t.column === 'date' ? 'show sizes' : t.column === 'size' ? 'show lines of code' : t.column === 'loc' ? 'show file counts' : 'show dates', icon: 'columns' as const },
-      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: 'collapse all', icon: 'square-minus' as const },
+      { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: t.expanded.length ? 'collapse all' : 'expand all', icon: t.expanded.length ? 'square-minus' as const : 'square-plus' as const },
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'folder-minus' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
