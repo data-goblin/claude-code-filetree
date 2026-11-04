@@ -3358,16 +3358,21 @@ export const register: Register = (on, options) => {
     }
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
+      const n = t.nodes.find(x => x.id === data.press)
+      if (data.shift && !data.ctrl && (ghost || n)) {
+        if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
+        await markRange($, data.press)
+        return {}
+      }
       if (ghost) {
+        markAnchor = ghost.id
         await patch($, () => ({ cursor: ghost.id, selected: ghost.id }))
         await diffFile($, ghost.id)
         return {}
       }
-      const n = t.nodes.find(x => x.id === data.press)
       if (!n) return {}
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
       if (data.ctrl) await openNode($, n)
-      else if (data.shift) await markRange($, n.id)
       else {
         markAnchor = n.id
         await press($, n)

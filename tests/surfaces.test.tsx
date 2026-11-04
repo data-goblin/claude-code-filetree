@@ -4282,6 +4282,23 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`shift+click on a deleted file's ghost row ends a range instead of opening its diff, on the ${surface}`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { ...RANGE_WORLD(root), status: '## main\0 D gone.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n' }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await ui.post({ press: `${root}/b.txt` }, zone(`${root}/b.txt`))
+    await clock.advance(1000)
+    await ui.post({ press: `${root}/gone.ts`, shift: true }, zone(`${root}/gone.ts`))
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt', 'c.txt', 'd.txt', 'gone.ts'])
+    expect(await texts(ui)).not.toContain('"format":"diff"')
+    expect(await texts(ui)).not.toContain('@@ -1,1 +0,0 @@')
+    await ui.unmount()
+  })
+
   test(`ctrl+click opens the file and marks nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const ran: Ran = []
