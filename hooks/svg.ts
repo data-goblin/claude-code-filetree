@@ -159,7 +159,7 @@ export const DESK = {
   muted: '#85858c',
   guide: '#808080',
   urgent: '#e5484d',
-  selection: '#80808033',
+  selection: '#80808066',
   hover: '#8080801f',
   field: '#8080801a',
   edge: '#80808040',

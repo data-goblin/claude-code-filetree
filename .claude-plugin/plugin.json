@@ -130,7 +130,7 @@
     "collapse": {
       "type": "string",
       "title": "Auto-collapse",
-      "description": "on: folders the tree opened to show Claude's reads and writes close again once that activity fades, unless you opened or moved into them. off: they stay open. The toolbar toggle and the a key flip it.",
+      "description": "on: folders the tree opened to show Claude's reads and writes close again 10 seconds after Claude last touched them, unless you opened or moved into them; turning it on also closes the ones opened while it was off. off: they stay open. The toolbar toggle and the a key flip it.",
       "default": "off",
       "options": [
         "on",

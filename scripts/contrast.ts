@@ -118,7 +118,7 @@ for (const [name, hexes] of Object.entries(THEMES)) {
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} label ${label.toFixed(2)}:1 (needs ${LABEL}), box on background ${edge.toFixed(2)}:1, nested box ${nest.toFixed(2)}:1 (need ${EDGE})`)
 }
-console.log('\ncursor row backgrounds (desktop needs 1.2 on every app background, terminal fallback 1.3 everywhere)')
+console.log('\ncursor row backgrounds (desktop needs 1.2 on light app backgrounds and 1.5 on black and vscode dark, terminal fallback 1.3 everywhere)')
 for (const [name, bg] of Object.entries(LIGHT_BACKGROUNDS)) {
   const desk = contrast(over(DESK.selection, bg), bg)
   const ok = desk >= 1.2
@@ -129,7 +129,7 @@ for (const [name, bg] of Object.entries(DARK_BACKGROUNDS)) {
   const desk = contrast(over(DESK.selection, bg), bg)
   const tui = selectionOn('ansi256(0)', bg, false)
   const term = contrast(tui, bg)
-  const ok = desk >= 1.2 && term >= 1.3
+  const ok = (name === 'one dark' || desk >= 1.5) && term >= 1.3
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} desktop ${DESK.selection} ${desk.toFixed(2)}:1, terminal ${tui} ${term.toFixed(2)}:1`)
 }

@@ -18,7 +18,7 @@ const Hit: ClientModule<HitProps, Local> = (props, surface) => {
   const ref = state.ref
   ref.id = props.id
   ref.unpoint ??= surface.onPointer(e => {
-    if (e.type === 'down') {
+    if (e.type === 'down' && props.keys !== false) {
       active = ref.id
       alive.set(ref.id, Date.now())
       ref.untick ??= surface.every(500, () => alive.set(ref.id, Date.now()))
