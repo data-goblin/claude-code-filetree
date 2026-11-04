@@ -2788,6 +2788,7 @@ async function expandAll($: EngineInterface): Promise<void> {
     open.push(...take)
     level = [...listed.values()].flat().filter(x => x.kind === 'dir' && x.name !== '.git').map(x => x.id)
   }
+  for (const d of open) autoOpened.delete(d)
   await patch($, t => ({ expanded: [...new Set([...t.expanded, ...open])] }))
   void watchTree($)
 }

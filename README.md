@@ -60,7 +60,8 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 - File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, with the matched characters highlighted in each result, and sortable Name, Git and value column headers
 - The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown (fewer in the Desktop app when lines are long), and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
-- Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
+- Git status per file and folder, line counts on changed files, and the branch with ahead/behind in the header (the upstream name with the `Remote branch` setting)
+- The collapse button closes every folder; when every folder is closed it becomes expand all, which opens up to three levels and at most 150 folders, skipping `.git`
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
