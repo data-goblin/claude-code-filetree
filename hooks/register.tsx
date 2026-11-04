@@ -1552,6 +1552,7 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   await patch($, () => ({ query }))
   const t = await get($)
   if (t.searchContent) {
+    if (!query.trim()) grepClear()
     grep.key = ''
     return []
   }
