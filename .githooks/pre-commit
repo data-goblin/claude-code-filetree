@@ -4,7 +4,7 @@ CLAUDE=claude
 [ -x "$HOME/.local/bin/claude" ] && CLAUDE="$HOME/.local/bin/claude"
 sh scripts/ci/greps.sh
 if ! git diff --cached --quiet -- hooks tests types scripts tsconfig.json; then
-  bun x tsc -p tsconfig.json --noEmit
+  bunx --bun --package typescript@5.9.3 tsc -p tsconfig.json --noEmit
   if command -v oxlint >/dev/null; then oxlint; else echo "pre-commit: oxlint not installed, CI runs it"; fi
 fi
 if ! git diff --cached --quiet -- .claude-plugin; then
