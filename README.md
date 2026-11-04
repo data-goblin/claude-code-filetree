@@ -54,7 +54,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 ## Features
 
 - File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, with the matched characters highlighted in each result, and sortable Name, Git and value column headers
-- The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
+- The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown (fewer in the Desktop app when lines are long), and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
@@ -122,7 +122,7 @@ x:            guard or unguard the entry under the cursor (off limits to Claude'
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
-v / V:        mark or unmark the entry under the cursor / clear all marks
+v / V:        mark or unmark the entry under the cursor / clear all marks; in the Desktop app V arrives as v, so press the "N marked" count in the footer to clear them
 "?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); j, k, the arrows, f, b, Page Up/Down, Home and End scroll it, and any other key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS
 ```
