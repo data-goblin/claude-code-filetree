@@ -4118,6 +4118,9 @@ export const register: Register = (on, options) => {
             </Text>
           </Box>
           <Box flexGrow={1} />
+          {desk && tipText ? (
+            <Box key="branch-tip" flexShrink={1} overflow="hidden"><Text {...tipProps} wrap="truncate-end">{tipText}</Text></Box>
+          ) : <Box key="branch-git" flexDirection="row" flexShrink={1} alignItems={desk ? 'center' : undefined}>
           <Box flexDirection="row" flexShrink={0} alignItems={desk ? 'center' : undefined}>
             {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 ? (
               desk && Svg
@@ -4139,8 +4142,10 @@ export const register: Register = (on, options) => {
               <Text {...mutedText} wrap="truncate-end">{` ${b.upstream}`}</Text>
             </Box>
           ) : null}
-          {b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}
-          {b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}
+          {desk && widths.metric ? (
+            <Box key="branch-sync" width={(widths.metric ?? 0) + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end">{<Box flexDirection="row">{b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}{b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}</Box>}</Box>
+          ) : <Box flexDirection="row">{b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}{b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}</Box>}
+          </Box>}
           <Box key="branch-tail" width={desk ? 2 : 1} flexShrink={0} />
         </Box>
       )
@@ -4557,18 +4562,18 @@ export const register: Register = (on, options) => {
               )
             ) : null}
             <Box flexGrow={1} />
-            {tipText ? (
+            {tipText && !desk ? (
               <Box flexShrink={1} marginLeft={2}>
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
             {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${marks.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Button></Box> : null}
-            {footerName && !tipText ? (
+            {footerName && (desk || !tipText) ? (
               <Box flexShrink={1} marginLeft={2}>
                 <Text {...mutedText} wrap="truncate-start">{footer && links.has(footer) ? footerName + linkNote(footerLink) : footerName}</Text>
               </Box>
             ) : null}
-            {footerName && !tipText ? (
+            {footerName && (desk || !tipText) ? (
               desk && Svg
                 ? <Box key="cursor" flexShrink={0} flexDirection="row" alignItems="center" marginLeft={1}><Svg key="cursor-icon" source={iconSvg('cursor', mutedInk, 14)} alt="cursor" width={14} height={14} /></Box>
                 : <Box key="cursor" flexShrink={0}><Text {...mutedText}>{unicode ? ' ↖' : ' \u{f01bf}'}</Text></Box>
