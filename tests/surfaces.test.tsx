@@ -4260,7 +4260,7 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   expect(copied).toEqual(['a.txt\nsrc', `${root}/a.txt\n${root}/src`])
   const sent = await $.prompt.submit({ text: 'compare these', wait: false, origin: { kind: 'composer' } })
   expect(JSON.stringify(sent)).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/a.txt\\n${root}/src`)
-  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await ui.post({ key: 'V' }, { in: 'rows' })
   await clock.settle()
   expect(marked(treeRows(await ui.drawn()).rows)).toEqual([])
   const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })

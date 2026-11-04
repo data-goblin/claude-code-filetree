@@ -1281,7 +1281,7 @@ function linkNote(state: LinkState | null | undefined): string {
 
 function toggleMark($: EngineInterface, id: string): void {
   if (marks.includes(id)) marks = marks.filter(m => m !== id)
-  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V or Esc clears them`)
+  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
   else marks = [...marks, id]
   void $.ui.invalidate('ui.render')
 }
@@ -2862,7 +2862,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'w') await showOutside($)
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
-  else if (key === 'V' || (key === 'v' && shift) || (key === 'escape' && marks.length)) clearMarks($)
+  else if (key === 'V' || (key === 'v' && shift)) clearMarks($)
   else if (cur && key === 'v') toggleMark($, cur.id)
   else if (key === 't') await openTerminal($, cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root)
   else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
