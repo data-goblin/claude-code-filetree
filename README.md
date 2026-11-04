@@ -147,7 +147,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 Open pull requests against a release branch, not `main`:
 
-- Fixes: the patch branch, such as `release/0.7.1`
+- Fixes: the patch branch, such as `release/0.7.2`
 - Features: the minor branch, such as `release/0.8.0`
 
 Keep the version of that branch.
