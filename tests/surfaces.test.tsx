@@ -5189,3 +5189,59 @@ test('the footer count of marks is a button that clears them', { timeoutMs: 20_0
   expect(JSON.stringify(await ui.drawn())).not.toContain('1 marked')
   await ui.unmount()
 })
+
+function deskRowsWorld(on: On, count: number) {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: Array.from({ length: count }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.ts`, 'file']) } }, [])
+  return { root, clock }
+}
+
+function clientKeys(tree: unknown): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  const walk = (n: unknown): void => {
+    if (Array.isArray(n)) return n.forEach(walk)
+    if (!n || typeof n !== 'object') return
+    const o = n as { type?: unknown; props?: { key?: unknown; module?: unknown } }
+    if (o.type === 'Client' && typeof o.props?.key === 'string' && typeof o.props.module === 'string') out.set(o.props.module, [...(out.get(o.props.module) ?? []), o.props.key])
+    Object.values(n).forEach(walk)
+  }
+  walk(tree)
+  return out
+}
+
+test('desktop (#47): a key that reaches every Client in the pane moves the cursor one row, so no per-row key listener can flood the page', { timeoutMs: 30_000 }, async ($, on) => {
+  const { root, clock } = deskRowsWorld(on, 40)
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const mounted = clientKeys(await ui.drawn())
+  const rows = mounted.get('hooks/hit.tsx') ?? []
+  const all = [...mounted.values()].flat()
+  expect(rows.length).toBeGreaterThan(30)
+  const cursor = async () => {
+    const lit: string[] = []
+    const walk = (n: unknown): void => {
+      if (Array.isArray(n)) return n.forEach(walk)
+      if (!n || typeof n !== 'object') return
+      const o = n as { props?: { key?: unknown; backgroundColor?: unknown } }
+      const key = o.props?.key
+      if (typeof key === 'string' && key.startsWith('row:') && o.props?.backgroundColor) lit.push(key.slice(4))
+      Object.values(n).forEach(walk)
+    }
+    walk(await ui.drawn())
+    return lit
+  }
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: rows[5] })
+  await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: rows[5] })
+  await clock.advance(1000)
+  await clock.settle()
+  expect(await cursor()).toEqual([`${root}/f05.ts`])
+  for (const k of all) await ui.key({ key: 'j', in: k })
+  await clock.settle()
+  expect(await cursor()).toEqual([`${root}/f06.ts`])
+  for (const k of all) await ui.key({ key: 'k', in: k })
+  await clock.settle()
+  expect(await cursor()).toEqual([`${root}/f05.ts`])
+  await ui.unmount()
+})
