@@ -33,7 +33,14 @@
 ## Tests
 
 - Run tests with `claude plugin test .`, never `bun test`: `claude-code/testing` only exists inside that harness, so bun fails to resolve it
-- Every PR keeps the version in `.claude-plugin/plugin.json` and the README badge above the latest `v*` release tag, so PRs merged before a release share its version; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
+- The first PR into a release branch raises the version in `.claude-plugin/plugin.json` and the README badge above the latest `v*` tag; every later PR keeps the release branch's version, so one release never carries two bumps; `.githooks/pre-push` and the version-bump workflow refuse a branch that does not
+
+## Branches
+
+- Keep exactly one release branch, `release/0.<minor>.x` (for example `release/0.7.x`), and target every PR at it, never at `main`
+- If no release branch exists, create it from `main` before opening the first PR
+- `main` only takes the release branch's merge, and an emergency hotfix
+- Once that merge is on `main` and its `v<version>` tag is published, delete the release branch, local and remote, and create the next one from `main`
 
 ## Releases
 
