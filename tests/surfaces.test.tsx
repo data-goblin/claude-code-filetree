@@ -4957,3 +4957,15 @@ test('a class with a literal caret is never translated for grep, so [-^] cannot 
   expect(toEre('[a^]')).toBeNull()
   expect(toEre('[^a]')).toBe('[^a]')
 })
+
+test('an untranslatable regex searches every line, so ^\\s*$ finds completely empty lines', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x002\x00\na.ts\x003\x00   \na.ts\x004\x00x\n'), ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^\\s*$', true)
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '^', '--', '.'])
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`, `grep:3:${root}/a.ts`])
+  await ui.unmount()
+})
