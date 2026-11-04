@@ -35,6 +35,7 @@ export const ICONS = {
   'file-git': `${FILE}M12 11v2.5M12 16.5V19M12 13.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 1 0 0-3`,
   'file-link': `${FILE}M11 18l3-3-3-3M14 15H8`,
   ban: 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M4.9 4.9l14.2 14.2',
+  cursor: 'M12.586 12.586 19 19M3.688 3.037a.497.497 0 0 0-.651.651l6.5 15.999a.501.501 0 0 0 .947-.062l1.569-6.083a2 2 0 0 1 1.448-1.479l6.124-1.579a.5.5 0 0 0 .063-.947z',
   crosshair: 'M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16M12 2v4M12 18v4M2 12h4M18 12h4',
   refresh: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6',
@@ -236,6 +237,14 @@ export function rowSvg(depth: number, chevron: 'open' | 'closed' | null, icon: I
   const chev = chevron ? glyph(chevron === 'open' ? 'chevron-down' : 'chevron-right', chevronColor, x + (STEP_PX - CHEVRON_PX) / 2, (ROW_PX - CHEVRON_PX) / 2, CHEVRON_PX, 3.2) : ''
   const pic = icon ? glyph(icon, color, x + STEP_PX, (ROW_PX - 16) / 2, 16) : ''
   return frame(w, ROW_PX, guides + chev + pic)
+}
+
+export function edgeSvg(color: string): string {
+  return `<svg xmlns="${NS}" width="1" height="4000"><rect width="1" height="4000" fill="${color}"/></svg>`
+}
+
+export function lineSvg(color: string, h: number): string {
+  return `<svg xmlns="${NS}" width="4000" height="${h}"><rect width="4000" height="${h}" fill="${color}"/></svg>`
 }
 
 export function barSvg(color: string): string {
