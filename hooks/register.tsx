@@ -3832,9 +3832,6 @@ export const register: Register = (on, options) => {
     if (rootC && rootC[0] > 0) branchCells['?'] = { t: `?:${rootC[0]}`, c: gitColors['?'] ?? addColor }
     if (rootC && rootC[1] > 0) branchCells.M = { t: `M:${rootC[1]}`, c: gitColors.M ?? 'ansi256(3)' }
     if (rootC && rootC[2] > 0) branchCells.D = { t: `D:${rootC[2]}`, c: theme.urgent }
-    const rootNode = t.top ? t.nodes.find(n => n.id === t.root) : undefined
-    const rootMetric = rootNode ? cellsOf(rootNode).metric : undefined
-    if (rootMetric) branchCells.metric = rootMetric
     const widths: Partial<Record<Col, number>> = {}
     for (const cells of [...allCells, branchCells]) for (const c of COLS) {
       const cell = cells[c]
@@ -4111,26 +4108,30 @@ export const register: Register = (on, options) => {
               {label}
             </Text>
           </Box>
-          {b.upstream && (
-            <Box flexShrink={1} overflow="hidden">
-              <Text {...mutedText} wrap="truncate-end">
-                {` ${b.upstream}`}
-              </Text>
-            </Box>
-          )}
           <Box flexGrow={1} />
-          <Box flexDirection="row" flexShrink={0}>
-            {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 ? <Text {...mutedText}>no Git changes</Text> : null}
+          <Box flexDirection="row" flexShrink={0} alignItems={desk ? 'center' : undefined}>
+            {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 ? (
+              desk && Svg
+                ? <Box key="clean" flexDirection="row" alignItems="center"><Svg key="clean-icon" source={iconSvg('git-commit', mutedInk, 14)} alt="git" width={14} height={14} /><Text {...mutedText}> no changes</Text></Box>
+                : <Text {...mutedText}>{unicode ? '± no changes' : '\u{e702} no changes'}</Text>
+            ) : null}
             {desk ? tailCols(branchCells, 'branch', GIT_COLS) : null}
             {!desk && totals[0] > 0 && <Text color={addColor}>{` +${totals[0]}`}</Text>}
             {!desk && totals[1] > 0 && <Text color={delColor}>{` -${totals[1]}`}</Text>}
             {desk ? null : rootCounts.map((c, i) => (
               <Text key={`root-count-${i}`} color={c.c}>{c.t}</Text>
             ))}
-            {b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}
-            {b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}
           </Box>
-          {tailCols(branchCells, 'branch', ['metric'])}
+          {b.upstream ? (
+            <Box flexDirection="row" flexShrink={1} overflow="hidden" marginLeft={2} alignItems={desk ? 'center' : undefined}>
+              {desk && Svg
+                ? <Svg key="remote-icon" source={iconSvg('cloud', mutedInk, 14)} alt="remote branch" width={14} height={14} />
+                : <Text {...mutedText}>{unicode ? '☁' : '\u{f0c2}'}</Text>}
+              <Text {...mutedText} wrap="truncate-end">{` ${b.upstream}`}</Text>
+            </Box>
+          ) : null}
+          {b.upstream ? <Text {...(b.ahead > 0 ? { color: tones.blue?.solid } : mutedText)}>{` ↑${b.ahead}`}</Text> : null}
+          {b.upstream ? <Text {...(b.behind > 0 ? { color: tones.red?.solid ?? theme.urgent } : mutedText)}>{` ↓${b.behind}`}</Text> : null}
           <Box key="branch-tail" width={desk ? 2 : 1} flexShrink={0} />
         </Box>
       )
@@ -4463,9 +4464,9 @@ export const register: Register = (on, options) => {
         {!t.top && showHints && (!hintOn ? (desk && Svg ? <Svg key="git-hint" source={rowSvg(0, null, null, mutedInk)} alt="git status" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text key="git-hint">{' '}</Text>) : desk && Svg ? (
           <Box key="git-hint" flexDirection="row" alignItems="center">
             <Svg key="git-hint-icon" source={rowSvg(0, null, 'git-branch', mutedInk)} alt="no git repo" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
-            <Text {...mutedText}>No git repo</Text>
+            <Text {...mutedText}>not a Git repo</Text>
           </Box>
-        ) : <Text key="git-hint" {...mutedText}>{unicode ? '± ' : '\u{ea68} '}No git repo</Text>)}
+        ) : <Text key="git-hint" {...mutedText}>{unicode ? '± ' : '\u{ea68} '}not a Git repo</Text>)}
         {searchGap ? <Text key="gap-above"> </Text> : null}
         {desk && Svg ? (
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
@@ -4473,7 +4474,7 @@ export const register: Register = (on, options) => {
             {zjump.on ? (
               <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentInk}>jump</Text></Box>
             ) : scopeChip()}
-            <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column">
+            <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
                 <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />

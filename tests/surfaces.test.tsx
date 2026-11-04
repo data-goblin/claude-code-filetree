@@ -2039,7 +2039,7 @@ for (const hints of ['on', 'off'] as const) {
     const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } } })
     await clock.settle()
     const drawn = await ui.drawn()
-    expect(JSON.stringify(drawn).includes('No git repo')).toBe(hints === 'on')
+    expect(JSON.stringify(drawn).includes('not a Git repo')).toBe(hints === 'on')
     expect(treeRows(drawn).rows.length).toBe(hints === 'on' ? 14 : 15)
     await ui.unmount()
   })
