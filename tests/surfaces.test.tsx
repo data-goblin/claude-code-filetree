@@ -5200,6 +5200,38 @@ test('desktop (#47): a key that reaches every Client in the pane moves the curso
   await ui.unmount()
 })
 
+test('desktop: a click on the root header leaves the keys with the tree rows', { timeoutMs: 30_000 }, async ($, on) => {
+  const { root, clock } = deskRowsWorld(on, 10)
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const all = [...clientKeys(await ui.drawn()).values()].flat()
+  expect(all).toContain('hit:root')
+  const cursor = async () => {
+    const lit: string[] = []
+    const walk = (n: unknown): void => {
+      if (Array.isArray(n)) return n.forEach(walk)
+      if (!n || typeof n !== 'object') return
+      const o = n as { props?: { key?: unknown; backgroundColor?: unknown } }
+      const key = o.props?.key
+      if (typeof key === 'string' && key.startsWith('row:') && o.props?.backgroundColor) lit.push(key.slice(4))
+      Object.values(n).forEach(walk)
+    }
+    walk(await ui.drawn())
+    return lit
+  }
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'hit:root' })
+  await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: 'hit:root' })
+  await clock.advance(1000)
+  await clock.settle()
+  const before = await cursor()
+  for (const k of all) await ui.key({ key: 'j', in: k })
+  await clock.settle()
+  expect(await cursor()).not.toEqual(before)
+  await ui.unmount()
+})
+
 test('desktop (#53): every background is translucent or a theme key and no text color is a fixed light or dark hex, so the pane reads in light and dark mode', { timeoutMs: 30_000 }, async ($, on) => {
   const root = '/home/k/proj'
   const clock = world(on, { os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0 M a.ts\0?? b.md\0', numstat: '1\t1\ta.ts\0', dirs: { [root]: [['src', 'dir'], ['a.ts', 'file'], ['b.md', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
