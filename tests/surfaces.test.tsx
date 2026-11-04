@@ -4594,7 +4594,9 @@ test('a content-search hit right after a line longer than the preview budget sti
 
 test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
-  expect(toEre('a.*?b\\s[\\w-]')).toBe('a.*b[[:space:]][[:alnum:]_-]')
+  expect(toEre('a.*?b[\\w-]\\W\\S')).toBe('a.*b[0-9A-Za-z_-][^0-9A-Za-z_][^ \t\r\f\v]')
+  for (const unsafe of ['a\\sb', '[^]', '[]', '[^]x', '(a|)', '|a', '()', '[a-c-e]', '[\\d-z]', '[é]', '[[:alpha:]]', '\\bword', 'a\\nb']) expect(toEre(unsafe)).toBeNull()
+  expect(toEre('a{2}b{x')).toBe('a{2}b\\{x')
   expect(toEre('[^\\D]')).toBeNull()
   expect(toEre('[a\\-z]')).toBeNull()
   expect(toEre('[\\]]')).toBeNull()

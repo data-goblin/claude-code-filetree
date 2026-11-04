@@ -313,51 +313,121 @@ export function compileRegex(src: string, ignoreCase: boolean): ((text: string) 
   }
 }
 
-const ERE_IN: Record<string, string> = { d: '0-9', w: '[:alnum:]_', s: '[:space:]' }
-const ERE_OUT: Record<string, string> = { d: '[0-9]', D: '[^0-9]', w: '[[:alnum:]_]', W: '[^[:alnum:]_]', s: '[[:space:]]', S: '[^[:space:]]' }
+const ERE_SPECIAL = '.[]()*+?{}|^$\\'
+const ERE_OUT: Record<string, string> = { d: '[0-9]', D: '[^0-9]', w: '[0-9A-Za-z_]', W: '[^0-9A-Za-z_]', S: '[^ \t\r\f\v]' }
+const ERE_IN: Record<string, string> = { d: '0-9', w: '0-9A-Za-z_' }
+const ERE_TEXT: Record<string, string> = { t: '\t', r: '\r', f: '\f', v: '\v' }
+const PLAIN = /^[ -~]$/
+
+function ereClass(src: string, i: number): { ere: string; next: number } | null {
+  let j = i + 1
+  let head = '['
+  if (src[j] === '^') {
+    head += '^'
+    j += 1
+  }
+  if (src[j] === ']') return null
+  const toks: { ch?: string; set?: string; dash?: boolean }[] = []
+  while (j < src.length && src[j] !== ']') {
+    const c = src[j] ?? ''
+    if (c === '\\') {
+      const e = src[j + 1]
+      if (e === undefined) return null
+      j += 2
+      if (e in ERE_IN) toks.push({ set: ERE_IN[e] })
+      else if (/[A-Za-z0-9]/.test(e) || ']\\-^['.includes(e) || !PLAIN.test(e)) return null
+      else toks.push({ ch: e })
+      continue
+    }
+    if (c === '[' || !PLAIN.test(c)) return null
+    toks.push(c === '-' ? { dash: true } : { ch: c })
+    j += 1
+  }
+  if (src[j] !== ']') return null
+  let body = ''
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k] ?? {}
+    const hi = toks[k + 2]
+    if (t.set !== undefined) body += t.set
+    else if (t.dash) {
+      if (k !== 0 && k !== toks.length - 1) return null
+    } else if (toks[k + 1]?.dash && hi?.ch !== undefined) {
+      body += `${t.ch}-${hi.ch}`
+      k += 2
+    } else body += t.ch
+  }
+  if (toks[0]?.dash || toks[toks.length - 1]?.dash) body += '-'
+  return { ere: `${head}${body}]`, next: j + 1 }
+}
 
 export function toEre(src: string): string | null {
   let out = ''
-  let inClass = false
   let quant = false
+  let empty = true
   for (let i = 0; i < src.length; i++) {
     const c = src[i] ?? ''
-    if (c === '\\' && i + 1 < src.length) {
-      const e = src[++i] ?? ''
+    if (c === '\\') {
+      const e = src[i + 1]
+      if (e === undefined) return null
+      i += 1
+      if (e in ERE_OUT) out += ERE_OUT[e]
+      else if (e in ERE_TEXT) out += ERE_TEXT[e]
+      else if (ERE_SPECIAL.includes(e)) out += `\\${e}`
+      else if (PLAIN.test(e) && !/[A-Za-z0-9]/.test(e)) out += e
+      else return null
       quant = false
-      if (inClass) {
-        if (e in ERE_IN) out += ERE_IN[e]
-        else if (e in ERE_OUT) return null
-        else if (']\\-^['.includes(e)) return null
-        else out += LITERAL_ESCAPES[e] ?? e
-      } else out += ERE_OUT[e] ?? LITERAL_ESCAPES[e] ?? `\\${e}`
-      continue
-    }
-    if (inClass) {
-      out += c
-      if (c === ']') inClass = false
+      empty = false
       continue
     }
     if (c === '[') {
-      inClass = true
-      out += c
-      if (src[i + 1] === '^') out += src[++i]
-      if (src[i + 1] === ']') out += src[++i]
+      const cls = ereClass(src, i)
+      if (!cls) return null
+      out += cls.ere
+      i = cls.next - 1
       quant = false
+      empty = false
       continue
     }
-    if (c === '(' && src[i + 1] === '?' && src[i + 2] === ':') {
+    if (c === '(') {
+      if (src[i + 1] === '?') {
+        if (src[i + 2] !== ':') return null
+        i += 2
+      }
       out += '('
-      i += 2
       quant = false
+      empty = true
       continue
     }
-    if (c === '?' && quant) {
+    if (c === '|' || c === ')') {
+      if (empty) return null
+      out += c
       quant = false
+      empty = c === '|'
       continue
     }
-    quant = c === '*' || c === '+' || c === '?' || c === '}'
-    out += c
+    if (c === '*' || c === '+' || c === '?') {
+      if (quant && c === '?') {
+        quant = false
+        continue
+      }
+      if (empty) return null
+      out += c
+      quant = true
+      continue
+    }
+    if (c === '{') {
+      const m = /^\{\d+(,\d*)?\}/.exec(src.slice(i))
+      if (m && !empty) {
+        out += m[0]
+        i += m[0].length - 1
+        quant = true
+        continue
+      }
+      out += '\\{'
+    } else if (c === '\n' || c === '\0') return null
+    else out += c
+    quant = false
+    empty = false
   }
-  return out
+  return empty ? null : out
 }
