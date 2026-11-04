@@ -31,9 +31,14 @@ w:            list the files Claude wrote outside the repo this session (shown o
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
 v / V:        mark or unmark the entry under the cursor / clear all marks; in the Desktop app V arrives as v, so press the "N marked" count in the footer to clear them
+shift+j / k:  mark the entry under the cursor, move down / up and mark the next one; shift+down / shift+up do the same
+shift+click:  mark every entry from the last marked or clicked one to the clicked one, in tree order
+ctrl+click:   open the file
 "?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); j, k, the arrows, f, b, Page Up/Down, Home and End scroll it, and any other key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS
 ```
+
+In the Desktop app the tree's hidden hotkeys lose shift, so shift+j there moves without marking. Click a row first: shift+click and shift+arrows on a clicked row mark ranges.
 
 <img src="media/shortcuts.gif" alt="? opens the grouped shortcuts overlay over the tree, and ? closes it" width="800">
 

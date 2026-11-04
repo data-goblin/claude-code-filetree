@@ -28,6 +28,9 @@ const GROUPS: readonly ShortcutGroup[] = [
     keys: [
       { key: 'd', label: 'diff' },
       { key: 'v / V', label: 'mark / clear marks' },
+      { key: 'shift+j / k', label: 'mark and extend down / up' },
+      { key: 'shift+click', label: 'mark from the last marked or clicked row' },
+      { key: 'ctrl+click', label: 'open the file' },
       { key: 'y / Y', label: 'copy relative / absolute path' },
       { key: 'u', label: 'copy the name' },
       { key: 't', label: 'shell in a tmux or herdr pane' },
