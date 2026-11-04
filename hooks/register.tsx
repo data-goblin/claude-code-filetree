@@ -3525,12 +3525,12 @@ export const register: Register = (on, options) => {
         <Box key={`${key}-diff`} flexDirection="column">
           {rows.map((r, j) => r.kind === '@' ? (
             <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" height={ROW_PX} paddingLeft={1} backgroundColor={DESK.hover}>
-              <Text color={mutedInk} size="footnote" tabular wrap="truncate-end">{r.text}</Text>
+              <Text dimColor size="footnote" tabular wrap="truncate-end">{r.text}</Text>
             </Box>
           ) : (
             <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" height={ROW_PX} backgroundColor={tintOf(r.kind)}>
-              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text color={mutedInk} tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
-              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text color={mutedInk} tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
+              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
+              <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
               <Box width={2} flexShrink={0} flexDirection="row" justifyContent="center"><Text color={r.kind === '+' ? add : r.kind === '-' ? del : mutedInk} mono>{r.kind === ' ' ? '' : r.kind}</Text></Box>
               <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text mono wrap="truncate-end">{r.text.replace(/\t/g, '  ') || ' '}</Text></Box>
             </Box>
@@ -3542,9 +3542,10 @@ export const register: Register = (on, options) => {
     const rowColors = { activeBg: selBg, hoverBg: palette.hover ?? (theme.selection.startsWith('#') ? faint(theme.selection) : ''), tones: light ? LIGHT_SHIMMER : SHIMMER }
     nativeScroll = e.surface === 'desktop'
     const accentInk = ink(theme.accent, DESK.accent)
+    const accentText = desk ? 'suggestion' : accentInk
     const mutedInk = ink(theme.muted, DESK.muted)
     const dc = (c: string | undefined) => (desk && c ? ink(c, c) : c)
-    const tint = (c: string | undefined) => (c === '' ? { dimColor: true } : c === undefined ? {} : { color: desk ? ink(c, c) : c })
+    const tint = (c: string | undefined) => (c === '' ? { dimColor: true } : c === undefined ? {} : !desk ? { color: c } : c === theme.muted ? { dimColor: true } : c === theme.accent ? { color: 'suggestion' } : c === theme.urgent ? { color: 'error' } : { color: ink(c, c) })
     const bgRgb = rgbOf(theme.bg)
     const searchBg = bgRgb ? toHex(over(bgRgb, rgbOf(theme.fg) ?? (light ? [0, 0, 0] : [255, 255, 255]), 0.07)) : light ? 'ansi256(254)' : 'ansi256(236)'
     const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
@@ -3642,7 +3643,7 @@ export const register: Register = (on, options) => {
                   if (g.title.startsWith(GROUP)) return (
                     <Box key={`pv-seg-${i}`} flexDirection="row" alignItems="center" marginBottom={1}>
                       <Svg key={`pv-group-icon-${i}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`group ${g.title.slice(GROUP.length)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
-                      <Text weight="semibold" color={accentInk}>{g.title.slice(GROUP.length)}</Text>
+                      <Text weight="semibold" color={accentText}>{g.title.slice(GROUP.length)}</Text>
                     </Box>
                   )
                   return (
@@ -3808,7 +3809,7 @@ export const register: Register = (on, options) => {
     const toolGap = desk ? 0 : toolWidth(toolButtons, 2) <= toolRoom ? 2 : 1
     const tipButton = buttons.find(b => b.id === hovered)
     const tipText = tipButton?.hint ?? ''
-    const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentInk : theme.accent } : desk ? { color: theme.fg ? ink(theme.fg, 'text') : 'text' } : theme.fg ? { color: theme.fg } : {}
+    const tipProps = tipButton && !tipButton.dim ? { color: desk ? accentText : theme.accent } : desk ? { color: theme.fg ? ink(theme.fg, 'text') : 'text' } : theme.fg ? { color: theme.fg } : {}
 
     const sizePad = desk ? '\u2007' : ' '
     const isLong = (n: FileNode): boolean => longFile > 0 && t.column === 'loc' && n.kind === 'file' && (locCache.get(n.id) ?? 0) > longFile
@@ -3922,7 +3923,7 @@ export const register: Register = (on, options) => {
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
     const scopeChip = () => !scopeName ? null : desk ? (
       <Box key="scope-chip" position="relative" flexShrink={0} flexDirection="row" alignItems="center" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}>
-        <Text color={accentInk}>{`in ${scopeName}`}</Text>
+        <Text color={accentText}>{`in ${scopeName}`}</Text>
         <Text color={glow(mutedInk, 'scope')} hover={{ color: lighten(mutedInk) }}>{' ×'}</Text>
         <Box position="absolute" top={0} left={0} right={0} bottom={0}>
           <Client key="button-scope" module="./button.tsx" props={{ id: 'scope', label: '', dim: false } satisfies ButtonProps} width="100%" height="100%" />
@@ -3942,7 +3943,7 @@ export const register: Register = (on, options) => {
       return desk ? (
         <Box key={`sort-${col}`} position="relative" flexShrink={0} flexDirection="row" alignItems="center">
           <Text color={glow(color, `sort-${col}`)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>
-          {mark ? <Text color={mutedInk}>{mark}</Text> : null}
+          {mark ? <Text dimColor>{mark}</Text> : null}
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key={`button-sort-${col}`} module="./button.tsx" props={{ id: `sort-${col}`, label: '', dim: !active } satisfies ButtonProps} width="100%" height="100%" />
           </Box>
@@ -3989,7 +3990,7 @@ export const register: Register = (on, options) => {
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
-        : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentInk} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
+        : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
           {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
@@ -4063,12 +4064,12 @@ export const register: Register = (on, options) => {
             <Box key={`grep-row:${grepId(g)}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : undefined} hover={{ backgroundColor: k === grep.sel ? deskSel : deskHover }}>
               {g.line ? <Box key={`grep-line:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
                 {Svg ? <Svg key={`grep-guide:${grepId(g)}`} source={rowSvg(1, null, null, mutedInk)} alt={`line ${g.line}`} width={STEP_PX * 3 + GAP_PX} height={ROW_PX} /> : null}
-                <Text color={mutedInk} tabular mono>{`${String(g.line).padStart(grepDigits)} `}</Text>
+                <Text dimColor tabular mono>{`${String(g.line).padStart(grepDigits)} `}</Text>
                 <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text mono wrap="truncate-end">{g.text}</Text></Box>
               </Box> : <Box key={`grep-file:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
                 {Svg ? <Svg key={`grep-icon:${grepId(g)}`} source={rowSvg(0, null, nodeIcon(grepNode(g.path), false), mutedInk)} alt={`file ${grepName(g.path)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
                 <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{grepName(g.path)}</Text></Box>
-                <Text color={mutedInk} tabular>{g.text}</Text>
+                <Text dimColor tabular>{g.text}</Text>
                 <Box width={2} flexShrink={0} />
               </Box>}
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
@@ -4439,10 +4440,10 @@ export const register: Register = (on, options) => {
           </Box>
           {groups.map(g => (
             <Box key={`keys-${g.title}`} flexDirection="column" marginTop={1}>
-              <Text key={`keys-title-${g.title}`} bold color={mutedInk}>{g.title}</Text>
+              <Text key={`keys-title-${g.title}`} bold dimColor>{g.title}</Text>
               {g.keys.map(k => (
                 <Box key={`keys-${g.title}-${k.key}`} flexDirection="row">
-                  <Box width={keyCols} flexShrink={0}><Text mono color={accentInk}>{k.key}</Text></Box>
+                  <Box width={keyCols} flexShrink={0}><Text mono color={accentText}>{k.key}</Text></Box>
                   <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{k.label}</Text></Box>
                 </Box>
               ))}
@@ -4463,7 +4464,7 @@ export const register: Register = (on, options) => {
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
               <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
-              {e.props.isFocused ? <Text bold color={accentInk}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
+              {e.props.isFocused ? <Text bold color={accentText}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:root" module="./hit.tsx" props={{ id: ROOT_PRESS, keys: false } satisfies HitProps} width="100%" height="100%" />
               </Box>
@@ -4501,7 +4502,7 @@ export const register: Register = (on, options) => {
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
             <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
             {zjump.on ? (
-              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentInk}>jump</Text></Box>
+              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentText}>jump</Text></Box>
             ) : scopeChip()}
             <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
               {zjump.on ? <>

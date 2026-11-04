@@ -29,7 +29,7 @@ function over(top: string, base: string): string {
 
 const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field }
 const deskBackgrounds = (bases: Record<string, string>): Record<string, string> =>
-  Object.fromEntries(Object.entries(bases).flatMap(([n, base]) => [[n, base], ...Object.entries(DESK_TINTS).filter(([t]) => t !== 'selection').map(([t, tint]) => [`${t} on ${n}`, over(tint, base)])]))
+  Object.fromEntries(Object.entries(bases).flatMap(([n, base]) => [[n, base], ...Object.entries(DESK_TINTS).map(([t, tint]) => [`${t} on ${n}`, over(tint, base)])]))
 
 export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
@@ -63,9 +63,9 @@ const suites = [
     name: name as string,
     backgrounds: deskBackgrounds(bases as Record<string, string>),
     checks: [
-      ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk ${k}`, color: DESK[k], min: TEXT })),
-      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: DIM })),
-      ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT })),
+      ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
+      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: DIM, skip: 'selection' })),
+      ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT, skip: 'selection' })),
     ],
   })),
 ]
@@ -78,7 +78,8 @@ console.log(`palette indices: ${PALETTE.map(([n, c]) => `${n}=${c || 'dimColor'}
 for (const suite of suites) {
   console.log(`\n${suite.name} palette`)
   for (const c of suite.checks) {
-    const ratios = Object.entries(suite.backgrounds).map(([bg, hex]) => [bg, contrast(c.color, hex)] as const)
+    const skip = 'skip' in c ? c.skip : undefined
+    const ratios = Object.entries(suite.backgrounds).filter(([bg]) => !skip || !bg.startsWith(`${skip} on `)).map(([bg, hex]) => [bg, contrast(c.color, hex)] as const)
     const worst = ratios.reduce((a, b) => (b[1] < a[1] ? b : a))
     const ok = worst[1] >= c.min
     if (!ok) failed++

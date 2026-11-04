@@ -11,6 +11,7 @@
 ## Colors
 
 - Every color the plugin picks itself (a hex value: shimmer tones, treemap fills and labels) passes `bun scripts/contrast.ts`, and the `contrast` workflow runs it on any change under `hooks/`; fix the color, never lower the gate
+- One owner-approved exception: the Desktop mustard for modified files (`DESK_GIT_TEXT` M and T) is checked on every background except the selected row, where no single mustard reaches 3:1 in both light and dark mode
 - Text, git and line-count colors are terminal palette indices and muted text is the engine's `dimColor`, so the user's terminal and Claude themes own them; the script asserts they stay that way and reports their contrast in the known themes without gating on it
 
 ## Types and lint
