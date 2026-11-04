@@ -3363,6 +3363,8 @@ export const register: Register = (on, options) => {
     if (grepOn(t) && grep.rows.length) {
       grep.sel = Math.max(0, Math.min(grep.rows.length - 1, grep.sel + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
       void $.ui.invalidate('ui.render')
+      const row = grep.rows[grep.sel]
+      if (row) await patch($, () => ({ selected: row.path }))
       return {}
     }
     const to = Math.max(0, Math.min(view.max, (t.scroll ?? view.from) + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
