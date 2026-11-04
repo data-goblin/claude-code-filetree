@@ -386,6 +386,7 @@ function ereClass(src: string, i: number): { ere: string; next: number } | null 
 }
 
 export function toEre(src: string): string | null {
+  if (/[^\x00-\x7f]/.test(src)) return null
   let out = ''
   let quant = false
   let empty = true
@@ -395,7 +396,10 @@ export function toEre(src: string): string | null {
       const e = src[i + 1]
       if (e === undefined) return null
       i += 1
-      if (e in ERE_OUT) out += ERE_OUT[e]
+      if (e in ERE_OUT) {
+        if (ERE_OUT[e]?.startsWith('[^')) return null
+        out += ERE_OUT[e]
+      }
       else if (e in ERE_TEXT) out += ERE_TEXT[e]
       else if (ERE_SPECIAL.includes(e)) out += `\\${e}`
       else if (PLAIN.test(e) && !/[A-Za-z0-9]/.test(e)) out += e
@@ -406,7 +410,7 @@ export function toEre(src: string): string | null {
     }
     if (c === '[') {
       const cls = ereClass(src, i)
-      if (!cls) return null
+      if (!cls || cls.ere.startsWith('[^')) return null
       out += cls.ere
       i = cls.next - 1
       quant = false
@@ -449,7 +453,7 @@ export function toEre(src: string): string | null {
         continue
       }
       out += '\\{'
-    } else if (c === '\n' || c === '\0') return null
+    } else if (c === '\n' || c === '\0' || c === '.') return null
     else out += c
     quant = false
     empty = false
