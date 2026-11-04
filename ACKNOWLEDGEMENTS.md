@@ -26,6 +26,7 @@ pull request credits them even when the code that shipped was rewritten.
 - Image previews draw in iTerm2, from PNG bytes: [@tjwelde](https://github.com/tjwelde) ([#45](https://github.com/data-goblin/claude-code-filetree/pull/45))
 - The pane stays open when a fullscreen terminal narrows for a moment: [@omocaig90](https://github.com/omocaig90) ([#50](https://github.com/data-goblin/claude-code-filetree/pull/50))
 - Desktop rows send one message per key press, not one per row: [@BlackBuddle](https://github.com/BlackBuddle) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
+- Date format and Clock settings for the date column: [@steve-piece](https://github.com/steve-piece) ([#60](https://github.com/data-goblin/claude-code-filetree/pull/60))
 
 ## Ideas
 

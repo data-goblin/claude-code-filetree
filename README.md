@@ -97,6 +97,8 @@ Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
+Date format:      year-month-day | day-month | month-day
+Clock:            24h | 12h
 Long file:        500 | a line count | off
 Remote branch:    off | on
 Hints:            on | off
