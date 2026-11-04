@@ -3,6 +3,7 @@ name: lint
 on:
   workflow_dispatch:
   push:
+    branches: [main, 'release/**']
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
   pull_request:
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/**', 'tsconfig*.json', '.oxlintrc.json', '.github/workflows/**']
@@ -12,7 +13,7 @@ permissions:
 
 concurrency:
   group: lint-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   code:
