@@ -5006,3 +5006,7 @@ test('moving through content results tells Claude about the highlighted file, no
   expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
   await ui.unmount()
 })
+
+test('file references keep folders written with brackets or parentheses', () => {
+  expect(fileRefs('see src/app/[id]/page.tsx:12, src/app/(auth)/login.tsx:15 and (src/a.ts:7)').map(r => `${r.path}:${r.line}`)).toEqual(['src/app/[id]/page.tsx:12', 'src/app/(auth)/login.tsx:15', 'src/a.ts:7'])
+})
