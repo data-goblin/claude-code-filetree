@@ -2119,7 +2119,8 @@ function previewWindow(text: string, line: number): { text: string; first: numbe
   let at = 0
   for (let n = 1; n < line && at >= 0; n++) at = clean.indexOf('\n', at) + 1 || -1
   if (at <= 0) return { text, first: 0 }
-  const back = clean.lastIndexOf('\n', Math.max(0, at - Math.floor(PREVIEW_CHARS / 4)) - 1) + 1
+  const min = Math.max(0, at - Math.floor(PREVIEW_CHARS / 4))
+  const back = min === 0 ? 0 : clean.indexOf('\n', min - 1) + 1 || at
   const from = Math.min(back, at)
   let first = 0
   for (let i = clean.indexOf('\n'); i >= 0 && i < from; i = clean.indexOf('\n', i + 1)) first++

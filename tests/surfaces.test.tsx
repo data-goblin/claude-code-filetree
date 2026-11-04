@@ -4565,6 +4565,33 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+test('a content-search hit right after a line longer than the preview budget still lands inside the preview', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['long.txt', 'file']] },
+    files: { [`${root}/long.txt`]: ['x'.repeat(100_000), 'needle here', 'after'].join('\n') },
+    grep: 'long.txt\x002\x00needle here\n',
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  await ui.post({ press: `grep:2:${root}/long.txt` }, { in: 'rows' })
+  await clock.settle()
+  await clock.advance(100)
+  await clock.settle()
+  const peek = peekOf(await ui.drawn()).preview
+  expect(peek.text).toContain('needle here')
+  expect(peek.startLine).toBe(2)
+  await ui.unmount()
+})
+
 test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
   expect(toEre('a.*?b\\s[\\w-]')).toBe('a.*b[[:space:]][[:alnum:]_-]')
