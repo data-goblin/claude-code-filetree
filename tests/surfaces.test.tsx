@@ -4610,10 +4610,11 @@ test('content search outside a repo in a hidden root with hidden files off searc
   await clock.settle()
   await clock.advance(200)
   await clock.settle()
-  const argv = ran.find(a => a[0] === 'grep' && a.includes('-rnIZH')) ?? []
+  const argv = ran.find(a => a[0] === 'grep' && a.includes('--null')) ?? []
   expect(argv).toContain('--exclude-dir=.*')
   expect(argv.slice(argv.indexOf('--') + 1)).toEqual([`${root}/app`, `${root}/b.toml`])
-  expect(argv[1]).toBe('-rnIZH')
+  expect(argv.slice(1, 3)).toEqual(['-rnIH', '--null'])
+  expect(argv.some(a => /^-[a-zA-Z]*Z/.test(a))).toBe(false)
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/app/c.toml`, `grep:3:${root}/app/c.toml`])
   await ui.unmount()
 })
