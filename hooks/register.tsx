@@ -3362,6 +3362,7 @@ export const register: Register = (on, options) => {
       if (data.shift && !data.ctrl && (ghost || n)) {
         if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
         await markRange($, data.press)
+        if (autoOpened.size) claimMarks((await get($)).cursor)
         return {}
       }
       if (ghost) {

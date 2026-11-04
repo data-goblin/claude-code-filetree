@@ -4299,6 +4299,26 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`with auto-collapse on, a shift+click range ending in a folder Claude opened keeps that folder open, on the ${surface}`, { timeoutMs: 20_000, options: { collapse: 'on' } }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await $.tool.call({ tool: 'Read', file_path: `${root}/src/e.ts` })
+    await clock.settle()
+    await clock.advance(3_000)
+    await clock.settle()
+    await ui.post({ press: `${root}/src/e.ts`, shift: true }, zone(`${root}/src/e.ts`))
+    await clock.settle()
+    expect(await marked()).toEqual(['e.ts'])
+    await clock.advance(11_000)
+    await clock.settle()
+    expect(await marked()).toEqual(['e.ts'])
+    await ui.unmount()
+  })
+
   test(`ctrl+click opens the file and marks nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const ran: Ran = []
