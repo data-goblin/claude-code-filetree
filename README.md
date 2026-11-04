@@ -31,6 +31,11 @@
 > [!NOTE]
 > filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
 
+
+<p align="center">
+  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
+</p>
+
 ---
 
 ## Installation
