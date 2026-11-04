@@ -37,6 +37,7 @@ export type FileTree = {
   query: string
   searchCase: boolean
   searchRegex: boolean
+  searchContent: boolean
   searchScope: string
   autoCollapse?: boolean
   sortCol: '' | 'name' | 'git' | 'metric'

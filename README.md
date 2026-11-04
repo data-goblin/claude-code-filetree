@@ -29,7 +29,7 @@
 </table>
 
 > [!NOTE]
-> filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
+> filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
 
 ---
 
@@ -53,18 +53,22 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Features
 
-- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, and sortable Name, Git and value column headers
+- File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, with the matched characters highlighted in each result, and sortable Name, Git and value column headers
+- The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown, and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
+- A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
 - The selected file goes to Claude as context, and `@path` in a prompt reveals that file
+- `v` marks up to 100 files and folders: marked rows show a dot, `y` / `Y` copy all their paths, `u` their names, and the marked paths go to Claude as context
 - Right column cycles date, size, lines of code and number of files from the header button, with git counts in their own columns beside it; a folder's date is its newest file
 - Split preview under or above the tree: highlighted code, rendered Markdown, images, video poster frames, and PDF and Word pages turned with `[` and `]`
 - Treemap of the folder under the cursor in the same split, sized by bytes or by lines, with Claude's activity lit
-- `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name
-- Open files in their default app, an editor in a tmux or herdr pane, or any command
+- `d` shows the diff of a file or of every changed file in a folder, in the pane or in a tool you name; a folder's files are grouped by folder, with test, build and generated files (lockfiles, `dist`, `build`, `out`, `*.min.*`, snapshots, test folders and `*.test.*` / `*_test.*` files) in a group of their own after the rest
+- Open files in their default app, an editor in a tmux or herdr pane, or any command, and `t` opens a shell in a folder in a new tmux or herdr pane (where Terminal target says)
 - Changes made outside Claude show at once on Linux through `inotifywait`
 - Draws in the terminal's own palette, with Nerd Font, plain or text glyphs; in the Desktop app, vector icons for files, folders and the toolbar
+- Symlinks show an arrow after the name: muted when the target is in the tree, yellow when it is outside, red when it is missing or the link is circular; the footer names the target and which of these it is for the selected row
 - `AGENTS.md`, `CLAUDE.md`, their `.local.md` variants and Markdown files under any `.claude/rules/` folder draw a brain instead of the Markdown icon (`§` in plain glyphs)
 - `x` guards a file or folder: it draws a red x, and Claude's Edit, Write and NotebookEdit calls on it or anything under it are refused with a reason naming the guard. A Bash or PowerShell command whose text names a guarded path asks you first; that check reads only the command text, so it can miss a path the command builds itself. Guards are kept per repo in filetree's own store under your Claude configuration, never in the repo
 - When Claude or a subagent writes a file outside the repo (or outside the tree root when there is no repo) with Edit, Write or NotebookEdit, a warning badge with the count shows in the header and a toast says so the first time in a session; the badge or `w` lists those files. Writes from Bash are not counted, since a shell command's targets cannot be known for sure
@@ -106,22 +110,28 @@ s:            focus search
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
 z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
+q:            search: file contents instead of names (the contents toggle in the search row); j / k pick a match, Enter opens it
 a:            auto-collapse: close folders opened for Claude once its activity fades
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
 p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
 "[ / ]":      previous / next page of a PDF or Word document
 d:            diff of the entry under the cursor
+t:            open a shell in the folder under the cursor (or the file's folder) in a new tmux or herdr pane
 x:            guard or unguard the entry under the cursor (off limits to Claude's edits)
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
-y / Y:        copy the relative / absolute path
-"?":          show the shortcuts in the footer for 10 seconds
+y / Y:        copy the relative / absolute path, or of every marked entry, one per line
+u:            copy the file name, or the names of every marked entry
+v / V:        mark or unmark the entry under the cursor / clear all marks
+"?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); j, k, the arrows, f, b, Page Up/Down, Home and End scroll it, and any other key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS
 ```
 
-<img src="docs/media/shortcuts.gif" alt="? shows the shortcuts in the footer, and k from the first row selects the root" width="800">
+<img src="docs/media/shortcuts.gif" alt="? opens the grouped shortcuts overlay over the tree, and ? closes it" width="800">
 
 Resize the pane with the mouse or the `pane:grow` and `pane:shrink` keybindings.
+
+`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
 
 ## Settings
 
@@ -140,11 +150,12 @@ Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off
 Auto-collapse:    off | on
-Shortcut row:     auto | always | off
+Shortcuts:        auto | always | off
 Open with:        empty | editor | preview | a command with {path} and {dir}
 Binary files:     Open with | default app
 Edit with:        empty | a command with {path} and {line}
 Diff with:        empty | a command such as "hunk diff --" or "lazygit -f"
+Diff groups:      folder | kind | off
 Terminal target:  auto | pane right | pane below | tab | workspace
 Ignore:           names to hide, such as ".cache .tmp"
 Preview pane:     bottom | top

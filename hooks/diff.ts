@@ -80,3 +80,38 @@ export function diffWindow(lines: DiffLine[], top: number, rows: number): { segm
   close()
   return { segments, top: from }
 }
+
+export type DiffGroups = 'folder' | 'kind' | 'off'
+
+export const GROUP = '── '
+const LOCKS = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock', 'go.sum'])
+const BUILT = new Set(['dist', 'build', 'out', 'test', 'tests', '__tests__', '__snapshots__'])
+
+export function diffGroups(value: unknown): DiffGroups {
+  return value === 'kind' || value === 'off' ? value : 'folder'
+}
+
+export function generated(path: string): boolean {
+  const parts = path.split('/')
+  const name = parts.pop() ?? ''
+  return name.endsWith('.lock') || LOCKS.has(name) || parts.some(p => BUILT.has(p)) || /\.min\.[^/]+$/.test(name) || name.endsWith('.snap') || /\.test\.[^/]+$/.test(name) || /_test\.[^/]+$/.test(name)
+}
+
+export function groupFiles<F extends { path: string }>(files: F[], mode: DiffGroups): ({ group: string } | { file: F })[] {
+  if (mode === 'off') return files.map(file => ({ file }))
+  const rest = files.filter(f => !generated(f.path))
+  const built = files.filter(f => generated(f.path))
+  const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : './')
+  const groups: [string, F[]][] = []
+  if (mode === 'folder') {
+    const sorted = [...rest].sort((a, b) => dirOf(a.path).localeCompare(dirOf(b.path)) || a.path.localeCompare(b.path))
+    for (const f of sorted) {
+      const last = groups.at(-1)
+      if (last && last[0] === dirOf(f.path)) last[1].push(f)
+      else groups.push([dirOf(f.path), [f]])
+    }
+  } else if (rest.length) groups.push(['source', rest])
+  if (built.length) groups.push(['tests, builds and generated', built])
+  if (groups.length < 2) return files.map(file => ({ file }))
+  return groups.flatMap(([name, list]) => [{ group: `${GROUP}${name} (${list.length})` }, ...list.map(file => ({ file }))])
+}

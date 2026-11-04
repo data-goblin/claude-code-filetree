@@ -5,7 +5,8 @@ import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
-import { compileRegex } from '../hooks/regex'
+import { compileRegex, compileSpans, toEre } from '../hooks/regex'
+import { fileRefs, markdownSplit } from '../hooks/refs'
 import { ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
@@ -49,6 +50,10 @@ type World = {
   locAbortOnce?: string[]
   tops?: Record<string, string>
   real?: Record<string, string>
+  grep?: string
+  fullName?: boolean
+  linkTo?: Record<string, string>
+  loops?: string[]
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -86,6 +91,15 @@ function world(on: On, w: World, ran: Ran) {
     throw new Error('no theme file')
   })
   const dirOf = (p: string) => w.dirs[p] ?? w.dirs[p.replace(/^[A-Za-z]:/, '')]
+  on('fs.exists', (_$, e) => {
+    const file = norm(e.path).replace(/^[A-Za-z]:/, '')
+    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined }
+  })
+  on('fs.write', (_$, e) => {
+    ran.push(['write', e.path])
+    w.files = { ...w.files, [norm(e.path).replace(/^[A-Za-z]:/, '')]: e.text }
+    return { value: undefined }
+  })
   on('fs.list', async (_$, e) => {
     const path = norm(e.path)
     const bare = path.replace(/^[A-Za-z]:/, '')
@@ -108,6 +122,13 @@ function world(on: On, w: World, ran: Ran) {
     const bare = said.slice(drive.length)
     const alias = Object.keys(w.real ?? {}).find(k => bare === k || bare.startsWith(`${k}/`))
     const p = alias ? `${drive}${w.real?.[alias]}${bare.slice(alias.length)}` : said
+    const key = p.replace(/^[A-Za-z]:/, '')
+    if (w.loops?.includes(key)) return { value: { kind: 'file', size: 1, mtimeMs: 1_700_000_000_000, isLink: true } }
+    const to = w.linkTo?.[key]
+    if (to !== undefined) {
+      if (!to) throw new Error(`ENOENT ${e.path}`)
+      return { value: { kind: 'file', size: 1, mtimeMs: 1_700_000_000_000, isLink: false, ...(e.resolve ? { realPath: to } : {}) } }
+    }
     const parent = p.slice(0, p.lastIndexOf('/')) || '/'
     const name = p.slice(p.lastIndexOf('/') + 1)
     const hit = dirOf(p) ? 'dir' : dirOf(parent)?.find(([n]) => n === name)?.[1]
@@ -150,6 +171,19 @@ function world(on: On, w: World, ran: Ran) {
       if (delay) await clock.sleep(delay)
       return ok(w.du?.[argv.at(-1) ?? ''] ?? '')
     }
+    if (argv[0] === 'mv' && w.files) {
+      const [from, to] = argv.slice(-2)
+      const text = w.files[from ?? '']
+      if (text !== undefined && to) {
+        w.files = { ...w.files, [to]: text }
+        delete w.files[from ?? '']
+      }
+      return ok('')
+    }
+    if (argv[0] === 'rm' && w.files) {
+      delete w.files[argv.at(-1) ?? '']
+      return ok('')
+    }
     if (argv[0] === 'uname') return ok(w.os === 'darwin' ? 'Darwin\n' : 'Linux\n')
     if (argv[0] === 'sh') return ok('missing\n')
     if (argv[0] === 'git') {
@@ -187,6 +221,11 @@ function world(on: On, w: World, ran: Ran) {
     }
     const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[(argv[1] ?? '').replace(/\/\.$/, '')] ?? '') : ''
     if (out) yield { stream: 'stdout', text: out }
+    if (w.grep && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) {
+      const under = argv[0] === 'git' ? (argv[argv.indexOf('-C') + 1] ?? '').slice(w.top.length + 1) : ''
+      const full = w.fullName && under && !argv.includes('--no-full-name')
+      yield { stream: 'stdout', text: full ? w.grep.replace(/^(?=.)/gm, `${under}/`) : w.grep }
+    }
     if (argv[0] === 'sh' && w.poster) yield { stream: 'stdout', text: w.poster(argv) }
     if (argv[0] === 'inotifywait' && w.watch) {
       await clock.sleep(w.watch.after)
@@ -2002,34 +2041,223 @@ test('spacing off and shortcuts off drop the blank lines and the shortcut row, a
   await ui.unmount()
 })
 
-test('the footer names the entry under the cursor, and ? shows the shortcuts with diff for ten seconds on the same row', { timeoutMs: 20_000 }, async ($, on) => {
+const shortcutText = (tree: unknown) => treeRows(tree).rows.map(r => r.left.map(x => x.t).join('')).join('\n')
+
+test('the footer names the entry under the cursor, and ? toggles a grouped shortcuts overlay in the tree body with no timer', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/home/k/proj'
   const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir'], ['README.md', 'file'], ['notes.md', 'file']] }, status: '## main\0', numstat: '' }, [])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 60 } } })
   await clock.settle()
   await ui.post({ press: `${root}/README.md` }, { in: 'rows' })
   await clock.settle()
   expect(await texts(ui)).toMatch(/"selected: "\]}\]}.*"truncate-start"},"children":\["README.md"\]/)
   await ui.post({ key: 'k' }, { in: 'rows' })
   await clock.settle()
-  expect(await texts(ui)).toMatch(/"selected: "\]}\]}.*"truncate-start"},"children":\["notes.md"\]/)
   await ui.post({ key: 'k' }, { in: 'rows' })
   await clock.settle()
   expect(await texts(ui)).toMatch(/"selected: "\]}\]}.*"truncate-start"},"children":\["src"\]/)
-  expect(await ui.find({ key: 'nav-d' })).toBeUndefined()
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
   await ui.post({ key: '?' }, { in: 'rows' })
   await clock.settle()
-  expect(await ui.find({ key: 'nav-d' })).toBeDefined()
-  expect(await ui.find({ key: 'nav-help' })).toBeDefined()
-  await clock.advance(10_100)
+  const open = shortcutText(await ui.drawn())
+  for (const word of ['Keyboard shortcuts', 'Move', 'Search', 'Files and actions', 'View', 'Pane', 'v / V', 'y / Y', 'n / g / m', 'c / r', 'f / b', '[ / ]', 'search file contents', 'ctrl+x tab', 'give the pane the keyboard', 'alt+l', 'alt+h', '/filetree keys', 'set up alt+l and alt+h', 'Esc', 'back to the prompt']) expect(open).toContain(word)
+  for (const key of ['u', 't', 'x', 'w', 'd', 'z', 'i', 's', 'p', 'a']) expect(open).toMatch(new RegExp(`\n   ${key} +\\S`))
+  expect(treeRows(await ui.drawn()).active).toBe('')
   expect(await ui.find({ key: 'nav-d' })).toBeUndefined()
+  await clock.advance(20_000)
+  expect(shortcutText(await ui.drawn())).toContain('Keyboard shortcuts')
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).toContain('Keyboard shortcuts')
   await ui.post({ key: '?' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
+  expect(treeRows(await ui.drawn()).active).toBe(`${root}/src`)
+  expect(await texts(ui)).toMatch(/"selected: "\]}\]}.*"truncate-start"},"children":\["src"\]/)
+  await ui.post({ key: '?' }, { in: 'rows' })
+  await clock.settle()
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
+  expect(JSON.stringify(await ui.drawn())).toContain('1 marked')
+  await ui.unmount()
+})
+
+test('the shortcuts overlay scrolls with j and the wheel when the pane is short, and h closes it and acts on the tree', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['src', 'dir'], ['a.ts', 'file']], [`${root}/src`]: [['x.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } } })
   await clock.settle()
   await ui.post({ key: '?' }, { in: 'rows' })
   await clock.settle()
-  expect(await ui.find({ key: 'nav-d' })).toBeUndefined()
+  const first = treeRows(await ui.drawn()).rows
+  expect(first[0]?.left.map(x => x.t).join('')).toContain('Keyboard shortcuts')
+  expect(shortcutText(await ui.drawn())).not.toContain('back to the prompt')
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows[0]?.left.map(x => x.t).join('')).not.toContain('Keyboard shortcuts')
+  await ui.post({ key: 'end' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).toContain('back to the prompt')
+  await ui.post({ key: 'home' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows[0]?.left.map(x => x.t).join('')).toContain('Keyboard shortcuts')
+  await $.ui.scroll({ ...wheelDown, by: 5 })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows[0]?.left.map(x => x.t).join('')).not.toContain('Keyboard shortcuts')
+  await ui.post({ key: 'l' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`? typed into the search box is a literal character and never toggles content search or the overlay on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file'], ['why?.md', 'file']] }, status: '## main\0', numstat: '', grep: 'a.ts\x003\x00const alpha = 1\n' }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await ui.input({ key: 'q', text: '?', kind: 'change' })
+    await clock.settle()
+    await clock.advance(200)
+    await clock.settle()
+    const drawn = await ui.drawn()
+    expect(JSON.stringify(drawn)).toContain('"value":"?"')
+    expect(JSON.stringify(drawn)).not.toContain('Keyboard shortcuts')
+    expect(JSON.stringify(drawn)).not.toContain('grep:')
+    expect(ran.some(a => a.includes('grep'))).toBe(false)
+    if (surface === 'desktop') {
+      expect(deskRows(drawn)).toEqual([`${root}/why?.md`])
+      expect(svgs(drawn).map(x => x.alt)).toContain('search file contents off')
+    } else expect(treeRows(drawn).rows.map(r => r.id).filter(id => id.startsWith(root))).toEqual([`${root}/why?.md`])
+    await ui.unmount()
+  })
+
+  test(`the q hotkey and a click on the contents toggle switch the search box between names and file contents on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file'], ['alpha.md', 'file']] }, status: '## main\0', numstat: '', grep: 'a.ts\x003\x00const alpha = 1\n' }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const hit = `grep:3:${root}/a.ts`
+    const settle = async () => {
+      await clock.settle()
+      await clock.advance(200)
+      await clock.settle()
+    }
+    await ui.input({ key: 'q', text: 'alpha', kind: 'change' })
+    await settle()
+    expect(JSON.stringify(await ui.drawn())).not.toContain(hit)
+    expect(ran.some(a => a.includes('grep'))).toBe(false)
+    if (surface === 'desktop') await ui.press({ key: 'hk-q' })
+    else await ui.post({ key: 'q' }, { in: 'rows' })
+    await settle()
+    const on1 = await ui.drawn()
+    expect(JSON.stringify(on1)).toContain(hit)
+    expect(JSON.stringify(on1)).toContain('"value":"alpha"')
+    expect(ran.some(a => a.includes('grep') && a.includes('alpha'))).toBe(true)
+    if (surface === 'desktop') {
+      expect(svgs(on1).map(x => x.alt)).toContain('search file contents on')
+      expect(JSON.stringify(on1)).toContain('"placeholder":"Search file contents..."')
+      await tap(ui, 'content')
+    } else {
+      expect(JSON.stringify(on1)).toContain('"placeholder":"search contents"')
+      expect(await ui.find({ key: 'search-content' })).toBeDefined()
+      await ui.press({ key: 'search-content' })
+    }
+    await settle()
+    const off = await ui.drawn()
+    expect(JSON.stringify(off)).not.toContain(hit)
+    if (surface === 'desktop') {
+      expect(svgs(off).map(x => x.alt)).toContain('search file contents off')
+      expect(deskRows(off)).toEqual([`${root}/alpha.md`])
+      await tap(ui, 'content')
+    } else {
+      expect(treeRows(off).rows.map(r => r.id).filter(id => id.startsWith(root))).toEqual([`${root}/alpha.md`])
+      await ui.press({ key: 'search-content' })
+    }
+    await settle()
+    expect(JSON.stringify(await ui.drawn())).toContain(hit)
+    await ui.unmount()
+  })
+}
+
+test('shortcuts always opens the overlay with the pane and ? still closes it', { timeoutMs: 20_000, options: { shortcuts: 'always' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).toContain('Keyboard shortcuts')
+  expect(await ui.find({ key: 'nav-help' })).toBeUndefined()
+  expect(await ui.find({ key: 'hk-tree' })).toBeDefined()
+  await ui.post({ key: '?' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).toContain('a.ts')
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
+  await ui.unmount()
+})
+
+test('shortcuts off drops the ?: shortcuts hint but ? still toggles the overlay', { timeoutMs: 20_000, options: { shortcuts: 'off' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await ui.find({ key: 'nav-help' })).toBeUndefined()
+  await ui.post({ key: '?' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).toContain('Keyboard shortcuts')
+  await ui.post({ key: '?' }, { in: 'rows' })
+  await clock.settle()
+  expect(shortcutText(await ui.drawn())).not.toContain('Keyboard shortcuts')
+  await ui.unmount()
+})
+
+test('on the desktop the Shortcuts button opens a keyboard panel in the pane body with desktop keys only, and Close or an action key closes it', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
+  await ui.press({ key: 'nav-help' })
+  await clock.settle()
+  const panel = JSON.stringify(await ui.find({ key: 'keys-panel' }))
+  for (const word of ['Keyboard shortcuts', 'keyboard shortcuts', 'Move', 'Files and actions', 'v / V', 'n / g / m', 'search file contents']) expect(panel).toContain(word)
+  for (const word of ['ctrl+x tab', 'alt+l', '/filetree keys', 'page the preview', 'Quick Look']) expect(panel).not.toContain(word)
+  await ui.press({ key: 'keys-close' })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
+  await ui.press({ key: 'nav-help' })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeDefined()
+  await ui.press({ key: 'hk-j' })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeDefined()
+  await ui.press({ key: 'hk-h' })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
+  await ui.press({ key: 'hk-j' })
+  await clock.settle()
+  await ui.press({ key: 'nav-help' })
+  await clock.settle()
+  await ui.press({ key: 'hk-v' })
+  await clock.settle()
+  expect(await ui.find({ key: 'keys-panel' })).toBeUndefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('1 marked')
   await ui.unmount()
 })
 
@@ -3948,4 +4176,938 @@ test('Follow work starts over in a new or resumed session: reads from the last s
   await clock.advance(1000)
   await clock.settle()
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
+})
+
+test('the contents toggle searches file contents, groups matches per file, opens the split at the line and caps the results', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['b.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    files: { [`${root}/src/a.ts`]: Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n') },
+    grep: 'src/a.ts\x0040\x00  const needle = 1\nsrc/a.ts\x0045\x00needle()\nb.md\x002\x00a needle\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'search-content' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(4)).toEqual(['grep', '-n', '-I', '-z', '--no-color', '--no-column', '--no-full-name', '--untracked', '-i', '-F', '-e', 'needle', '--', '.'])
+  const rows = treeRows(await ui.drawn()).rows
+  expect(rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:40:${root}/src/a.ts`, `grep:45:${root}/src/a.ts`, `grep:0:${root}/b.md`, `grep:2:${root}/b.md`])
+  expect(rows[1]?.left.map(s => s.t).join('')).toBe('    40  const needle = 1')
+  expect(rows[0]?.right.map(s => s.t).join('')).toContain('2')
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await ui.post({ key: 'return' }, { in: 'rows' })
+  await clock.settle()
+  expect(peekOf(await ui.drawn()).preview.startLine).toBe(38)
+  await ui.post({ press: `grep:45:${root}/src/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  expect(peekOf(await ui.drawn()).preview.startLine).toBe(43)
+  expect(treeRows(await ui.drawn()).active).toBe(`grep:45:${root}/src/a.ts`)
+  w.grep = `${Array.from({ length: 250 }, (_, i) => `b.md\x00${i + 1}\x00needle ${i}`).join('\n')}\n`
+  await ui.input({ key: 'q', text: 'needles', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const capped = treeRows(await ui.drawn()).rows
+  expect(capped.at(-1)?.left[0]?.t).toBe('first 200 matches; keep typing to narrow')
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const drawn = JSON.stringify(await desktop.drawn())
+  expect(drawn).toContain(`hit:grep:1:${root}/b.md`)
+  expect(drawn).toContain('first 200 matches; keep typing to narrow')
+  await desktop.post({ press: `grep:3:${root}/b.md` }, { in: `hit:grep:3:${root}/b.md` })
+  await clock.settle()
+  expect(JSON.stringify(await desktop.drawn())).toContain('pv-head')
+  await desktop.press({ key: 'back' })
+  await clock.settle()
+  await ui.input({ key: 'q', text: '', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.some(r => r.id.startsWith('grep:'))).toBe(false)
+  await desktop.unmount()
+  await ui.unmount()
+})
+
+test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc clear them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  for (const name of ['a.txt', 'src']) {
+    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
+    await clock.advance(1000)
+    await ui.post({ key: 'v' }, { in: 'rows' })
+  }
+  await clock.settle()
+  const marked = (rows: RowSpec[]) => rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
+  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([`${root}/src`, `${root}/a.txt`])
+  expect(JSON.stringify(await ui.drawn())).toContain('2 marked')
+  for (const key of ['y', 'Y']) await ui.post({ key }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['a.txt\nsrc', `${root}/a.txt\n${root}/src`])
+  const sent = await $.prompt.submit({ text: 'compare these', wait: false, origin: { kind: 'composer' } })
+  expect(JSON.stringify(sent)).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/a.txt\\n${root}/src`)
+  await ui.post({ key: 'V' }, { in: 'rows' })
+  await clock.settle()
+  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([])
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await desktop.post({ press: `${root}/b.txt` }, { in: `hit:${root}/b.txt` })
+  await desktop.post({ key: 'v' }, { in: `hit:${root}/b.txt` })
+  await clock.settle()
+  expect(svgs(await desktop.drawn()).filter(s => s.alt.startsWith('marked ')).map(s => s.alt)).toEqual(['marked b.txt'])
+  await desktop.post({ key: 'V' }, { in: `hit:${root}/b.txt` })
+  await clock.settle()
+  expect(svgs(await desktop.drawn()).some(s => s.alt.startsWith('marked '))).toBe(false)
+  await desktop.unmount()
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`u copies the bare file name on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['deep.ts', 'file']] } }, [])
+    const copied: string[] = []
+    on('ui.copy', (_$, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true } }
+    })
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await ui.post({ press: `${root}/src` }, zone(`${root}/src`))
+    await clock.settle()
+    await ui.post({ press: `${root}/src/deep.ts` }, zone(`${root}/src/deep.ts`))
+    await clock.settle()
+    if (surface === 'desktop') await ui.press({ key: 'hk-u' })
+    else await ui.post({ key: 'u' }, zone(`${root}/src/deep.ts`))
+    await clock.settle()
+    expect(copied).toEqual(['deep.ts'])
+    await ui.unmount()
+  })
+}
+
+test('symlinks show an arrow, and the footer says where they lead: inside, outside the tree, broken or circular, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['gone.ts', 'file'], ['in.ts', 'file'], ['loop', 'file'], ['out.ts', 'file'], ['x.ts', 'file']] },
+    links: [`${root}/in.ts`, `${root}/out.ts`, `${root}/gone.ts`, `${root}/loop`],
+    linkTo: { [`${root}/in.ts`]: `${root}/x.ts`, [`${root}/out.ts`]: '/etc/hosts', [`${root}/gone.ts`]: '' },
+    loops: [`${root}/loop`],
+    stdout: { [`readlink -- ${root}/gone.ts`]: 'missing.ts\n', [`readlink -- ${root}/loop`]: 'loop\n' },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
+  await clock.settle()
+  await ui.drawn()
+  await clock.settle()
+  const rows = treeRows(await ui.drawn()).rows
+  const arrow = (name: string) => rows.find(r => r.id === `${root}/${name}`)?.left.find(s => s.t === ' →')
+  expect(arrow('x.ts')).toBeUndefined()
+  expect(arrow('in.ts')?.c).toBe('')
+  expect(arrow('out.ts')?.c).toBe('ansi256(3)')
+  expect(arrow('gone.ts')?.c).toBe('ansi256(1)')
+  expect(arrow('loop')?.c).toBe('ansi256(1)')
+  const footer = async (name: string) => {
+    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
+    await clock.advance(1000)
+    await clock.settle()
+    return JSON.stringify(await ui.drawn())
+  }
+  expect(await footer('in.ts')).toContain('in.ts → ~/proj/x.ts"')
+  expect(await footer('out.ts')).toContain('out.ts → /etc/hosts (outside the tree)')
+  expect(await footer('gone.ts')).toContain('gone.ts → missing.ts (broken: target missing)')
+  expect(await footer('loop')).toContain('loop → loop (circular link)')
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
+  await clock.settle()
+  const drawn = JSON.stringify(await desktop.drawn())
+  expect(drawn.match(/"children":\[" → "\]/g)?.length).toBe(4)
+  expect(drawn).toContain('{"color":"#d99a1e"},"children":[" → "]')
+  expect(drawn).toContain('loop → loop (circular link)')
+  await desktop.unmount()
+  await ui.unmount()
+})
+
+for (const [surface, env, want] of [
+  ['terminal', { HOME: '/home/k', TMUX: '/tmp/tmux-1000/default,1,0', SHELL: '/bin/zsh' }, ['tmux', 'new-window', '-c', '/home/k/proj/src', '--', '/bin/zsh']],
+  ['terminal', { HOME: '/home/k', HERDR_ENV: '1', HERDR_BIN_PATH: '/opt/herdr' }, ['/opt/herdr', 'pane', 'split', '--current', '--direction', 'right', '--focus', '--cwd', '/home/k/proj/src']],
+  ['desktop', { HOME: '/home/k' }, null],
+] as const) {
+  test(`t opens a shell in the folder of the cursor on the ${surface}${'TMUX' in env ? ' in tmux' : 'HERDR_ENV' in env ? ' in herdr' : ', or says it needs tmux or herdr'}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] } }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await ui.post({ press: `${root}/src` }, zone(`${root}/src`))
+    await clock.settle()
+    await ui.post({ press: `${root}/src/a.ts` }, zone(`${root}/src/a.ts`))
+    await clock.settle()
+    if (surface === 'desktop') await ui.press({ key: 'hk-t' })
+    else await ui.post({ key: 't' }, zone(`${root}/src/a.ts`))
+    await clock.settle()
+    if (want) expect(ran).toContainEqual([...want])
+    else expect(ran).toContainEqual(['toast', 't opens a shell in a new tmux or herdr pane; run Claude Code inside tmux or herdr to use it'])
+    await ui.unmount()
+  })
+}
+
+test('name search highlights the matched characters for plain, case and regex search, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['xAbyab.ts', 'file'], ['zz.ts', 'file']] } }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const lit = async () => {
+    const row = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src/xAbyab.ts`)
+    return row?.left.slice(3).filter(s => s.c === 'ansi256(4)' && s.b).map(s => s.t) ?? []
+  }
+  await ui.input({ key: 'q', text: 'ab', kind: 'change' })
+  await clock.settle()
+  expect(await lit()).toEqual(['Ab', 'ab'])
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await clock.settle()
+  expect(await lit()).toEqual(['ab'])
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'b.a', kind: 'change' })
+  await clock.settle()
+  expect(await lit()).toEqual(['bya'])
+  const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const name = every(await desktop.drawn(), n => has(n, 'type') && n.type === 'Text' && kids(n).some(c => has(c, 'type') && c.type === 'Text'))
+  expect(JSON.stringify(name)).toContain('"weight":"semibold","bold":true},"children":["bya"]')
+  expect(JSON.stringify(name)).toContain('"children":["xA",')
+  await desktop.unmount()
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`file references with a line in Claude's reply get a link that reveals the file and previews that line, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+      dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] },
+      files: { [`${root}/src/a.ts`]: Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join('\n') },
+    }, [])
+    on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const pane = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const text = 'Fixed it in `src/a.ts:40-42`, see also src/a.ts#L50, /home/k/proj/src/missing.ts:3, http://host:8080 and 12:30.'
+    const reply = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+    await clock.settle()
+    const drawn = JSON.stringify(await reply.drawn())
+    expect(drawn).toContain(text)
+    expect(drawn).toContain(`in the file tree: [src/a.ts:40-42](file://${root}/src/a.ts#L40-L42)  [src/a.ts:50](file://${root}/src/a.ts#L50)"`)
+    const before = opens.length
+    await reply.press({ key: 'filetree-refs', link: { href: `file://${root}/src/a.ts#L40-L42` } })
+    await clock.settle()
+    expect(opens.slice(before).some(o => has(o, 'id') && o.id === 'filetree')).toBe(true)
+    if (surface === 'desktop') {
+      expect(JSON.stringify(await pane.drawn())).toMatch(/"source":"line 38\\nline 39[^"]*","path":"\/home\/k\/proj\/src\/a\.ts","startLine":38/)
+      await pane.press({ key: 'back' })
+      await clock.settle()
+      const term = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+      await clock.settle()
+      expect(treeRows(await term.drawn()).active).toBe(`${root}/src/a.ts`)
+      await term.unmount()
+    } else {
+      expect(peekOf(await pane.drawn()).preview.startLine).toBe(38)
+      expect(treeRows(await pane.drawn()).active).toBe(`${root}/src/a.ts`)
+    }
+    const plain = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text: 'No files here, version 1.2:3 aside.', isFirstOfReply: false } })
+    await clock.settle()
+    expect(JSON.stringify(await plain.drawn())).not.toContain('filetree-refs')
+    await plain.unmount()
+    await reply.unmount()
+    await pane.unmount()
+  })
+}
+
+test('a reply reference pressed on the terminal while a full diff is open replaces it with the split preview at that line', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0 M src/a.ts\0', numstat: '',
+    dirs: { [root]: [['src', 'dir']], [`${root}/src`]: [['a.ts', 'file']] },
+    files: { [`${root}/src/a.ts`]: Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join('\n') },
+    patch: 'diff --git a/src/a.ts b/src/a.ts\nindex 1..2 100644\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-line 0\n+line 1\n',
+  }, [])
+  on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const pane = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await pane.post({ key: 'end' }, { in: 'rows' })
+  await pane.post({ key: 'd' }, { in: 'rows' })
+  await clock.settle()
+  expect(await texts(pane)).toContain('"format":"diff"')
+  const reply = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'AssistantMessage', props: { text: 'Fixed it in `src/a.ts:40`.', isFirstOfReply: true } })
+  await clock.settle()
+  await reply.press({ key: 'filetree-refs', link: { href: `file://${root}/src/a.ts#L40` } })
+  await clock.settle()
+  expect(await texts(pane)).not.toContain('"format":"diff"')
+  expect(peekOf(await pane.drawn()).preview.startLine).toBe(38)
+  expect(treeRows(await pane.drawn()).active).toBe(`${root}/src/a.ts`)
+  await reply.unmount()
+  await pane.unmount()
+})
+
+for (const [surface, groups, want] of [
+  ['terminal', 'folder', ['── lib/ (1)', 'lib/a.ts', '── src/ (2)', 'src/a.ts', 'src/b.ts', '── tests, builds and generated (2)', 'package-lock.json', 'tests/x.test.ts']],
+  ['desktop', 'folder', ['group lib/ (1)', 'file lib/a.ts', 'group src/ (2)', 'file src/a.ts', 'file src/b.ts', 'group tests, builds and generated (2)', 'file package-lock.json', 'file tests/x.test.ts']],
+  ['terminal', 'kind', ['── source (3)', 'src/b.ts', 'lib/a.ts', 'src/a.ts', '── tests, builds and generated (2)', 'package-lock.json', 'tests/x.test.ts']],
+  ['terminal', 'off', ['src/b.ts', 'package-lock.json', 'lib/a.ts', 'tests/x.test.ts', 'src/a.ts']],
+] as const) {
+  test(`d on a folder with Diff groups ${groups} orders the files on the ${surface}`, { timeoutMs: 20_000, options: { groups } }, async ($, on) => {
+    const root = '/home/k/proj'
+    const files = ['src/b.ts', 'package-lock.json', 'lib/a.ts', 'tests/x.test.ts', 'src/a.ts']
+    const patch = files.map(f => `diff --git a/${f} b/${f}\nindex 1..2 100644\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('')
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir'], ['lib', 'dir'], ['tests', 'dir'], ['package-lock.json', 'file']] }, status: '## main\0 M src/a.ts\0', numstat: '', patch }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), scroll: { offset: 0, bodyRows: 80 } } })
+    await clock.settle()
+    await ui.post({ key: 'k' }, { in: surface === 'desktop' ? `hit:${root}/lib` : 'rows' })
+    await ui.post({ key: 'd' }, { in: surface === 'desktop' ? `hit:${root}/lib` : 'rows' })
+    await clock.settle()
+    const tree = await ui.drawn()
+    if (surface === 'desktop') expect(svgs(tree).map(s => s.alt).filter(a => a.startsWith('group ') || a.startsWith('file '))).toEqual([...want])
+    else {
+      const preview = rowsProps(clientProps(tree, 'rows')).preview
+      expect(preview?.segments?.map(g => g.title).filter(Boolean)).toEqual([...want])
+    }
+    await ui.unmount()
+  })
+}
+
+test('content search in a tree rooted in a repository subdirectory joins hits to the root even when git grep.fullName is set', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const top = '/home/k/repo'
+  const root = `${top}/src`
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top, status: '## main\0', numstat: '',
+    dirs: { [top]: [['src', 'dir']], [root]: [['a.txt', 'file']] },
+    grep: 'a.txt\x003\x00a needle\n', fullName: true,
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const argv = ran.find(a => a[0] === 'git' && a.includes('grep')) ?? []
+  expect(argv[argv.indexOf('-C') + 1]).toBe(root)
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.txt`, `grep:3:${root}/a.txt`])
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a content-search hit past the preview character budget opens at its line with real line numbers, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const pad = (n: number) => `line ${n} `.padEnd(99, 'x')
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+      dirs: { [root]: [['big.txt', 'file']] },
+      files: { [`${root}/big.txt`]: Array.from({ length: 2000 }, (_, i) => pad(i + 1)).join('\n') },
+      grep: `big.txt\x001500\x00${pad(1500)}\n`,
+    }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    if (surface === 'desktop') await tap(ui, 'content')
+    else await ui.post({ key: 'q' }, { in: 'rows' })
+    await ui.input({ key: 'q', text: 'line 1500', kind: 'change' })
+    await clock.settle()
+    await clock.advance(200)
+    await clock.settle()
+    const id = `grep:1500:${root}/big.txt`
+    await ui.post({ press: id }, { in: surface === 'desktop' ? `hit:${id}` : 'rows' })
+    await clock.settle()
+    await clock.advance(100)
+    await clock.settle()
+    const drawn = await ui.drawn()
+    if (surface === 'desktop') {
+      const code = every(drawn, n => has(n, 'type') && n.type === 'Code').map(n => propsOf(n))
+      const at = code.find(c => has(c, 'startLine') && c.startLine === 1498)
+      expect(has(at, 'source') && String(at.source).startsWith('line 1498 ')).toBe(true)
+      const above = code.find(c => has(c, 'source') && String(c.source).includes('line 1497 '))
+      expect(has(above, 'startLine') && has(above, 'source') && Number(above.startLine) + String(above.source).split('\n').length).toBe(1498)
+    } else {
+      const peek = peekOf(drawn).preview
+      expect(peek.startLine).toBe(1498)
+      expect(peek.text.startsWith('line 1498 ')).toBe(true)
+      expect(JSON.stringify(drawn)).toContain('1498–')
+    }
+    await ui.unmount()
+  })
+}
+
+test('a content-search hit right after a line longer than the preview budget still lands inside the preview', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['long.txt', 'file']] },
+    files: { [`${root}/long.txt`]: ['x'.repeat(100_000), 'needle here', 'after'].join('\n') },
+    grep: 'long.txt\x002\x00needle here\n',
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  await ui.post({ press: `grep:2:${root}/long.txt` }, { in: 'rows' })
+  await clock.settle()
+  await clock.advance(100)
+  await clock.settle()
+  const peek = peekOf(await ui.drawn()).preview
+  expect(peek.text).toContain('needle here')
+  expect(peek.startLine).toBe(2)
+  await ui.unmount()
+})
+
+test('a case-sensitive regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
+  expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
+  expect(toEre('ab*?[\\w-]\\d')).toBe('ab*[0-9A-Za-z_-][0-9]')
+  for (const unsafe of ['a\\sb', '[^]', '[]', '[^]x', '(a|)', '|a', '()', '[a-c-e]', '[\\d-z]', '[é]', '[[:alpha:]]', '\\bword', 'a\\nb']) expect(toEre(unsafe)).toBeNull()
+  expect(toEre('a{2}b{x')).toBe('a{2}b\\{x')
+  expect(toEre('[^\\D]')).toBeNull()
+  expect(toEre('[a\\-z]')).toBeNull()
+  expect(toEre('[\\]]')).toBeNull()
+  expect(toEre('[\\\\x]')).toBeNull()
+  expect(toEre('[\\.]')).toBe('[.]')
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['a.ts', 'file']] },
+    grep: 'a.ts\x001\x00ddd\na.ts\x002\x00width 42\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: '\\d+', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '[0-9]+', '--', '.'])
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`])
+  await ui.unmount()
+})
+
+test('content search outside a repo in a hidden root with hidden files off searches its visible children, so grep never skips the root itself', { timeoutMs: 20_000, options: { ignore: 'cache[1]' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/.config'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['app', 'dir'], ['.cache', 'dir'], ['node_modules', 'dir'], ['b.toml', 'file']], [`${root}/app`]: [['c.toml', 'file']] },
+    grep: `${root}/app/c.toml\x003\x00needle = 1\n`,
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'hidden' })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const argv = ran.find(a => a[0] === 'grep' && a.includes('--null')) ?? []
+  expect(argv).toContain('--exclude-dir=.*')
+  expect(argv.slice(argv.indexOf('--') + 1)).toEqual([`${root}/app`, `${root}/b.toml`])
+  expect(argv.slice(1, 3)).toEqual(['-rnIH', '--null'])
+  expect(argv.some(a => /^-[a-zA-Z]*Z/.test(a))).toBe(false)
+  expect(argv).toContain('--exclude-dir=cache\\[1\\]')
+  expect(argv).not.toContain('--exclude-dir=cache[1]')
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/app/c.toml`, `grep:3:${root}/app/c.toml`])
+  await ui.unmount()
+})
+
+test('a Markdown preview opened at a line splits between blocks, splits a code fence at the line itself by closing and reopening it, and keeps link definitions in both halves', () => {
+  const doc = ['# Title', '', 'See [docs][d].', '', '```ts', 'const a = 1', 'const b = 2', '```', '', 'After', '', '[d]: https://x.test'].join('\n')
+  const [above, below] = markdownSplit(doc, 6)
+  expect(above.split('\n').slice(0, 7)).toEqual(['# Title', '', 'See [docs][d].', '', '```ts', 'const a = 1', '```'])
+  expect(below.startsWith('```ts\nconst b = 2\n```')).toBe(true)
+  expect(above.endsWith('[d]: https://x.test')).toBe(true)
+  expect(below.endsWith('[d]: https://x.test')).toBe(true)
+  expect(markdownSplit('a\n\nb\n\nc', 4)[1]).toBe('c')
+})
+
+test('row keys during content search act on the highlighted result, not the tree cursor left behind', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['b.md', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    grep: 'b.md\x002\x00a needle\nsrc/a.ts\x0040\x00const needle = 1\n',
+  }
+  const clock = world(on, w, [])
+  on('tool.check', () => ({ decision: 'allow' }))
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/b.md` }, { in: 'rows' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  for (let i = 0; i < 3; i++) await ui.post({ key: 'j' }, { in: 'rows' })
+  expect(treeRows(await ui.drawn()).active).toBe(`grep:40:${root}/src/a.ts`)
+  await ui.post({ key: 'x' }, { in: 'rows' })
+  await clock.settle()
+  const edit = (file_path: string) => $.tool.check({ tool: 'Edit', input: { file_path, old_string: 'a', new_string: 'b' } })
+  expect((await edit(`${root}/src/a.ts`)).decision).toBe('deny')
+  expect((await edit(`${root}/b.md`)).decision).toBe('allow')
+  await ui.unmount()
+})
+
+test('content search: the wheel walks the results, and right-click copies the hit file path, relative and absolute', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['b.md', 'file']] },
+    grep: `${Array.from({ length: 80 }, (_, i) => `b.md\x00${i + 1}\x00needle ${i}`).join('\n')}\n`,
+  }
+  const clock = world(on, w, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(await ids()).not.toContain(`grep:70:${root}/b.md`)
+  for (let i = 0; i < 25; i++) await $.ui.scroll({ ...wheelDown, by: 3 })
+  await clock.settle()
+  expect(await ids()).toContain(`grep:70:${root}/b.md`)
+  await ui.post({ copy: `grep:70:${root}/b.md` }, { in: 'rows' })
+  await ui.post({ copy: `grep:70:${root}/b.md`, shift: true }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['b.md', `${root}/b.md`])
+  await ui.unmount()
+})
+
+test('match highlighting does bounded work: a pattern with overlapping alternatives over a long path returns at once, and plain patterns still light every match', () => {
+  const spans = compileSpans('(a|aa)*z|a', false)
+  const start = performance.now()
+  for (let i = 0; i < 200; i++) spans?.(`/${'a'.repeat(1000)}`)
+  expect(performance.now() - start).toBeLessThan(2000)
+  expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
+})
+
+test('match highlighting charges every NFA step: nested optional repeats over 200 long paths return at once', () => {
+  const spans = compileSpans('((a?){100}){5}z|a', false)
+  const start = performance.now()
+  for (let i = 0; i < 200; i++) spans?.(`/${'a'.repeat(1000)}/${i}`)
+  expect(performance.now() - start).toBeLessThan(1000)
+  expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
+})
+
+test('i on a content search hit scopes the search to the folder of that hit, not the tree cursor', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['lib', 'dir'], ['src', 'dir']], [`${root}/lib`]: [['b.ts', 'file']], [`${root}/src`]: [['a.ts', 'file']] },
+    grep: 'src/a.ts\x001\x00needle\n',
+  }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await ui.post({ key: 'up' }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).active).toBe(`${root}/lib`)
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/src/a.ts`, `grep:1:${root}/src/a.ts`])
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  const before = ran.length
+  await ui.post({ key: 'i' }, { in: 'rows' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(ran.slice(before).filter(a => a[0] === 'git' && a.includes('grep')).at(-1)?.slice(-2)).toEqual(['--', 'src'])
+  await ui.unmount()
+})
+
+test('file references with a line include extensionless names like Dockerfile, never bare numbers', () => {
+  expect(fileRefs('Edit Dockerfile:12, Makefile#L3-L5 and src/a.ts:7; port 8080:1 is not a file').map(r => `${r.path}:${r.line}-${r.end}`)).toEqual(['Dockerfile:12-12', 'Makefile:3-5', 'src/a.ts:7-7'])
+})
+
+test('open content search results refresh after Claude writes a file', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '',
+    dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] },
+    grep: 'a.ts\x001\x00needle\n',
+  }
+  const clock = world(on, w, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'needle', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(await ids()).toEqual([`grep:0:${root}/a.ts`, `grep:1:${root}/a.ts`])
+  w.grep = 'a.ts\x001\x00needle\nb.ts\x004\x00needle again\n'
+  await $.tool.call({ tool: 'Write', file_path: `${root}/b.ts`, content: 'x' })
+  await clock.settle()
+  await ui.drawn()
+  await clock.advance(1000)
+  await clock.settle()
+  expect(await ids()).toEqual([`grep:0:${root}/a.ts`, `grep:1:${root}/a.ts`, `grep:0:${root}/b.ts`, `grep:4:${root}/b.ts`])
+  await ui.unmount()
+})
+
+const KEYS_FILE = '/home/k/.claude/keybindings.json'
+const keysRun = { command: 'filetree', args: 'keys', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } } satisfies CommandRunInput
+
+function keysWorld(on: On, text: string | undefined, picks: string[]) {
+  const ran: Ran = []
+  const asked: string[][] = []
+  const root = '/home/k/proj'
+  const w: World = {
+    os: 'linux',
+    env: { HOME: '/home/k' },
+    cwd: root,
+    top: '',
+    status: '',
+    numstat: '',
+    dirs: { [root]: [['a.txt', 'file']], '/home/k/.claude': text === undefined ? [] : [['keybindings.json', 'file']] },
+    files: text === undefined ? {} : { [KEYS_FILE]: text },
+    linkTo: text === undefined ? {} : { [KEYS_FILE]: KEYS_FILE },
+    tool: e => {
+      if (e.tool !== 'AskUserQuestion' || !has(e, 'questions') || !Array.isArray(e.questions)) return undefined
+      const q: unknown = e.questions[0]
+      if (!has(q, 'question') || typeof q.question !== 'string' || !has(q, 'options') || !Array.isArray(q.options)) return undefined
+      asked.push(q.options.map((o: unknown) => (has(o, 'label') ? String(o.label) : '')))
+      return { result: { questions: [], answers: { [q.question]: picks.shift() ?? '' } } }
+    },
+  }
+  const clock = world(on, w, ran)
+  return { w, ran, asked, clock }
+}
+
+const keysIn = (w: World) => JSON.parse(w.files?.[KEYS_FILE] ?? '{}') as { bindings: { context: string; bindings: Record<string, string | null> }[] }
+
+test('/filetree keys with no keybindings.json asks, then writes alt+l in Chat and alt+h in Pane and PaneField', { timeoutMs: 20_000 }, async ($, on) => {
+  const { w, asked, clock } = keysWorld(on, undefined, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = await $.command.run(keysRun)
+  expect(JSON.stringify(r)).toContain(`Wrote ${KEYS_FILE}`)
+  expect(asked).toEqual([['Add them', 'Cancel']])
+  expect(keysIn(w).bindings).toEqual([
+    { context: 'Chat', bindings: { 'meta+l': 'abovePrompt:focus' } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+  ])
+})
+
+test('/filetree keys keeps existing bindings and other keys, keeps a tab indent, and a second run changes nothing', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = `${JSON.stringify({ $schema: 'https://x/schema.json', bindings: [{ context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor' } }, { context: 'Global', bindings: { 'ctrl+t': null } }] }, null, '\t')}\n`
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.command.run(keysRun)
+  const after = w.files?.[KEYS_FILE] ?? ''
+  expect(after).toContain('\n\t"bindings"')
+  const doc = keysIn(w) as { $schema?: string; bindings: { context: string; bindings: Record<string, string | null> }[] }
+  expect(doc.$schema).toBe('https://x/schema.json')
+  expect(doc.bindings).toEqual([
+    { context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor', 'meta+l': 'abovePrompt:focus' } },
+    { context: 'Global', bindings: { 'ctrl+t': null } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+  ])
+  expect(ran.some(a => a[0] === 'mv' && a.at(-1) === KEYS_FILE)).toBe(true)
+  const writes = ran.filter(a => a[0] === 'write').length
+  const again = await $.command.run(keysRun)
+  expect(JSON.stringify(again)).toContain('Already set')
+  expect(asked.length).toBe(1)
+  expect(ran.filter(a => a[0] === 'write').length).toBe(writes)
+  expect(w.files?.[KEYS_FILE]).toBe(after)
+})
+
+test('/filetree keys asks on a clash, Keep mine leaves the file byte-identical, and a Global alt+l counts as a clash', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = '{\n    "bindings": [\n        { "context": "Global", "bindings": { "alt+l": "app:toggleTodos" } },\n        { "context": "Pane", "bindings": { "meta+h": "pane:shrink" } }\n    ]\n}\n'
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Keep mine', 'Replace'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const kept = await $.command.run(keysRun)
+  expect(JSON.stringify(kept)).toContain('Kept your bindings')
+  expect(asked[0]).toEqual(['Replace', 'Keep mine', 'Add the free ones only'])
+  expect(w.files?.[KEYS_FILE]).toBe(text)
+  expect(ran.some(a => a[0] === 'write')).toBe(false)
+  await $.command.run(keysRun)
+  expect(w.files?.[KEYS_FILE]).toContain('\n    "bindings"')
+  expect(keysIn(w).bindings).toEqual([
+    { context: 'Global', bindings: { 'alt+l': 'app:toggleTodos' } },
+    { context: 'Pane', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'PaneField', bindings: { 'meta+h': 'abovePrompt:leave' } },
+    { context: 'Chat', bindings: { 'meta+l': 'abovePrompt:focus' } },
+  ])
+  expect(JSON.stringify(await $.command.run(keysRun))).toContain('Already set')
+})
+
+test('/filetree keys refuses invalid JSON and a read-only file without asking or writing', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = '{ "bindings": [ { "context": "Chat", '
+  const { w, ran, asked, clock } = keysWorld(on, text, ['Add them'])
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = JSON.stringify(await $.command.run(keysRun))
+  expect(r).toContain('not valid JSON')
+  expect(r).toContain('Nothing changed')
+  w.files = { [KEYS_FILE]: '{"bindings":[]}' }
+  w.exits = { test: [1, ''] }
+  expect(JSON.stringify(await $.command.run(keysRun))).toContain('is read-only')
+  expect(asked.length).toBe(0)
+  expect(ran.some(a => a[0] === 'write')).toBe(false)
+})
+
+function grepWorld(root: string, grep: string, extra: Partial<World> = {}): World {
+  return { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['a.ts', 'file'], ['b.md', 'file']] }, grep, ...extra }
+}
+
+async function contentSearch($: Engine, clock: ReturnType<typeof world>, text: string, regex = false) {
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  if (regex) await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text, kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  return ui
+}
+
+test('a costly regex over long lines stops the content search with a notice instead of freezing', { timeoutMs: 60_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const long = 'a'.repeat(100_000)
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 10 }, (_, i) => `a.ts\x00${i + 1}\x00${long}`).join('\n')}\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const started = Date.now()
+  const ui = await contentSearch($, clock, '(?:a{100}){10}\\s', true)
+  expect(Date.now() - started).toBeLessThan(5_000)
+  expect(JSON.stringify(await ui.drawn())).toContain('search stopped: the pattern is too costly')
+  await ui.unmount()
+})
+
+test('a class with a literal caret is never translated for grep, so [-^] cannot turn into a negation', () => {
+  expect(toEre('[-^]')).toBeNull()
+  expect(toEre('[a^]')).toBeNull()
+  expect(toEre('[^a]')).toBeNull()
+})
+
+test('an untranslatable regex searches every line, so ^\\s*$ finds completely empty lines', { timeoutMs: 20_000 }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x002\x00\na.ts\x003\x00   \na.ts\x004\x00x\n'), ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^\\s*$', true)
+  expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '^', '--', '.'])
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`, `grep:3:${root}/a.ts`])
+  await ui.unmount()
+})
+
+test('y, Y and u copy the marks while a content search has no matches', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, ''), [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.advance(1000)
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await ui.unmount()
+  const search = await contentSearch($, clock, 'nothing')
+  expect(JSON.stringify(await search.drawn())).toContain('no matches')
+  for (const key of ['y', 'Y', 'u']) await search.post({ key }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['a.ts', `${root}/a.ts`, 'a.ts'])
+  await search.unmount()
+})
+
+test('moving through content results tells Claude about the highlighted file, not the old tree selection', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00needle\nb.md\x002\x00needle\n'), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, 'needle')
+  for (let i = 0; i < 3; i++) await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  const sent = JSON.stringify(await $.prompt.submit({ text: 'edit this', wait: false, origin: { kind: 'composer' } }))
+  expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
+  await ui.unmount()
+})
+
+test('file references keep folders written with brackets or parentheses', () => {
+  expect(fileRefs('see src/app/[id]/page.tsx:12, src/app/(auth)/login.tsx:15 and (src/a.ts:7)').map(r => `${r.path}:${r.line}`)).toEqual(['src/app/[id]/page.tsx:12', 'src/app/(auth)/login.tsx:15', 'src/a.ts:7'])
+})
+
+test('the regex fallback reads whole lines, so a long line cannot pass ^\\s*$ on its blank prefix', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `a.ts\x001\x00${' '.repeat(12_000)}x\nc.ts\x003\x00\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^\\s*$', true)
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(ids).toContain(`grep:3:${root}/c.ts`)
+  expect(ids).not.toContain(`grep:1:${root}/a.ts`)
+  await ui.unmount()
+})
+
+test('the regex fallback reads whole lines, so a match past 10,000 characters is found', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `b.md\x002\x00${'b'.repeat(12_000)} needle\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '\\sneedle', true)
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toContain(`grep:2:${root}/b.md`)
+  await ui.unmount()
+})
+
+test('scrolling content results with the wheel tells Claude about the highlighted file', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00needle\nb.md\x002\x00needle\n'), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, 'needle')
+  await $.ui.scroll({ ...wheelDown, by: 3 })
+  await clock.settle()
+  const sent = JSON.stringify(await $.prompt.submit({ text: 'edit this', wait: false, origin: { kind: 'composer' } }))
+  expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
+  await ui.unmount()
+})
+
+test('/filetree keys writes nothing when keybindings.json changes while it asks', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = `${JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor' } }] }, null, 2)}\n`
+  const { w, clock } = keysWorld(on, text, ['Add them'])
+  const edited = `${JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+g': 'chat:externalEditor' } }] }, null, 2)}\n`
+  const ask = w.tool
+  w.tool = e => {
+    const r = ask?.(e)
+    if (r && w.files) w.files[KEYS_FILE] = edited
+    return r
+  }
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = await $.command.run(keysRun)
+  expect(JSON.stringify(r)).toContain('changed while you were asked')
+  expect(w.files?.[KEYS_FILE]).toBe(edited)
+})
+
+test('content search results tell Claude about the first highlighted hit as soon as they arrive', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'b.md\x002\x00needle\n'), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, 'needle')
+  const sent = JSON.stringify(await $.prompt.submit({ text: 'edit this', wait: false, origin: { kind: 'composer' } }))
+  expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
+  await ui.unmount()
+})
+
+test('patterns that can match a non-ASCII character are never translated for grep, so UTF-8 grep cannot drop what the matcher accepts', () => {
+  for (const p of ['^..$', 'a.b', '[^a]', '\\W', '\\D', '\\S', 'é', '😀+']) expect(toEre(p)).toBeNull()
+  expect(compileRegex('^..$', false, { left: 1000 })?.('😀')).toBe(true)
+  expect(toEre('needle\\d+')).toBe('needle[0-9]+')
+})
+
+test('a regex content search that ignores case scans every line, so Unicode case folding cannot hide a match from grep', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00K\n'), ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^[a-z]$', true)
+  const argv = ran.find(a => a[0] === 'git' && a.includes('grep')) ?? []
+  expect(argv[argv.indexOf('-e') + 1]).toBe('^')
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toContain(`grep:1:${root}/a.ts`)
+  await ui.unmount()
+})
+
+test('desktop: content results stay inside the drawing budget and say how many rows they hold back', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const long = `${'d'.repeat(200)}`
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 200 }, (_, i) => `${long}/f${i}.ts\x001\x00${'x'.repeat(300)}`).join('\n')}\n`), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: `hit:${root}/a.ts` })
+  await ui.input({ key: 'q', text: 'x', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toMatch(/first \d+ of 400 rows; keep typing to narrow/)
+  await ui.unmount()
 })

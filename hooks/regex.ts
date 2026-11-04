@@ -204,7 +204,7 @@ function compile(node: Node): Op[] {
   return prog
 }
 
-function run(prog: Op[], text: string): boolean {
+function run(prog: Op[], text: string, work: { left: number }): boolean {
   const seen = new Int32Array(prog.length).fill(-1)
   let mark = 0
   const add = (into: number[], pc0: number, at: number): boolean => {
@@ -213,6 +213,7 @@ function run(prog: Op[], text: string): boolean {
       const pc = stack.pop() as number
       if (seen[pc] === mark) continue
       seen[pc] = mark
+      if (--work.left < 0) return false
       const op = prog[pc]
       if (!op) continue
       if (op.op === 'match') return true
@@ -229,6 +230,7 @@ function run(prog: Op[], text: string): boolean {
   let list: number[] = []
   if (add(list, 0, 0)) return true
   for (let at = 0; at < text.length; at++) {
+    if (work.left < 0) return false
     const c = text[at] as string
     mark += 1
     const next: number[] = []
@@ -242,12 +244,219 @@ function run(prog: Op[], text: string): boolean {
   return false
 }
 
-export function compileRegex(src: string, ignoreCase: boolean): ((text: string) => boolean) | null {
+function longest(prog: Op[], text: string, from: number, work: { left: number }): number {
+  const seen = new Int32Array(prog.length).fill(-1)
+  let mark = 0
+  let best = -1
+  const add = (into: number[], pc0: number, at: number): void => {
+    const stack = [pc0]
+    while (stack.length) {
+      const pc = stack.pop() as number
+      if (seen[pc] === mark) continue
+      seen[pc] = mark
+      if (--work.left < 0) return
+      const op = prog[pc]
+      if (!op) continue
+      if (op.op === 'match') best = Math.max(best, at)
+      else if (op.op === 'jmp') stack.push(op.x)
+      else if (op.op === 'split') stack.push(op.y, op.x)
+      else if (op.op === 'bol') {
+        if (at === 0) stack.push(pc + 1)
+      } else if (op.op === 'eol') {
+        if (at === text.length) stack.push(pc + 1)
+      } else into.push(pc)
+    }
+  }
+  let list: number[] = []
+  add(list, 0, from)
+  for (let at = from; at < text.length && list.length; at++) {
+    if (--work.left < 0) return -1
+    const c = text[at] as string
+    mark += 1
+    const next: number[] = []
+    for (const pc of list) {
+      const op = prog[pc]
+      if (op?.op === 'char' && op.test(c)) add(next, pc + 1, at + 1)
+      if (work.left < 0) return -1
+    }
+    list = next
+  }
+  return work.left < 0 ? -1 : best
+}
+
+const SPAN_WORK = 20_000
+const SPAN_POOL = 200_000
+const SPAN_WINDOW_MS = 250
+const spanPool = { left: SPAN_POOL, at: 0 }
+let spanMemo: { key: string; fn: ((text: string) => [number, number][]) | null } | null = null
+
+export function compileSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
+  const key = `${ignoreCase ? 'i' : 'c'}${src}`
+  if (spanMemo?.key === key) return spanMemo.fn
+  const fn = buildSpans(src, ignoreCase)
+  spanMemo = { key, fn }
+  spanPool.left = SPAN_POOL
+  spanPool.at = Date.now()
+  return fn
+}
+
+function buildSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
   try {
     const prog = compile(parse(src, ignoreCase))
-    return text => run(prog, text)
+    return text => {
+      const out: [number, number][] = []
+      const now = Date.now()
+      if (now - spanPool.at > SPAN_WINDOW_MS) {
+        spanPool.left = SPAN_POOL
+        spanPool.at = now
+      }
+      const grant = Math.min(SPAN_WORK, spanPool.left)
+      const work = { left: grant }
+      for (let at = 0; at < text.length && work.left > 0; ) {
+        const end = longest(prog, text, at, work)
+        if (end > at) {
+          out.push([at, end])
+          at = end
+        } else at += 1
+      }
+      spanPool.left -= grant - Math.max(0, work.left)
+      return out
+    }
   } catch (err) {
     if (err instanceof Unsupported) return null
     throw err
   }
+}
+
+export function compileRegex(src: string, ignoreCase: boolean, work: { left: number } = { left: Infinity }): ((text: string) => boolean) | null {
+  try {
+    const prog = compile(parse(src, ignoreCase))
+    return text => run(prog, text, work)
+  } catch (err) {
+    if (err instanceof Unsupported) return null
+    throw err
+  }
+}
+
+const ERE_SPECIAL = '.[]()*+?{}|^$\\'
+const ERE_OUT: Record<string, string> = { d: '[0-9]', D: '[^0-9]', w: '[0-9A-Za-z_]', W: '[^0-9A-Za-z_]', S: '[^ \t\r\f\v]' }
+const ERE_IN: Record<string, string> = { d: '0-9', w: '0-9A-Za-z_' }
+const ERE_TEXT: Record<string, string> = { t: '\t', r: '\r', f: '\f', v: '\v' }
+const PLAIN = /^[ -~]$/
+
+function ereClass(src: string, i: number): { ere: string; next: number } | null {
+  let j = i + 1
+  let head = '['
+  if (src[j] === '^') {
+    head += '^'
+    j += 1
+  }
+  if (src[j] === ']') return null
+  const toks: { ch?: string; set?: string; dash?: boolean }[] = []
+  while (j < src.length && src[j] !== ']') {
+    const c = src[j] ?? ''
+    if (c === '\\') {
+      const e = src[j + 1]
+      if (e === undefined) return null
+      j += 2
+      if (e in ERE_IN) toks.push({ set: ERE_IN[e] })
+      else if (/[A-Za-z0-9]/.test(e) || ']\\-^['.includes(e) || !PLAIN.test(e)) return null
+      else toks.push({ ch: e })
+      continue
+    }
+    if (c === '[' || c === '^' || !PLAIN.test(c)) return null
+    toks.push(c === '-' ? { dash: true } : { ch: c })
+    j += 1
+  }
+  if (src[j] !== ']') return null
+  let body = ''
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k] ?? {}
+    const hi = toks[k + 2]
+    if (t.set !== undefined) body += t.set
+    else if (t.dash) {
+      if (k !== 0 && k !== toks.length - 1) return null
+    } else if (toks[k + 1]?.dash && hi?.ch !== undefined) {
+      body += `${t.ch}-${hi.ch}`
+      k += 2
+    } else body += t.ch
+  }
+  if (toks[0]?.dash || toks[toks.length - 1]?.dash) body += '-'
+  return { ere: `${head}${body}]`, next: j + 1 }
+}
+
+export function toEre(src: string): string | null {
+  if (/[^\x00-\x7f]/.test(src)) return null
+  let out = ''
+  let quant = false
+  let empty = true
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i] ?? ''
+    if (c === '\\') {
+      const e = src[i + 1]
+      if (e === undefined) return null
+      i += 1
+      if (e in ERE_OUT) {
+        if (ERE_OUT[e]?.startsWith('[^')) return null
+        out += ERE_OUT[e]
+      }
+      else if (e in ERE_TEXT) out += ERE_TEXT[e]
+      else if (ERE_SPECIAL.includes(e)) out += `\\${e}`
+      else if (PLAIN.test(e) && !/[A-Za-z0-9]/.test(e)) out += e
+      else return null
+      quant = false
+      empty = false
+      continue
+    }
+    if (c === '[') {
+      const cls = ereClass(src, i)
+      if (!cls || cls.ere.startsWith('[^')) return null
+      out += cls.ere
+      i = cls.next - 1
+      quant = false
+      empty = false
+      continue
+    }
+    if (c === '(') {
+      if (src[i + 1] === '?') {
+        if (src[i + 2] !== ':') return null
+        i += 2
+      }
+      out += '('
+      quant = false
+      empty = true
+      continue
+    }
+    if (c === '|' || c === ')') {
+      if (empty) return null
+      out += c
+      quant = false
+      empty = c === '|'
+      continue
+    }
+    if (c === '*' || c === '+' || c === '?') {
+      if (quant && c === '?') {
+        quant = false
+        continue
+      }
+      if (empty) return null
+      out += c
+      quant = true
+      continue
+    }
+    if (c === '{') {
+      const m = /^\{\d+(,\d*)?\}/.exec(src.slice(i))
+      if (m && !empty) {
+        out += m[0]
+        i += m[0].length - 1
+        quant = true
+        continue
+      }
+      out += '\\{'
+    } else if (c === '\n' || c === '\0' || c === '.') return null
+    else out += c
+    quant = false
+    empty = false
+  }
+  return empty ? null : out
 }

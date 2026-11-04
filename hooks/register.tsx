@@ -1,12 +1,13 @@
 import { type EngineInterface, type HookStream, type ProcessSpawnResult, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
-import { herdrError, herdrOpenCommand, herdrPane, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, type Target, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
+import { herdrError, herdrOpenCommand, herdrPane, herdrSplit, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, type Target, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
+import { bindKeys } from './keybind'
 import { CACHE_KEEP, cacheName, CLEAN, coderFor, EXIT_FAILED, EXIT_LOCKED, EXIT_MISSING, fitCells, PNG_DIRECT_BYTES, PNG_DIRECT_PIXELS, pictureKind, pngSize, POLICY, POSTER } from './peek'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { type DiffLine, diffWindow, splitPatch } from './diff'
+import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
@@ -15,6 +16,7 @@ import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, 
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
+import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, selectionOn, DESK, DESK_GIT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
@@ -34,6 +36,8 @@ import {
   join,
   mapper,
   matcher,
+  matchSpans,
+  highlight,
   parseGit,
   parseNumstat,
   posix,
@@ -50,6 +54,8 @@ import {
   collator,
   type Row,
 } from './tree'
+import { compileRegex, toEre } from './regex'
+import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
@@ -64,8 +70,14 @@ const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
 const NO_REPO_DEPTH = 4
 const DOUBLE_MS = 450
-const SHORTCUTS_MS = 10_000
 const FIND_LIMIT = 200
+const GREP_LIMIT = 200
+const MARK_LIMIT = 100
+const GREP_MS = 15_000
+const GREP_WAIT_MS = 150
+const GREP_TEXT = 300
+const GREP_WORK = 50_000_000
+const GREP_LINE = 10_000
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
 const NAME_MIN = 10
@@ -116,6 +128,7 @@ let openWithSetting = ''
 let binariesInDefaultApp = false
 let editWithSetting = ''
 let diffWithSetting = ''
+let groupSetting: DiffGroups = 'folder'
 let targetSetting: Target = 'auto'
 let palette: Palette = parsePalette('')
 let inTmux = false
@@ -132,6 +145,16 @@ let mainBusy = false
 let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
+let marks: string[] = []
+type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
+const links = new Set<string>()
+const linkStates = new Map<string, LinkState | null>()
+let peekWant: { path: string; top: number } | null = null
+let peekAt: { path: string; line: number; jumped: boolean } | null = null
+let deskLine: { path: string; top: number; scrolled: boolean; line: number } | null = null
+type GrepHit = { path: string; line: number; text: string }
+type SearchFlag = 'searchCase' | 'searchRegex' | 'searchContent'
+const grep = { key: '', rows: [] as GrepHit[], sel: 0, seq: 0, capped: false, busy: false, note: '', stop: null as (() => void) | null }
 let peekPath = ''
 let peekRows = 8
 let peekTop = 0
@@ -200,7 +223,10 @@ let collapseTimer: { cancel: () => void } | null = null
 let collapseAt = 0
 let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
-let shortcutsTimer = 0
+let shortcutsTop = 0
+let deskKeysAt = 0
+let shortcutsMax = 0
+let shortcutsPage = 1
 let treemapSetting: 'auto' | 'image' | 'cells' | 'off' = 'auto'
 let kittyTerm = false
 let imageDenied = false
@@ -234,7 +260,7 @@ const listLatest = new Map<string, number>()
 const unreadable = new Set<string>()
 const background = new Map<string, Background>()
 
-type Preview = { path: string; text: string; note: string; diff?: DiffLine[]; page?: number }
+type Preview = { path: string; text: string; note: string; diff?: DiffLine[]; page?: number; first?: number }
 type Scan = { dir: string; loc: boolean; items: Usage[]; total: number; done: boolean; stale: boolean; stopped: boolean; stop: () => void }
 const scans = new Map<string, Scan>()
 let mapLock: { anchor: string; pick: string; cursor: string } | null = null
@@ -317,6 +343,12 @@ async function setActivities($: EngineInterface, fn: (list: Activity[]) => Activ
 async function list($: EngineInterface, dir: string): Promise<FileNode[] | null> {
   try {
     const entries = await $.fs.list(dir)
+    for (const e of entries) {
+      const id = join(dir, e.name)
+      linkStates.delete(id)
+      if (e.isLink) links.add(id)
+      else links.delete(id)
+    }
     const resolved = await Promise.all(
       entries.map(async e => {
         if (!e.isLink) return { name: e.name, kind: e.kind, mtimeMs: e.mtimeMs, size: e.size, isLink: false }
@@ -390,11 +422,18 @@ async function watchTree($: EngineInterface): Promise<void> {
   }
 }
 
+function staleGrep($: EngineInterface): void {
+  if (!grep.key) return
+  grep.key = ''
+  void $.ui.invalidate('ui.render')
+}
+
 async function watched($: EngineInterface): Promise<void> {
   watchTimer = null
   const paths = [...watchQueue]
   watchQueue.clear()
   dropPreviews(paths)
+  if (paths.length) staleGrep($)
   const t = await get($)
   const open = new Set([t.root, ...openDirs(t)])
   const dirs = [...new Set(paths.map(p => dirname(p)).filter(d => open.has(d)))]
@@ -496,10 +535,13 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   timeQueue = []
   lastRoot = root
   hintRoot = ''
+  marks = []
+  linkStates.clear()
   searchIndex = null
+  grepClear()
   sizeEpoch += 1
   sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex) }))
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
   const title = `Files: ${root.split('/').pop() || root}`
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
@@ -536,8 +578,12 @@ function isIgnored(root: string, path: string): boolean {
   return ignoreNames.length > 0 && relative(root, path).split('/').some(name => ignoreNames.includes(name))
 }
 
+function globLiteral(name: string): string {
+  return name.replace(/[*?[\]\\]/g, '\\$&')
+}
+
 function pruneArgs(root: string, ignored: string[] = []): string[] {
-  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames.map(n => n.replace(/[*?[\]\\]/g, '\\$&'))]
+  const names = [...PRUNE, ...(broad(root) ? HOME_PRUNE : []), ...ignoreNames.map(globLiteral)]
   return ['(', ...names.flatMap((name, i) => (i === 0 ? ['-name', name] : ['-o', '-name', name])), ...ignored.flatMap(p => ['-o', '-path', p]), ')', '-prune', '-o']
 }
 
@@ -1171,11 +1217,80 @@ async function sync($: EngineInterface, force = false): Promise<void> {
   if (t.top) await refreshGit($)
 }
 
-async function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
+async function copyPaths($: EngineInterface, ids: string[], how: 'relative' | 'absolute' | 'name', surface?: RenderSurface): Promise<void> {
   const t = await get($)
-  const text = !absolute && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id
+  const one = (id: string) => (how === 'name' ? id.slice(id.lastIndexOf('/') + 1) || id : how === 'relative' && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id)
+  const text = ids.map(one).join('\n')
   const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
-  $.ui.toast(done.isCopied ? `Copied ${text}` : 'Could not copy the path')
+  $.ui.toast(!done.isCopied ? `Could not copy the ${how === 'name' ? 'name' : 'path'}${ids.length > 1 ? 's' : ''}` : ids.length > 1 ? `Copied ${ids.length} ${how === 'name' ? 'names' : 'paths'}` : `Copied ${text}`)
+}
+
+function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
+  return copyPaths($, [id], absolute ? 'absolute' : 'relative', surface)
+}
+
+async function linkTarget($: EngineInterface, id: string): Promise<string> {
+  if ((await osName($)) === 'win32') return ''
+  try {
+    const run = await $.process.run(['readlink', '--', id], { timeoutMs: 3_000 })
+    return run.exitCode === 0 ? run.stdout.trim() : ''
+  } catch {
+    return ''
+  }
+}
+
+async function loops($: EngineInterface, id: string, first: string): Promise<boolean> {
+  const seen = new Set([id])
+  let cur = id
+  let to = first
+  for (let hop = 0; hop < 16; hop++) {
+    if (!to) return false
+    const next = isAbsolute(to) ? to : join(dirname(cur), to.replace(/^\.\//, ''))
+    if (seen.has(next)) return true
+    seen.add(next)
+    cur = next
+    to = await linkTarget($, cur)
+  }
+  return true
+}
+
+async function classifyLink($: EngineInterface, id: string): Promise<void> {
+  if (linkStates.has(id)) return
+  linkStates.set(id, null)
+  const root = (await get($)).root
+  let state: LinkState
+  try {
+    const real = (await $.fs.stat(id, { resolve: true })).realPath
+    if (real) state = { kind: inside(await realOf($, root), posix(real)) ? 'ok' : 'outside', target: posix(real) }
+    else {
+      const target = await linkTarget($, id)
+      state = { kind: (await loops($, id, target)) ? 'circular' : 'broken', target }
+    }
+  } catch (err) {
+    const target = await linkTarget($, id)
+    state = { kind: /ELOOP|too many|loop/i.test(messageOf(err)) || (await loops($, id, target)) ? 'circular' : 'broken', target }
+  }
+  if (linkStates.get(id) !== null) return
+  linkStates.set(id, state)
+  void $.ui.invalidate('ui.render')
+}
+
+function linkNote(state: LinkState | null | undefined): string {
+  if (!state) return ' →'
+  const to = state.target ? ` ${shortPath(state.target)}` : ''
+  return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
+}
+
+function toggleMark($: EngineInterface, id: string): void {
+  if (marks.includes(id)) marks = marks.filter(m => m !== id)
+  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  else marks = [...marks, id]
+  void $.ui.invalidate('ui.render')
+}
+
+function clearMarks($: EngineInterface): void {
+  marks = []
+  void $.ui.invalidate('ui.render')
 }
 
 async function exists($: EngineInterface, path: string): Promise<boolean> {
@@ -1190,6 +1305,7 @@ async function exists($: EngineInterface, path: string): Promise<boolean> {
 async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
   const reads = queuedReads
   queuedReads = []
+  if (jobs.some(j => !j.readOnly)) staleGrep($)
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
@@ -1284,6 +1400,7 @@ function dropPreviews(paths: string[]): void {
 async function touched($: EngineInterface, paths: string[], tone: string, show: boolean): Promise<void> {
   if (tone !== 'purple') dropPreviews(paths)
   if (tone !== 'purple') markStale($, paths)
+  if (tone !== 'purple') staleGrep($)
   if (await followCwd($)) return
   const t = await get($)
   if (!t.root) return
@@ -1436,6 +1553,12 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   if (!(await get($)).query.trim()) searchIndex = null
   await patch($, () => ({ query }))
   const t = await get($)
+  if (t.searchContent) {
+    if (!query.trim()) grepClear()
+    grep.key = ''
+    return []
+  }
+  if (grep.key) grepClear()
   if (!query.trim()) return []
   const index = await indexPaths($, t)
   const match = matcher(query, Boolean(t.searchCase), Boolean(t.searchRegex))
@@ -1451,6 +1574,244 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const stale = [...new Set(hits.filter(p => !ids.has(p)).map(dirname))].filter(d => inside(shown.root, d))
   if (stale.length) await loadDirs($, stale)
   return hits
+}
+
+function grepOn(t: FileTree): boolean {
+  return Boolean(t.searchContent) && Boolean(t.query.trim())
+}
+
+function grepKey(t: FileTree): string {
+  return JSON.stringify([t.root, t.top, t.query.trim(), Boolean(t.searchCase), Boolean(t.searchRegex), t.searchScope, t.showHidden])
+}
+
+function grepId(h: GrepHit): string {
+  return `grep:${h.line}:${h.path}`
+}
+
+function grepStop(): void {
+  grep.stop?.()
+  grep.stop = null
+}
+
+function grepClear(): void {
+  grepStop()
+  grep.seq += 1
+  grep.key = ''
+  grep.rows = []
+  grep.sel = 0
+  grep.capped = false
+  grep.busy = false
+  grep.note = ''
+}
+
+function grepSkip(t: FileTree): string[] {
+  return [...PRUNE, ...(broad(t.root) ? HOME_PRUNE : []), ...ignoreNames, ...(t.showHidden ? [] : ['.*'])]
+}
+
+async function grepTargets($: EngineInterface, t: FileTree): Promise<string[]> {
+  const dir = t.searchScope || t.root
+  const skip = new Set(grepSkip(t))
+  const kids = await $.fs.list(dir).catch(() => [])
+  return kids.filter(k => !skip.has(k.name) && (t.showHidden || !k.name.startsWith('.'))).map(k => join(dir, k.name))
+}
+
+function ereFor(t: FileTree, q: string): string | null {
+  return t.searchCase ? toEre(q) : null
+}
+
+function grepArgv(t: FileTree, q: string, targets: string[]): string[] {
+  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (ereFor(t, q) ?? '^') : q]
+  if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--no-column', '--no-full-name', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
+  return ['grep', '-rnIH', '--null', ...grepSkip(t).map(n => `--exclude-dir=${n === '.*' ? n : globLiteral(n)}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
+}
+
+function grepRun($: EngineInterface, t: FileTree): void {
+  grepClear()
+  grep.key = grepKey(t)
+  const mine = grep.seq
+  const q = t.query.trim()
+  if (!q) return
+  if (badPattern(q, Boolean(t.searchRegex))) {
+    grep.note = 'not a valid pattern'
+    return
+  }
+  grep.busy = true
+  $.clock.after(GREP_WAIT_MS, () => {
+    if (mine === grep.seq) void grepSpawn($, t, q, mine)
+  })
+}
+
+async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: number): Promise<void> {
+  const targets = t.top ? [] : await grepTargets($, t)
+  if (grep.seq !== mine) return
+  if (!t.top && targets.length === 0) {
+    grep.busy = false
+    void $.ui.invalidate('ui.render')
+    return
+  }
+  const stream = $.process.spawn({ argv: grepArgv(t, q, targets), ...(t.top ? { env: { GIT_OPTIONAL_LOCKS: '0' } } : {}) })
+  const stop = () => stopStream(stream)
+  grep.stop = stop
+  let note = ''
+  const timer = $.clock.after(GREP_MS, () => {
+    if (grep.seq !== mine) return
+    note = `search stopped after ${GREP_MS / 1000} seconds`
+    stop()
+  })
+  const files = new Map<string, GrepHit[]>()
+  const work = { left: GREP_WORK }
+  const fits = t.searchRegex ? compileRegex(q, !t.searchCase, work) : null
+  const exact = t.searchRegex && ereFor(t, q) !== null
+  let count = 0
+  let capped = false
+  let costly = false
+  let rest = ''
+  let err = ''
+  const take = (line: string) => {
+    if (costly) return
+    const cut = line.indexOf('\0')
+    const m = cut < 0 ? null : /^(\d+)[\0:](.*)$/s.exec(line.slice(cut + 1))
+    if (!m) return
+    const raw = posix(line.slice(0, cut))
+    const path = isAbsolute(raw) ? raw : join(t.root, raw.replace(/^\.\//, ''))
+    if (isIgnored(t.root, path) || (!t.showHidden && relative(t.root, path).split('/').some(x => x.startsWith('.')))) return
+    const body = m[2] ?? ''
+    if (fits && !(exact && body.length > GREP_LINE)) {
+      const ok = fits(body)
+      if (work.left < 0) {
+        note ||= 'search stopped: the pattern is too costly'
+        costly = true
+        stop()
+        return
+      }
+      if (!ok) return
+    }
+    if (count >= GREP_LIMIT) {
+      capped = true
+      return
+    }
+    count += 1
+    const text = (m[2] ?? '').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim()
+    const hit = { path, line: Number(m[1]), text: text.length > GREP_TEXT ? `${text.slice(0, GREP_TEXT)}…` : text }
+    const list = files.get(path)
+    if (list) list.push(hit)
+    else files.set(path, [hit])
+  }
+  try {
+    for await (const chunk of stream) {
+      if (grep.seq !== mine) return
+      if (chunk.stream !== 'stdout') {
+        err ||= chunk.text.trim().split('\n')[0] ?? ''
+        continue
+      }
+      const lines = (rest + chunk.text).split('\n')
+      rest = lines.pop() ?? ''
+      for (const line of lines) take(line)
+      if (capped || costly) break
+    }
+    if (rest && !capped) take(rest)
+  } catch (error) {
+    err = /ENOENT|not found|no such file/i.test(messageOf(error)) ? `${t.top ? 'git' : 'grep'} is not installed` : messageOf(error).split('\n')[0] ?? ''
+  } finally {
+    timer.cancel()
+    if (grep.seq === mine) {
+      grep.stop = null
+      grep.busy = false
+      grep.capped = capped
+      grep.rows = [...files.entries()].flatMap(([path, hits]) => [{ path, line: 0, text: String(hits.length) }, ...hits])
+      grep.note = note || (count ? '' : err)
+      void $.ui.invalidate('ui.render')
+      const row = grep.rows[grep.sel] ?? grep.rows[0]
+      if (row) void patch($, () => ({ selected: row.path }))
+    }
+  }
+}
+
+async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface): Promise<void> {
+  mapLock = null
+  const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
+  const top = Math.max(0, line - 3)
+  if (surface === 'desktop' || nativeScroll) {
+    await revealPaths($, [h.path])
+    await loadPreview($, h.path, line)
+    deskLine = { path: h.path, top, scrolled: false, line }
+    await patch($, cur => ({ preview: h.path, previewTop: Math.max(0, top - (previewed?.first ?? 0)), cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
+    $.clock.after(100, () => parkPreview($))
+    return
+  }
+  await revealPaths($, [h.path])
+  peekAt = { path: h.path, line, jumped: false }
+  if (peekPath === h.path) peeked = null
+  else peekWant = { path: h.path, top }
+  overPeek = false
+  await patch($, cur => ({ split: true, preview: '', previewTop: 0, cursor: h.path, selected: h.path, expanded: [...new Set([...cur.expanded, ...ancestorsOf(h.path, cur.root)])] }))
+}
+
+const refCache = new Map<string, Promise<FileRef[]>>()
+
+function refsIn($: EngineInterface, text: string, root: string, cwd: string): Promise<FileRef[]> {
+  const key = `${root}\0${cwd}\0${text}`
+  const known = refCache.get(key)
+  if (known) return known
+  const found = (async () => {
+    const out: FileRef[] = []
+    for (const r of fileRefs(text)) {
+      const path = resolve(cwd, r.path, home)
+      if (!inside(root, path) || path === root || out.some(o => o.path === path && o.line === r.line && o.end === r.end)) continue
+      const kind = await $.fs.stat(path).then(st => st.kind, () => '')
+      if (kind === 'file') out.push({ ...r, path })
+    }
+    return out
+  })()
+  refCache.set(key, found)
+  if (refCache.size > 200) refCache.delete(refCache.keys().next().value ?? key)
+  return found
+}
+
+async function openRef($: EngineInterface, href: string, surface: RenderSurface): Promise<void> {
+  const ref = parseHref(href)
+  if (!ref) return
+  const t = await get($)
+  if (!inside(t.root, ref.path)) return
+  void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
+  await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
+}
+
+async function grepNav($: EngineInterface, key: string, surface?: RenderSurface): Promise<boolean> {
+  const last = grep.rows.length - 1
+  const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -10, pagedown: 10, home: -Infinity, end: Infinity }
+  if (key in by) {
+    grep.sel = Math.max(0, Math.min(last, grep.sel + (by[key] ?? 0)))
+    void $.ui.invalidate('ui.render')
+    const row = grep.rows[grep.sel]
+    if (row) await patch($, () => ({ selected: row.path }))
+    if (surface === 'desktop' && row) void $.ui.scroll({ to: { key: `grep-row:${grepId(row)}` }, in: PANE, block: 'nearest' }).catch(() => undefined)
+    return true
+  }
+  if (key !== 'return' && key !== 'enter' && key !== 'o') return false
+  const hit = grep.rows[grep.sel]
+  if (hit) await openHit($, hit, surface)
+  return true
+}
+
+async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
+  if (!['x', 'd', 'v', 't', 'y', 'Y', 'u', 'i'].includes(key) || (key === 'v' && shift)) return false
+  const path = grep.rows[grep.sel]?.path
+  if (!path) {
+    if ((key === 'y' || key === 'Y' || key === 'u') && marks.length) await copyPaths($, marks, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+    return true
+  }
+  if (key === 'i') {
+    const t = await get($)
+    const dir = dirname(path)
+    await scopeSearch($, dir === t.root ? '' : dir)
+    $.clock.after(50, () => focusPane($, t.root, 'q'))
+  } else if (key === 'x') await toggleGuard($, path)
+  else if (key === 'd') await diffFile($, path)
+  else if (key === 'v') toggleMark($, path)
+  else if (key === 't') await openTerminal($, dirname(path))
+  else await copyPaths($, marks.length ? marks : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  return true
 }
 
 const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
@@ -1611,7 +1972,7 @@ function jumpClose($: EngineInterface, refocus = false): void {
   zjump.rows = []
   zjump.seq += 1
   void $.ui.invalidate('ui.render')
-  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, treeKey()))
+  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, 'hk-tree'))
 }
 
 async function repoOf($: EngineInterface, path: string): Promise<string | null> {
@@ -1705,13 +2066,18 @@ async function jumpKey($: EngineInterface, key: string): Promise<void> {
   }
 }
 
-async function searchFlag($: EngineInterface, flag: 'searchCase' | 'searchRegex'): Promise<void> {
-  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : { searchRegex: !cur.searchRegex }))
+async function searchFlag($: EngineInterface, flag: SearchFlag): Promise<void> {
+  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : flag === 'searchRegex' ? { searchRegex: !cur.searchRegex } : { searchContent: !cur.searchContent }))
   const t = await get($)
   if (t.query.trim()) await search($, t.query)
 }
 
-async function jump($: EngineInterface, query: string): Promise<void> {
+async function jump($: EngineInterface, query: string, surface?: RenderSurface): Promise<void> {
+  if ((await get($)).searchContent) {
+    const hit = grep.rows[grep.sel]
+    if (hit) await openHit($, hit, surface)
+    return
+  }
   const hits = (await search($, query)).slice(0, 10)
   await patch($, cur => {
     const open = new Set(cur.expanded)
@@ -1752,8 +2118,8 @@ function fitSerialized(lines: string[], max: number): string[] {
   return lines
 }
 
-async function loadPreview($: EngineInterface, path: string): Promise<void> {
-  previewed = await readPreview($, path)
+async function loadPreview($: EngineInterface, path: string, line?: number): Promise<void> {
+  previewed = await readPreview($, path, 1, line)
 }
 
 function stopStream(stream: HookStream<unknown, ProcessSpawnResult>): void {
@@ -1792,7 +2158,20 @@ async function docText($: EngineInterface, path: string, page: number): Promise<
   return run?.exitCode === 0 ? run.stdout.replace(/\f/g, '\n').trimEnd() : ''
 }
 
-async function readPreview($: EngineInterface, path: string, page = 1): Promise<Preview> {
+function previewWindow(text: string, line: number): { text: string; first: number } {
+  const clean = text.replace(/\r\n?/g, '\n')
+  let at = 0
+  for (let n = 1; n < line && at >= 0; n++) at = clean.indexOf('\n', at) + 1 || -1
+  if (at <= 0) return { text, first: 0 }
+  const min = Math.max(0, at - Math.floor(PREVIEW_CHARS / 4))
+  const back = min === 0 ? 0 : clean.indexOf('\n', min - 1) + 1 || at
+  const from = Math.min(back, at)
+  let first = 0
+  for (let i = clean.indexOf('\n'); i >= 0 && i < from; i = clean.indexOf('\n', i + 1)) first++
+  return { text: clean.slice(from), first }
+}
+
+async function readPreview($: EngineInterface, path: string, page = 1, line?: number): Promise<Preview> {
   if (path === OUTSIDE) return { path, text: outside.map(shortPath).join('\n'), note: `${outside.length} file${outside.length === 1 ? '' : 's'} Claude wrote outside the repo this session` }
   let text = ''
   let note = ''
@@ -1820,12 +2199,16 @@ async function readPreview($: EngineInterface, path: string, page = 1): Promise<
     note = `could not read: ${messageOf(err).split('\n')[0]}`
   }
   const total = text.length
+  const win = line && total > PREVIEW_CHARS ? previewWindow(text, line) : { text, first: 0 }
+  const first = win.first
+  text = win.text
   let lines = text.slice(0, PREVIEW_CHARS).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').split('\n')
-  if (lines.length > 1 && (total > PREVIEW_CHARS || lines.at(-1) === '')) lines.pop()
+  if (lines.length > 1 && (text.length > PREVIEW_CHARS || lines.at(-1) === '')) lines.pop()
   lines = lines.map(l => (l.length > PREVIEW_LINE ? `${l.slice(0, PREVIEW_LINE)}…` : l))
   const fit = fitSerialized(lines, PREVIEW_CHARS)
-  if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
-  return { path, text: fit.join('\n'), note, page }
+  if (first) note = `lines ${(first + 1).toLocaleString('en')}–${(first + fit.length).toLocaleString('en')} of ${total.toLocaleString('en')} characters`
+  else if (total > PREVIEW_CHARS || fit.length < lines.length) note = `first ${fit.length.toLocaleString('en')} lines of ${total.toLocaleString('en')} characters`
+  return { path, text: fit.join('\n'), note, page, ...(first ? { first } : {}) }
 }
 
 async function loadDiff($: EngineInterface, path: string, folder: boolean): Promise<boolean> {
@@ -1844,7 +2227,7 @@ async function loadDiff($: EngineInterface, path: string, folder: boolean): Prom
   }
   if (!files.length) return false
   const many = folder || files.length > 1
-  const lines = files.flatMap(f => (many ? [{ kind: '@' as const, text: f.path, old: 0, new: 0 }, ...f.lines] : f.lines))
+  const lines = many ? groupFiles(files, folder ? groupSetting : 'off').flatMap(g => ('group' in g ? [{ kind: '@' as const, text: g.group, old: 0, new: 0 }] : [{ kind: '@' as const, text: g.file.path, old: 0, new: 0 }, ...g.file.lines])) : files.flatMap(f => f.lines)
   const note = many ? `${files.length} changed file${files.length === 1 ? '' : 's'} against HEAD` : others.length ? 'untracked file' : 'changes against HEAD'
   previewed = { path, text: '', note, diff: lines }
   return true
@@ -2165,24 +2548,44 @@ async function mapKey($: EngineInterface, key: string): Promise<boolean> {
   return true
 }
 
-function treeKey(): string {
-  return shortcutsSetting === 'always' ? 'nav-o' : 'hk-tree'
-}
-
 function focusPane($: EngineInterface, root: string, key: string): void {
   void $.ui.open({ id: PANE, title: `Files: ${root.split('/').pop() || root}`, focus: true }).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
 }
 
-function toggleShortcuts($: EngineInterface): void {
-  if (shortcutsSetting !== 'auto') return
-  const mine = ++shortcutsTimer
-  shortcutsShown = !shortcutsShown
-  if (shortcutsShown) $.clock.after(SHORTCUTS_MS, () => {
-    if (mine !== shortcutsTimer) return
-    shortcutsShown = false
-    void $.ui.invalidate('ui.render')
-  })
+function toggleShortcuts($: EngineInterface, open = !shortcutsShown): void {
+  shortcutsShown = open
+  shortcutsTop = 0
+  deskKeysAt = 0
   void $.ui.invalidate('ui.render')
+}
+
+function scrollShortcuts($: EngineInterface, by: number): void {
+  const top = Math.max(0, Math.min(shortcutsMax, shortcutsTop + by))
+  if (top === shortcutsTop) return
+  shortcutsTop = top
+  void $.ui.invalidate('ui.render')
+}
+
+function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): boolean {
+  if (key === '?') {
+    toggleShortcuts($)
+    return true
+  }
+  if (!shortcutsShown) return false
+  if (SCROLL_KEYS.has(key)) {
+    const page = Math.max(1, shortcutsPage - 1)
+    const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, b: -page, pagedown: page, f: page, home: -Infinity, end: Infinity }
+    if (surface !== 'desktop') scrollShortcuts($, by[key] ?? 0)
+    else {
+      const titles = shortcutGroups(true).map(g => g.title)
+      const step = by[key] ?? 0
+      deskKeysAt = Math.max(0, Math.min(titles.length - 1, deskKeysAt + (Number.isFinite(step) ? Math.sign(step) * (Math.abs(step) > 1 ? 3 : 1) : step)))
+      void $.ui.scroll({ to: { key: `keys-${titles[deskKeysAt]}` }, in: PANE, block: 'start' }).catch(() => undefined)
+    }
+    return true
+  }
+  toggleShortcuts($, false)
+  return false
 }
 
 async function toggleSplit($: EngineInterface): Promise<void> {
@@ -2224,7 +2627,7 @@ function parkPreview($: EngineInterface): void {
 
 async function closePreview($: EngineInterface): Promise<void> {
   await patch($, () => ({ preview: '', previewTop: 0 }))
-  $.clock.after(100, async () => focusPane($, (await get($)).root, treeKey()))
+  $.clock.after(100, async () => focusPane($, (await get($)).root, 'hk-tree'))
 }
 
 async function jumpDiff($: EngineInterface, dir: 1 | -1): Promise<void> {
@@ -2337,6 +2740,21 @@ async function openInHerdr($: EngineInterface, editor: string, path: string, lin
   if (sent.exitCode !== 0) $.ui.toast(`could not open ${path} with ${editor}: ${herdrError(sent.stderr) || `exit ${sent.exitCode}`}`)
 }
 
+async function openTerminal($: EngineInterface, dir: string): Promise<void> {
+  const host = await editorHost($, await osName($))
+  if (!host) {
+    $.ui.toast('t opens a shell in a new tmux or herdr pane; run Claude Code inside tmux or herdr to use it')
+    return
+  }
+  try {
+    const argv = host === 'tmux' ? tmuxCommand(targetSetting, dir, [(await $.env.get('SHELL')) || 'sh']) : herdrSplit((await $.env.get('HERDR_BIN_PATH')) || 'herdr', dir, targetSetting, (await $.env.get('HERDR_WORKSPACE_ID')) || '')
+    const run = await $.process.run(argv, { timeoutMs: 10_000 })
+    if (run.exitCode !== 0) $.ui.toast(`could not open a terminal in ${shortPath(dir)}: ${(host === 'herdr' ? herdrError(run.stderr) : run.stderr.trim().split('\n')[0]) || `exit ${run.exitCode}`}`)
+  } catch (err) {
+    $.ui.toast(`could not open a terminal in ${shortPath(dir)}: ${messageOf(err).split('\n')[0]}`)
+  }
+}
+
 async function editPreview($: EngineInterface, path: string): Promise<void> {
   if (editWithSetting || inTmux || inHerdr) await openFile($, path, { mode: editWithSetting || 'editor', line: previewLine })
 }
@@ -2411,7 +2829,9 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
+  if (shortcutKey($, key, surface)) return
   if (key === 'z') return jumpOpen($)
+  if (grepOn(await get($)) && ((await grepNav($, key, surface)) || (await grepAct($, key, shift, surface)))) return
   await steer($, key, shift, surface)
   if (autoOpened.size) claimMarks((await get($)).cursor)
 }
@@ -2441,7 +2861,6 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'pagedown') await move(10)
   else if (key === 'home') await move(-rows.length)
   else if (key === 'end') await move(rows.length)
-  else if (key === '?') toggleShortcuts($)
   else if (key === 'i') {
     const dir = cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root
     await scopeSearch($, dir === t.root ? '' : dir)
@@ -2454,10 +2873,15 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (key === 'm') await sortBy($, 'metric')
   else if (key === 'c') await searchFlag($, 'searchCase')
   else if (key === 'r') await searchFlag($, 'searchRegex')
+  else if (key === 'q') await searchFlag($, 'searchContent')
   else if (key === 'w') await showOutside($)
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
-  else if (cur && (key === 'y' || key === 'Y')) await copyPath($, cur.id, key === 'Y' || shift, surface)
+  else if (key === 'V' || (key === 'v' && shift)) clearMarks($)
+  else if (cur && key === 'v') toggleMark($, cur.id)
+  else if (key === 't') await openTerminal($, cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root)
+  else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else if ((cur || marks.length) && key === 'u') await copyPaths($, marks.length ? marks : [cur?.id ?? ''], 'name', surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
@@ -2517,6 +2941,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'sort-metric') await sortBy($, 'metric')
   else if (id === 'case') await searchFlag($, 'searchCase')
   else if (id === 'regex') await searchFlag($, 'searchRegex')
+  else if (id === 'content') await searchFlag($, 'searchContent')
 }
 
 function loadGuards($: EngineInterface): Promise<void> {
@@ -2616,6 +3041,7 @@ export const register: Register = (on, options) => {
   editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   palette = parsePalette(options?.palette)
   diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
+  groupSetting = diffGroups(options?.groups)
   targetSetting = terminalTarget(options?.target)
   noDock = options?.start === 'off'
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
@@ -2627,7 +3053,7 @@ export const register: Register = (on, options) => {
     guardsLoaded = null
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
-    await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open] (no path = cwd, open = never hide)', immediate: true })
+    await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
     if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
@@ -2679,6 +3105,7 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'filetree' }, async ($, e) => {
     const given = (e.args ?? '').trim()
+    if (given === 'keys') return { text: await bindKeys($, home) }
     const mine = given ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
     if (mine?.isShown) {
       noDock = true
@@ -2844,7 +3271,7 @@ export const register: Register = (on, options) => {
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
-      await copyPath($, data.copy, Boolean(data.shift), e.surface)
+      await copyPath($, data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
       return {}
     }
     if (typeof data.scrollTo === 'number') {
@@ -2854,6 +3281,15 @@ export const register: Register = (on, options) => {
     }
     if (typeof data.press === 'string' && zjump.on) {
       if (zjump.rows.includes(data.press)) await jumpTo($, data.press)
+      return {}
+    }
+    if (typeof data.press === 'string' && data.press.startsWith('grep:')) {
+      const at = grep.rows.findIndex(h => grepId(h) === data.press)
+      const hit = grep.rows[at]
+      if (hit) {
+        grep.sel = at
+        await openHit($, hit, e.surface)
+      }
       return {}
     }
     if (typeof data.press === 'string') {
@@ -2909,6 +3345,10 @@ export const register: Register = (on, options) => {
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && zjump.on) jumpClose($)
+    if (e.id === PANE) {
+      shortcutsShown = shortcutsSetting === 'always'
+      shortcutsTop = 0
+    }
     return next(e)
   })
 
@@ -2933,6 +3373,17 @@ export const register: Register = (on, options) => {
       scrollSplit($, peekTop + Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
       return {}
     }
+    if (shortcutsShown && !zjump.on) {
+      scrollShortcuts($, Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
+      return {}
+    }
+    if (grepOn(t) && grep.rows.length) {
+      grep.sel = Math.max(0, Math.min(grep.rows.length - 1, grep.sel + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
+      void $.ui.invalidate('ui.render')
+      const row = grep.rows[grep.sel]
+      if (row) await patch($, () => ({ selected: row.path }))
+      return {}
+    }
     const to = Math.max(0, Math.min(view.max, (t.scroll ?? view.from) + Math.sign(e.by) * Math.max(3, Math.abs(e.by))))
     if (to !== t.scroll) await patch($, () => ({ scroll: to }))
     return {}
@@ -2943,6 +3394,8 @@ export const register: Register = (on, options) => {
     if (!(await followCwd($))) void sync($)
     const t = await get($)
     const context = [...(e.context ?? [])]
+    const marked = (await Promise.all(marks.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
+    if (marked.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${marked.join('\n')}`)
     if (t.selected && (await exists($, t.selected))) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${t.selected}`)
     const mentions = [...e.text.matchAll(/@([^\s"'`]+)/g)]
       .map(m => (m[1] ?? '').replace(/[.,;:!?)]+$/, ''))
@@ -2964,6 +3417,23 @@ export const register: Register = (on, options) => {
       })()
     }
     return next(context.length ? { ...e, context } : e)
+  })
+
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    const drawn = await next(e)
+    if (e.component !== 'AssistantMessage' || e.props.isSummary || (e.surface !== 'terminal' && e.surface !== 'desktop') || !fileRefs(e.props.text).length) return drawn
+    const t = await get($)
+    if (!t.root) return drawn
+    const refs = await refsIn($, e.props.text, t.root, await cwdOf($))
+    if (!refs.length) return drawn
+    const { Box, Markdown } = $.ui.resolve(e)
+    const links = refs.map(r => ({ href: refHref(r), label: `${relative(t.root, r.path)}:${r.line}${r.end > r.line ? `-${r.end}` : ''}` }))
+    return (
+      <Box flexDirection="column">
+        {drawn}
+        <Markdown key="filetree-refs" dimColor text={`in the file tree: ${links.map(l => `[${l.label.replace(/[[\]]/g, '\\$&')}](${l.href})`).join('  ')}`} pressableLinks={links.map(l => l.href)} onLinkPress={(link, p) => void openRef($, link.href, p.surface)} />
+      </Box>
+    )
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
@@ -3046,17 +3516,20 @@ export const register: Register = (on, options) => {
     const bgRgb = rgbOf(theme.bg)
     const searchBg = bgRgb ? toHex(over(bgRgb, rgbOf(theme.fg) ?? (light ? [0, 0, 0] : [255, 255, 255]), 0.07)) : light ? 'ansi256(254)' : 'ansi256(236)'
     const glow = (color: string, id: string) => (hovered === id ? lighten(color) : color)
-    const toggle = (id: 'case' | 'regex', label: string, active: boolean, bad: boolean) => {
+    const flagOf = { case: 'searchCase', regex: 'searchRegex', content: 'searchContent' } as const
+    const toggle = (id: keyof typeof flagOf, label: string, active: boolean, bad: boolean) => {
       const color = bad ? ink(theme.urgent, DESK.urgent) : active ? accentInk : mutedInk
       return desk ? (
         <Box key={`tool-${id}`} position="relative" flexShrink={0} flexDirection="row" alignItems="center">
-          <Text color={glow(color, id)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>
+          {id === 'content' && Svg
+            ? <Svg key={`search-${id}-icon-${active ? 'on' : 'off'}`} source={iconSvg('file-text', glow(color, id), 16)} alt={`search file contents ${active ? 'on' : 'off'}`} width={16} height={16} />
+            : <Text color={glow(color, id)} hover={{ color: lighten(color) }} weight={active ? 'semibold' : 'regular'}>{label}</Text>}
           <Box position="absolute" top={0} left={0} right={0} bottom={0}>
             <Client key={`button-${id}`} module="./button.tsx" props={{ id, label: '', dim: !active } satisfies ButtonProps} width="100%" height="100%" />
           </Box>
         </Box>
       ) : (
-        <Button key={`search-${id}`} plain label={label} onPress={() => void searchFlag($, id === 'case' ? 'searchCase' : 'searchRegex')}>
+        <Button key={`search-${id}`} plain label={label} onPress={() => void searchFlag($, flagOf[id])}>
           <Text {...(bad ? { color: theme.urgent } : active ? { color: theme.accent } : { dimColor: true })}>{label}</Text>
         </Button>
       )
@@ -3081,14 +3554,15 @@ export const register: Register = (on, options) => {
       return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
     }
     if (t.preview) {
-      if (previewed?.path !== t.preview) await loadPreview($, t.preview)
+      if (previewed?.path !== t.preview) await loadPreview($, t.preview, deskLine?.path === t.preview ? deskLine.line : undefined)
       const p = previewed
+      const first = p?.diff ? 0 : (p?.first ?? 0)
       const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(t.preview)
       const all = p?.diff?.length ?? (p?.text ?? '').split('\n').length
       previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 3 : 2))
       const start = nativeScroll ? 0 : p?.diff ? Math.min(t.previewTop, Math.max(0, all - 1)) : Math.min(t.previewTop, Math.max(0, all - previewRows))
       const win = p?.diff ? diffWindow(p.diff, start, previewRows) : previewLines(p?.text ?? '', start, previewRows, markdown)
-      previewLine = win.top + 1
+      previewLine = first + win.top + 1
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const listing = t.preview === OUTSIDE
       const external = { id: 'external', label: glyphSetting === 'text' ? 'open' : unicode ? '↗' : '\u{eb14}', dim: true, hint: 'open in default app' }
@@ -3132,6 +3606,12 @@ export const register: Register = (on, options) => {
                 {win.segments.map((g, i) => {
                   const node: FileNode = { id: g.title, parent: '', name: g.title.split('/').pop() ?? g.title, kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true }
                   const counts = p?.diff ? diffCounts(g.source) : [0, 0]
+                  if (g.title.startsWith(GROUP)) return (
+                    <Box key={`pv-seg-${i}`} flexDirection="row" alignItems="center" marginBottom={1}>
+                      <Svg key={`pv-group-icon-${i}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`group ${g.title.slice(GROUP.length)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+                      <Text weight="semibold" color={accentInk}>{g.title.slice(GROUP.length)}</Text>
+                    </Box>
+                  )
                   return (
                     <Box key={`pv-seg-${i}`} flexDirection="column" marginBottom={1}>
                       {g.title ? (
@@ -3148,7 +3628,22 @@ export const register: Register = (on, options) => {
                   )
                 })}
               </Box>
-            ) : directPreview(elements, win, t.preview, markdown, theme.accent)}
+            ) : deskLine?.path === t.preview && deskLine.top > 0 && !p?.diff ? (() => {
+              const lines = (p?.text ?? '').split('\n')
+              const at = Math.max(0, Math.min(deskLine.top - first, lines.length - 1))
+              if (!deskLine.scrolled) {
+                deskLine.scrolled = true
+                $.clock.after(50, () => void $.ui.scroll({ to: { key: 'pv-line' }, in: PANE, block: 'start' }).catch(() => undefined))
+              }
+              const { Markdown, Code } = elements
+              const [above, below] = markdown ? markdownSplit(p?.text ?? '', at) : [lines.slice(0, at).join('\n'), lines.slice(at).join('\n')]
+              return (
+                <Box key="pv-split" flexDirection="column">
+                  {markdown ? <Markdown key="pv-above" text={above} /> : <Code key="pv-above" source={above} path={t.preview} startLine={first + 1} wrap="truncate-end" />}
+                  {markdown ? <Markdown key="pv-line" text={below} /> : <Code key="pv-line" source={below} path={t.preview} startLine={first + at + 1} wrap="truncate-end" />}
+                </Box>
+              )
+            })() : directPreview(elements, { ...win, top: first + win.top }, t.preview, markdown, theme.accent)}
             <Box key="pv-hotkeys" height={0} overflow="hidden" flexDirection="row">
               {acts.filter(a => a.key).map(a => <Button key={`pv-hk-${a.key}`} plain hotkey={a.key} label={a.key} onPress={() => previewActs.get(a.id)?.()} />)}
             </Box>
@@ -3177,11 +3672,11 @@ export const register: Register = (on, options) => {
             {!listing && (editWithSetting || inTmux || inHerdr) ? <Button key="edit" plain dimColor autoFocus hotkey="e" label={`${unicode ? 'edit' : '\u{ea73} edit'} :${previewLine}`} onPress={() => void editPreview($, t.preview)} /> : null}
           </Box>
           {p?.note ? <Text {...mutedText}>{p.note}</Text> : null}
-          {nativeScroll ? directPreview(elements, win, t.preview, markdown, theme.accent) : (
+          {nativeScroll ? directPreview(elements, { ...win, top: first + win.top }, t.preview, markdown, theme.accent) : (
             <Client
               key="rows"
               module="./rows.tsx"
-              props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+              props={{ rows: [], active: '', ...rowColors, pointer: false, preview: 'segments' in win ? { text: '', path: t.preview, startLine: win.top + 1, markdown: false, segments: win.segments, titleColor: theme.accent } : { text: win.text, path: t.preview, startLine: first + win.top + 1, markdown } } satisfies RowsProps}
             />
           )}
         </Box>
@@ -3203,9 +3698,11 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = rowsOf(t)
+    const grepping = !zjump.on && grepOn(t)
+    if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
-    const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsShown || shortcutsSetting === 'auto' ? 1 : 0)
+    const chrome = 1 + (searchGap ? 2 : sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : showHints ? 1 : 0) + (!desk || footer || latest || shortcutsSetting === 'auto' ? 1 : 0)
     const spare = body - chrome - 5
     const splitRows = t.split && !nativeScroll && spare >= 6 && (treemapSetting !== 'off' || Boolean(peekTarget(t))) ? Math.min(Math.max(6, Math.floor(body * 0.45)), spare) : 0
     splitShown = splitRows > 0
@@ -3340,6 +3837,7 @@ export const register: Register = (on, options) => {
     if (width - 6 - maxDepth * 2 - tailSum() - 2 < NAME_MIN) delete widths.metric
     if (width - 6 - maxDepth * 2 - tailSum() - 2 < NAME_MIN) for (const c of GIT_COLS) delete widths[c]
     const tailCells = tailSum()
+    const searching = Boolean(t.query.trim()) && !grepping
     const rowParts = (r: (typeof rows)[number]) => {
       const n = r.node
       const own = t.git[n.id]
@@ -3356,7 +3854,15 @@ export const register: Register = (on, options) => {
       if (cells.metric && gitColor && !isIgnored && !isLong(n)) cells.metric = { ...cells.metric, c: gitColor }
       const hasCounts = Boolean(cells['?'] || cells.M || cells.D)
       const badge = hasCounts ? '  ' : status ? ` ${status}` : isIgnored ? ' ⊘' : '  '
-      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length)
+      const rel = relative(t.root, n.id)
+      const spans = searching ? matchSpans(t.query, Boolean(t.searchCase), Boolean(t.searchRegex), rel) : []
+      const hl = (text: string) => (spans.length ? highlight(text, spans, rel.length - n.name.length) : [{ t: text, hit: false }])
+      const isMarked = marks.includes(n.id)
+      const isLink = links.has(n.id)
+      const link = isLink ? linkStates.get(n.id) : undefined
+      if (isLink && !linkStates.has(n.id)) void classifyLink($, n.id)
+      const linkColor = link?.kind === 'broken' || link?.kind === 'circular' ? theme.urgent : link?.kind === 'outside' ? warnColor : theme.muted
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0) - (isLink ? 2 : 0))
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
@@ -3367,7 +3873,9 @@ export const register: Register = (on, options) => {
         { t: '  '.repeat(r.depth) },
         { t: caret, c: isCur ? theme.accent : theme.muted, b: isCur || undefined },
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
-        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' },
+        ...(lit ? [{ t: name, sh: tone, dim: isDim, b: isBright }] : hl(name).map(x => ({ t: x.t, c: x.hit ? theme.accent : nameColor, b: x.hit || n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' }))),
+        ...(isLink ? [{ t: ' →', c: linkColor }] : []),
+        ...(isMarked ? [{ t: ' ●', c: theme.accent }] : []),
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
         const cell = cells[c]
@@ -3375,7 +3883,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard }
+      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked, isLink, link, linkColor, parts: hl(n.name) }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -3445,12 +3953,15 @@ export const register: Register = (on, options) => {
       const strike = p.status === 'D' && n.kind !== 'dir'
       const name = p.lit
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
-        : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
+        : <Text {...tint(p.nameColor)} bold={n.id === t.selected || undefined} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentInk} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
           {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
-          <Box flexGrow={1} flexShrink={1} overflow="hidden">{name}</Box>
+          <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
+          {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
+          {p.isLink ? <Box flexGrow={1} /> : null}
+          {p.isMarked && Svg ? <Svg key={`mark:${n.id}`} source={iconSvg('mark', accentInk, 12)} alt={`marked ${n.name}`} width={12} height={12} /> : null}
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
             {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
@@ -3466,7 +3977,19 @@ export const register: Register = (on, options) => {
     const jumpSpecs: RowSpec[] = zjump.rows.length
       ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
       : [note('no matching folder')]
-    const specs: RowSpec[] = zjump.on ? jumpSpecs : [
+    const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
+    const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
+    const grepNode = (path: string): FileNode => ({ id: path, parent: dirname(path), name: path.slice(path.lastIndexOf('/') + 1), kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true })
+    const grepNote = !grepping ? '' : grep.rows.length === 0 ? (grep.busy ? 'searching…' : grep.note || 'no matches') : grep.capped ? `first ${GREP_LIMIT} matches; keep typing to narrow` : grep.note
+    const grepRoom = Math.max(1, room - (grepNote ? 1 : 0))
+    const grepFrom = nativeScroll ? 0 : Math.max(0, Math.min(grep.sel - Math.floor(grepRoom / 2), grep.rows.length - grepRoom))
+    const grepSpecs: RowSpec[] = !grepping ? [] : [
+      ...grep.rows.slice(grepFrom, nativeScroll ? undefined : grepFrom + grepRoom).map((h): RowSpec => h.line
+        ? { id: grepId(h), left: clean([{ t: `    ${String(h.line).padStart(grepDigits)}  `, c: theme.muted }, { t: h.text, c: theme.fg || undefined }]), right: [] }
+        : { id: grepId(h), left: clean([{ t: `${unicode ? '∙' : fileIcon(grepNode(h.path), false, false)} `, c: theme.muted }, { t: grepName(h.path), c: theme.fg || undefined, b: true }]), right: [{ t: ` ${h.text} `, c: theme.muted }] }),
+      ...(grepNote ? [note(grepNote)] : []),
+    ]
+    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : [
       ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
@@ -3486,7 +4009,46 @@ export const register: Register = (on, options) => {
         deskParts.push(rowParts(r))
       }
     }
+    const deskGrep: GrepHit[] = []
+    if (desk && grepping) {
+      let size = 0
+      for (const g of grep.rows) {
+        size += DESK_ROW_CHARS + 6 * grepId(g).length + g.text.length
+        if (size > ROWS_BUDGET) break
+        deskGrep.push(g)
+      }
+    }
+    const deskGrepNote = deskGrep.length < grep.rows.length ? `first ${deskGrep.length} of ${grep.rows.length} rows; keep typing to narrow` : grepNote
     const deskTree = () => {
+      if (grepping) return (
+        <Box key="grep-list" flexDirection="column">
+          {deskGrep.map((g, k) => (
+            <Box key={`grep-row:${grepId(g)}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : undefined} hover={{ backgroundColor: k === grep.sel ? deskSel : deskHover }}>
+              {g.line ? <Box key={`grep-line:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
+                {Svg ? <Svg key={`grep-guide:${grepId(g)}`} source={rowSvg(1, null, null, mutedInk)} alt={`line ${g.line}`} width={STEP_PX * 3 + GAP_PX} height={ROW_PX} /> : null}
+                <Text color={mutedInk} tabular mono>{`${String(g.line).padStart(grepDigits)} `}</Text>
+                <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text mono wrap="truncate-end">{g.text}</Text></Box>
+              </Box> : <Box key={`grep-file:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
+                {Svg ? <Svg key={`grep-icon:${grepId(g)}`} source={rowSvg(0, null, nodeIcon(grepNode(g.path), false), mutedInk)} alt={`file ${grepName(g.path)}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+                <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text weight="semibold" wrap="truncate-start">{grepName(g.path)}</Text></Box>
+                <Text color={mutedInk} tabular>{g.text}</Text>
+                <Box width={2} flexShrink={0} />
+              </Box>}
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key={`hit:${grepId(g)}`} module="./hit.tsx" props={{ id: grepId(g) } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ))}
+          {deskGrepNote ? (
+            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+              <Text {...mutedText}>{deskGrepNote}</Text>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ) : null}
+        </Box>
+      )
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
@@ -3517,7 +4079,7 @@ export const register: Register = (on, options) => {
     }
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar =
-      !nativeScroll && rows.length > shown.length + pinned.length
+      !nativeScroll && !grepping && rows.length > shown.length + pinned.length
         ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
         : undefined
 
@@ -3596,7 +4158,9 @@ export const register: Register = (on, options) => {
       if (target !== peekPath) {
         peekPath = target
         peeked = null
-        peekTop = 0
+        peekTop = peekWant?.path === target ? peekWant.top : 0
+        peekWant = null
+        if (peekAt?.path !== target) peekAt = null
         overPeek = false
       }
       let start = peekTop
@@ -3739,18 +4303,26 @@ export const register: Register = (on, options) => {
             }))
           }
           if (peeked?.path !== target) peeked = { path: target, text: '', note: 'reading…', page }
-        } else if (peeked?.path !== target) peeked = await readPreview($, target)
+        } else if (peeked?.path !== target) {
+          const at = peekAt?.path === target ? peekAt : null
+          peeked = await readPreview($, target, 1, at?.line)
+          if (at && !at.jumped) {
+            at.jumped = true
+            start = peekTop = Math.max(0, at.line - 3 - (peeked.first ?? 0))
+          }
+        }
+        const first = peeked.first ?? 0
         const lines = peeked.text.split('\n')
         const last = Math.max(0, lines.length - peekRows)
         start = Math.min(start, last)
         const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(target)
         const win = previewLines(peeked.text, start, peekRows, markdown)
-        status = `${docKind === 'pdf' ? `p ${page}${docCounts.has(target) ? `/${docCounts.get(target)}` : ''} ` : ''}${peeked.text ? `${start + 1}–${Math.min(lines.length, start + peekRows)}/${lines.length}` : ''}`.trim()
+        status = `${docKind === 'pdf' ? `p ${page}${docCounts.has(target) ? `/${docCounts.get(target)}` : ''} ` : ''}${peeked.text ? `${first + start + 1}–${first + Math.min(lines.length, start + peekRows)}/${first + lines.length}` : ''}`.trim()
         const size = Math.max(1, Math.round((peekRows * peekRows) / Math.max(1, lines.length)))
         const bar = lines.length > peekRows ? { pos: last ? Math.round((start / last) * (peekRows - size)) : 0, size, thumb: theme.accent, track: theme.muted } : undefined
         if (!peeked.text) overPeek = false
         content = peeked.text
-          ? <Client key="peek" module="./rows.tsx" props={{ rows: [], active: '', ...rowColors, pointer, ...(bar ? { bar } : {}), preview: { text: win.text, path: target, startLine: win.top + 1, markdown, rows: peekRows } } satisfies RowsProps} />
+          ? <Client key="peek" module="./rows.tsx" props={{ rows: [], active: '', ...rowColors, pointer, ...(bar ? { bar } : {}), preview: { text: win.text, path: target, startLine: first + win.top + 1, markdown, rows: peekRows } } satisfies RowsProps} />
           : <Text {...mutedText}>{raw?.state === 'pending' ? 'converting…' : peeked.note || 'empty file'}</Text>
       }
       const title = (
@@ -3774,13 +4346,15 @@ export const register: Register = (on, options) => {
     const split = await peek()
 
     const paging = splitShown && Boolean(peekPath) && (pictureKind(peekPath) === 'pdf' || (pictureKind(peekPath) === 'office' && Boolean(Image) && !imageDenied && !inTmux && !inHerdr))
-    const park = () => focusPane($, t.root, paging ? 'rows' : treeKey())
+    const park = () => focusPane($, t.root, paging ? 'rows' : 'hk-tree')
+    const footerLink = footer && links.has(footer) ? linkStates.get(footer) : undefined
+    if (footer && links.has(footer) && !linkStates.has(footer)) void classifyLink($, footer)
     const footerName = footer === t.root ? t.root.split('/').filter(Boolean).pop() || t.root : footer ? (inside(t.root, footer) ? footer.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(footer)) : ''
     const allKeys: { key: string; label: string; act: () => void }[] = [
       { key: 'jkhl', label: 'move', act: () => undefined },
       { key: 'o', label: 'open', act: () => void navigate($, 'return') },
       { key: 'd', label: 'diff', act: () => void navigate($, 'd') },
-      { key: 's', label: 'search', act: () => focusPane($, t.root, 'q') },
+      { key: 's', label: 'search', act: () => void navigate($, 's', false, e.surface) },
       { key: 'i', label: 'in folder', act: () => void navigate($, 'i', false, e.surface) },
       { key: 'a', label: 'auto-collapse', act: () => void navigate($, 'a', false, e.surface).then(park) },
       { key: 'z', label: 'jump', act: () => void navigate($, 'z', false, e.surface) },
@@ -3789,29 +4363,49 @@ export const register: Register = (on, options) => {
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
       ...(e.surface === 'desktop' ? [] : [{ key: 'p', label: 'preview', act: () => void navigate($, 'p', false, e.surface).then(park) }]),
       { key: 'y', label: 'copy path', act: () => void navigate($, 'y', false, e.surface).then(park) },
+      { key: 'u', label: 'copy name', act: () => void navigate($, 'u', false, e.surface).then(park) },
+      { key: 'v', label: 'mark', act: () => void navigate($, 'v', false, e.surface).then(park) },
+      { key: 't', label: 'terminal', act: () => void navigate($, 't', false, e.surface) },
       { key: 'x', label: 'guard', act: () => void navigate($, 'x', false, e.surface).then(park) },
       ...(outside.length ? [{ key: 'w', label: 'outside writes', act: () => void navigate($, 'w', false, e.surface) }] : []),
       { key: 'c', label: 'match case', act: () => void navigate($, 'c', false, e.surface).then(park) },
       { key: 'r', label: 'regex', act: () => void navigate($, 'r', false, e.surface).then(park) },
+      { key: 'q', label: 'contents', act: () => void navigate($, 'q', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
-      ...(shortcutsSetting === 'auto' ? [{ key: '?', label: 'hide', act: () => undefined }] : []),
     ]
-    const picked = new Set<string>()
-    if (shortcutsShown) {
-      let room = width - (footerName ? 12 + Math.min(footerName.length, 6) : 0) - (latest ? 6 + latest.label.length : 0)
-      for (const key of ['?', 'jkhl', '[ ]', 'd', 'o', 'w', 'x', 's', 'i', 'z', 'p', 'y', 'c', 'r', 'a', 'n', 'g', 'm']) {
-        const k = allKeys.find(x => x.key === key)
-        if (!k) continue
-        const w = (key === 'jkhl' ? 7 : key.length) + k.label.length + 4
-        if (w > room) continue
-        room -= w
-        picked.add(key)
-      }
+    const overlay = shortcutsShown && !zjump.on
+    const keyRows = overlay && !desk ? shortcutRows(theme.accent, theme.muted) : []
+    shortcutsPage = room
+    shortcutsMax = Math.max(0, keyRows.length - room)
+    shortcutsTop = Math.min(shortcutsTop, shortcutsMax)
+    const deskShortcuts = () => {
+      const groups = shortcutGroups(true)
+      const keyCols = Math.max(...groups.flatMap(g => g.keys.map(k => k.key.length))) + 2
+      return (
+        <Box key="keys-panel" flexDirection="column" marginTop={1} marginX={1} paddingX={1} paddingY={1} backgroundColor={DESK.field}>
+          <Box key="keys-head" flexDirection="row" alignItems="center">
+            {Svg ? <Svg key="keys-panel-icon" source={iconSvg('keyboard', accentInk, 16)} alt="keyboard shortcuts" width={16} height={16} /> : null}
+            <Box marginLeft={1} flexShrink={1}><Text bold>Keyboard shortcuts</Text></Box>
+            <Box flexGrow={1} />
+            <Button key="keys-close" plain dimColor hover={{ dimColor: false }} label="Close" onPress={() => { toggleShortcuts($, false); park() }} />
+          </Box>
+          {groups.map(g => (
+            <Box key={`keys-${g.title}`} flexDirection="column" marginTop={1}>
+              <Text key={`keys-title-${g.title}`} bold color={mutedInk}>{g.title}</Text>
+              {g.keys.map(k => (
+                <Box key={`keys-${g.title}-${k.key}`} flexDirection="row">
+                  <Box width={keyCols} flexShrink={0}><Text mono color={accentInk}>{k.key}</Text></Box>
+                  <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{k.label}</Text></Box>
+                </Box>
+              ))}
+            </Box>
+          ))}
+        </Box>
+      )
     }
-    const keys = allKeys.filter(k => picked.has(k.key))
     const hidden: [string, () => void][] = zjump.on ? [] : [
-      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k).then(park)]),
-      ...allKeys.filter(k => /^[a-z]$/.test(k.key) && !picked.has(k.key)).map((k): [string, () => void] => [k.key, k.act]),
+      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, shortcutsShown || grepping ? e.surface : undefined).then(park)]),
+      ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]
 
@@ -3821,7 +4415,7 @@ export const register: Register = (on, options) => {
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
               <Svg key="root-icon" source={rowSvg(0, 'open', t.top === t.root ? 'folder-git' : 'folder-open', accentInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
-              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
                 <Text bold>{header}</Text>
               </Button>
             </Box>
@@ -3833,7 +4427,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row">
             <Box flexDirection="row" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? rowColors.activeBg || undefined : undefined}>
-              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, treeKey()))}>
+              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
                 <Text color={theme.accent}>{`${rootGlyph} `}</Text>
                 <Text bold color={theme.accent}>{header}</Text>
               </Button>
@@ -3867,16 +4461,17 @@ export const register: Register = (on, options) => {
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
               </> : <Input
                 key="q"
-                placeholder="Search files..."
+                placeholder={t.searchContent ? 'Search file contents...' : 'Search files...'}
                 value={t.query}
                 onInput={onQuery}
-                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+                onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
             {t.query ? <Button key="clear" plain dimColor label="×" onPress={() => void search($, '')} /> : null}
             <Box flexShrink={0} flexDirection="row" gap={2} marginLeft={1} marginRight={1}>
               {toggle('case', 'Aa', Boolean(t.searchCase), false)}
               {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+              {toggle('content', 'contents', Boolean(t.searchContent), false)}
             </Box>
           </Box>
         ) : (
@@ -3890,44 +4485,35 @@ export const register: Register = (on, options) => {
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
               </> : <Input
                 key="q"
-                placeholder="search"
+                placeholder={t.searchContent ? 'search contents' : 'search'}
                 submitLabel="go"
                 value={t.query}
                 onInput={onQuery}
-                onSubmit={(v: string) => void jump($, v).then(() => $.clock.after(100, park))}
+                onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
             {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
             <Box flexShrink={0} flexDirection="row" gap={1} marginLeft={1}>
               {toggle('case', 'Aa', Boolean(t.searchCase), false)}
               {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+              {toggle('content', glyphSetting === 'text' ? 'in' : unicode ? '≡' : '\u{f09aa}', Boolean(t.searchContent), false)}
               <Text> </Text>
             </Box>
           </Box>
         )}
         {sortHeader ? headerRow() : searchGap ? <Text key="gap-below"> </Text> : null}
-        {desk ? deskTree() : (
+        {desk ? (overlay ? deskShortcuts() : deskTree()) : (
           <Client
             key="rows"
             module="./rows.tsx"
-            props={{ rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
         {splitAt === 'bottom' ? split : null}
-        {(footer || latest || tipText || shortcutsShown || shortcutsSetting === 'auto') && (
+        {(footer || latest || tipText || shortcutsSetting === 'auto') && (
           <Box flexDirection="row" height={1} overflow="hidden">
-            {keys.length ? (
-              <Box flexDirection="row" flexShrink={0} gap={2}>
-                {keys.map(k => k.key === 'jkhl'
-                  ? <Text key="nav-move" dimColor><Text color={theme.accent}>j k h l</Text>: move</Text>
-                  : k.key === '[ ]'
-                  ? <Button key="nav-page" plain dimColor label={`[ ]: ${k.label}`} onPress={k.act}><Text color={theme.accent}>[ ]</Text>{`: ${k.label}`}</Button>
-                  : k.key === '?'
-                  ? <Button key="nav-help" plain dimColor label={`?: ${k.label}`} onPress={() => { toggleShortcuts($); park() }}><Text color={theme.accent}>?</Text>{`: ${k.label}`}</Button>
-                  : <Button key={`nav-${k.key}`} plain dimColor autoFocus={k.key === 'o' && shortcutsSetting === 'always' ? true : undefined} hotkey={!zjump.on && /^[a-z]$/.test(k.key) ? k.key : undefined} label={/^[a-z]$/.test(k.key) ? k.label : `${k.key}: ${k.label}`} onPress={k.act} />)}
-              </Box>
-            ) : shortcutsSetting === 'auto' ? (
+            {shortcutsSetting === 'auto' ? (
               desk && Svg ? (
                 <Box key="keys" flexShrink={0} flexDirection="row" alignItems="center">
                   <Svg key="keys-icon" source={rowSvg(0, null, 'keyboard', mutedInk)} alt="keyboard shortcuts" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
@@ -3946,16 +4532,17 @@ export const register: Register = (on, options) => {
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
+            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Box> : null}
             {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
             {footerName && !tipText ? (
               <Box flexShrink={1}>
-                <Text {...mutedText} wrap="truncate-start">{footerName}</Text>
+                <Text {...mutedText} wrap="truncate-start">{footer && links.has(footer) ? footerName + linkNote(footerLink) : footerName}</Text>
               </Box>
             ) : null}
           </Box>
         )}
         <Box key="hotkeys" height={0} overflow="hidden" flexDirection="row">
-          {shortcutsSetting === 'always' ? null : <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} />}
+          <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} />
           {hidden.map(([k, act]) => <Button key={`hk-${k}`} plain hotkey={k} label={k} onPress={act} />)}
         </Box>
       </Box>

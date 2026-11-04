@@ -149,8 +149,8 @@
     },
     "shortcuts": {
       "type": "string",
-      "title": "Shortcut row",
-      "description": "auto: the footer shows a ?: shortcuts hint until you press ? in the tree, then the shortcuts show at the left of the footer row for 10 seconds, the selected entry staying at the right; ? again hides them. always: they always show. off: they never show. The keys work in every mode with the tree focused.",
+      "title": "Shortcuts",
+      "description": "? in the tree shows every key, grouped, in place of the tree; j, k, the arrows, f, b and the page keys scroll it; ? again or any other key that acts closes it, and the key still acts. auto: the footer shows a ?: shortcuts hint. always: the list opens with the pane. off: no hint. ? works in every mode with the tree focused; typed in the search field it is just a character.",
       "default": "auto",
       "options": [
         "auto",
@@ -185,6 +185,17 @@
       "title": "Diff with",
       "description": "What d does on a changed file, in the tree or the preview. Empty: show its diff against HEAD in the pane, drawn by Claude Code's own diff view (an untracked file shows as all added; d again goes back to the file). Anything else is a terminal command, run on the file in a tmux window, a herdr pane or, on Linux, a new terminal window through xdg-terminal-exec, the file path going last. Examples: hunk diff --, lazygit -f, git difftool -y --, nvim -c Gvdiffsplit.",
       "default": ""
+    },
+    "groups": {
+      "type": "string",
+      "title": "Diff groups",
+      "description": "How d on a folder orders its changed files. folder: grouped by folder, with test, build and generated files (lockfiles, dist, build and out folders, *.min.*, snapshots, test folders, *.test.* and *_test.* files) in their own group last. kind: the other files first, then that test, build and generated group. off: one list in git's order.",
+      "default": "folder",
+      "options": [
+        "folder",
+        "kind",
+        "off"
+      ]
     },
     "target": {
       "type": "string",

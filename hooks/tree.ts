@@ -1,6 +1,6 @@
 import type { Branch, FileNode, FileTree, Theme } from '../types'
 import { stronger } from './icons'
-import { compileRegex } from './regex'
+import { compileRegex, compileSpans } from './regex'
 
 export type Entry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number; size: number; isLink: boolean }
 export type Row = { node: FileNode; depth: number; open: boolean }
@@ -26,6 +26,7 @@ export function emptyTree(root: string): FileTree {
     query: '',
     searchCase: false,
     searchRegex: false,
+    searchContent: false,
     searchScope: '',
     sortCol: '',
     sortDir: 'desc',
@@ -313,6 +314,32 @@ export function matcher(query: string, cased: boolean, regex: boolean): Matcher 
   return make(text => text.toLowerCase().includes(lower))
 }
 
+export function matchSpans(query: string, cased: boolean, regex: boolean, text: string): [number, number][] {
+  const q = query.trim()
+  if (!q || badPattern(q, regex)) return []
+  if (regex) return compileSpans(q, !cased)?.(text) ?? []
+  const hay = cased ? text : text.toLowerCase()
+  const needle = cased ? q : q.toLowerCase()
+  const out: [number, number][] = []
+  for (let at = hay.indexOf(needle); at >= 0; at = hay.indexOf(needle, at + needle.length)) out.push([at, at + needle.length])
+  return out
+}
+
+export function highlight(text: string, spans: [number, number][], from = 0): { t: string; hit: boolean }[] {
+  const out: { t: string; hit: boolean }[] = []
+  let at = 0
+  for (const [a, b] of spans) {
+    const s = Math.max(0, Math.min(text.length, a - from))
+    const e = Math.max(0, Math.min(text.length, b - from))
+    if (e <= s || s < at) continue
+    if (s > at) out.push({ t: text.slice(at, s), hit: false })
+    out.push({ t: text.slice(s, e), hit: true })
+    at = e
+  }
+  if (at < text.length) out.push({ t: text.slice(at), hit: false })
+  return out
+}
+
 export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => number): Row[] {
   const kids = new Map<string, FileNode[]>()
   for (const n of t.nodes) {
@@ -323,7 +350,7 @@ export function visibleRows(t: FileTree, order?: (a: FileNode, b: FileNode) => n
   }
   if (order) for (const list of kids.values()) list.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || order(a, b))
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
-  const match = matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
+  const match = t.searchContent ? null : matcher(t.query, Boolean(t.searchCase), Boolean(t.searchRegex))
   let keep: Set<string> | null = null
   if (match) {
     keep = new Set()
