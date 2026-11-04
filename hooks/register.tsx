@@ -1722,6 +1722,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
 }
 
 async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface): Promise<void> {
+  mapLock = null
   const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
   const top = Math.max(0, line - 3)
   if (surface === 'desktop' || nativeScroll) {
