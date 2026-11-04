@@ -192,7 +192,12 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 ## Contributing
 
-Open pull requests against a release branch, never `main`: fixes and small changes go to the patch branch (`release/<next patch>`, now `release/0.7.1`), new features, settings and behaviour changes to the feature branch (`release/<next minor>.0`, now `release/0.8.0`). A release branch is named after the version it carries, and a pull request keeps that version in `.claude-plugin/plugin.json` and the README badge; the version check refuses anything else.
+Open pull requests against a release branch, not `main`:
+
+- Fixes: the patch branch, such as `release/0.7.1`
+- Features: the minor branch, such as `release/0.8.0`
+
+Keep the version of that branch.
 
 Turn on the git hooks once per clone. The pre-commit hook runs the fast checks in seconds: grep rules, types, oxlint, and `claude plugin validate` when the manifests change. The pre-push hook checks the version against the release branch and runs the plugin tests:
 
