@@ -1782,7 +1782,10 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
 async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
   if (!['x', 'd', 'v', 't', 'y', 'Y', 'u', 'i'].includes(key) || (key === 'v' && shift)) return false
   const path = grep.rows[grep.sel]?.path
-  if (!path) return true
+  if (!path) {
+    if ((key === 'y' || key === 'Y' || key === 'u') && marks.length) await copyPaths($, marks, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+    return true
+  }
   if (key === 'i') {
     const t = await get($)
     const dir = dirname(path)

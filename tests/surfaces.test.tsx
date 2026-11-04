@@ -221,7 +221,7 @@ function world(on: On, w: World, ran: Ran) {
     }
     const out = argv[0] === 'du' ? (w.du?.[argv.at(-1) ?? ''] ?? '') : argv[0] === 'find' && argv.includes('grep') ? (w.loc?.[(argv[1] ?? '').replace(/\/\.$/, '')] ?? '') : ''
     if (out) yield { stream: 'stdout', text: out }
-    if (w.grep !== undefined && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) {
+    if (w.grep && (argv[0] === 'grep' || (argv[0] === 'git' && argv.includes('grep')))) {
       const under = argv[0] === 'git' ? (argv[argv.indexOf('-C') + 1] ?? '').slice(w.top.length + 1) : ''
       const full = w.fullName && under && !argv.includes('--no-full-name')
       yield { stream: 'stdout', text: full ? w.grep.replace(/^(?=.)/gm, `${under}/`) : w.grep }
@@ -4968,4 +4968,28 @@ test('an untranslatable regex searches every line, so ^\\s*$ finds completely em
   expect(ran.find(a => a[0] === 'git' && a.includes('grep'))?.slice(-4)).toEqual(['-e', '^', '--', '.'])
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([`grep:0:${root}/a.ts`, `grep:2:${root}/a.ts`, `grep:3:${root}/a.ts`])
   await ui.unmount()
+})
+
+test('y, Y and u copy the marks while a content search has no matches', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, ''), [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.advance(1000)
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await ui.unmount()
+  const search = await contentSearch($, clock, 'nothing')
+  expect(JSON.stringify(await search.drawn())).toContain('no matches')
+  for (const key of ['y', 'Y', 'u']) await search.post({ key }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual(['a.ts', `${root}/a.ts`, 'a.ts'])
+  await search.unmount()
 })
