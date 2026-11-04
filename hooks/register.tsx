@@ -93,6 +93,7 @@ const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
+const COLLAPSE_MS = 10_000
 const GIT_POLL_MS = 2000
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
@@ -1439,7 +1440,7 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
 }
 
 async function markOpened($: EngineInterface, opened: string[], touched: string[]): Promise<void> {
-  const until = (await $.clock.now()) + ACTIVITY_TTL_MS
+  const until = (await $.clock.now()) + COLLAPSE_MS
   for (const d of opened) if (!autoOpened.has(d)) autoOpened.set(d, until)
   for (const d of autoOpened.keys()) if (touched.some(p => p === d || inside(d, p))) autoOpened.set(d, until)
   if (autoCollapseOn(await get($))) armCollapse($)
@@ -4444,7 +4445,7 @@ export const register: Register = (on, options) => {
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
             <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
-              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
               {e.props.isFocused ? <Text bold color={accentInk}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:root" module="./hit.tsx" props={{ id: ROOT_PRESS, keys: false } satisfies HitProps} width="100%" height="100%" />
