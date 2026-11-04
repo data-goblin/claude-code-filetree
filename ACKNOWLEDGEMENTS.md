@@ -25,6 +25,7 @@ pull request credits them even when the code that shipped was rewritten.
 - `/filetree` runs at once while Claude is working: [@bernard-kong](https://github.com/bernard-kong) ([#43](https://github.com/data-goblin/claude-code-filetree/pull/43))
 - Image previews draw in iTerm2, from PNG bytes: [@tjwelde](https://github.com/tjwelde) ([#45](https://github.com/data-goblin/claude-code-filetree/pull/45))
 - The pane stays open when a fullscreen terminal narrows for a moment: [@omocaig90](https://github.com/omocaig90) ([#50](https://github.com/data-goblin/claude-code-filetree/pull/50))
+- Desktop rows send one message per key press, not one per row: [@BlackBuddle](https://github.com/BlackBuddle) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
 
 ## Ideas
 
@@ -43,3 +44,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Glyphs auto picked Nerd icons on macOS without a Nerd Font: [@pridapablo](https://github.com/pridapablo) ([#19](https://github.com/data-goblin/claude-code-filetree/issues/19))
 - Classic hooks skipped on Team and Enterprise accounts: [@QuentinSuckling](https://github.com/QuentinSuckling) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
 - Plain refresh glyph drew as a box in macOS Terminal: [@hamin-apple](https://github.com/hamin-apple) ([#37](https://github.com/data-goblin/claude-code-filetree/issues/37))
+- Desktop tree rows flooded the page with messages: [@DavidHo7](https://github.com/DavidHo7) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
