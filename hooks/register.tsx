@@ -3296,7 +3296,7 @@ export const register: Register = (on, options) => {
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
-      await copyPath($, data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
+      await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
       return {}
     }
     if (typeof data.scrollTo === 'number') {

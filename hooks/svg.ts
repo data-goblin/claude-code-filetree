@@ -179,12 +179,12 @@ const ANSI: Record<number, string> = {
 }
 
 export const DESK_GIT: Record<string, string> = {
-  A: '#3fb950',
-  '?': '#3fb950',
-  R: '#4b8ef0',
-  C: '#4b8ef0',
-  M: '#d99a1e',
-  T: '#d99a1e',
+  A: '#339641',
+  '?': '#339641',
+  R: '#4583dd',
+  C: '#4583dd',
+  M: '#ab7a18',
+  T: '#ab7a18',
 }
 
 export const DESK_GIT_TEXT: Record<string, string> = {

@@ -64,7 +64,7 @@ const suites = [
     backgrounds: deskBackgrounds(bases as Record<string, string>),
     checks: [
       ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
-      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: DIM, skip: 'selection' })),
+      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: TEXT, skip: 'selection' })),
       ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT, skip: 'selection' })),
     ],
   })),
