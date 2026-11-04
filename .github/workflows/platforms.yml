@@ -39,6 +39,7 @@ jobs:
         if: runner.os == 'Linux'
         with:
           bun-version: 1.3.13
+          no-cache: true
       - name: Open, tmux and herdr scripts
         if: runner.os == 'Linux'
         run: bun scripts/check-open.ts
