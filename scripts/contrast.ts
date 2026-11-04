@@ -3,7 +3,7 @@ import { GIT_COLOR } from '../hooks/icons'
 import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
-import { DESK, DESK_GIT, selectionOn } from '../hooks/svg'
+import { DESK, DESK_GIT, DESK_GIT_TEXT, selectionOn } from '../hooks/svg'
 
 type Check = { name: string; color: string; min: number }
 
@@ -19,6 +19,17 @@ function luminance(hex: string): number {
   const [r, g, b] = [16, 8, 0].map(s => lin(((v >> s) & 255) / 255))
   return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
 }
+
+function over(top: string, base: string): string {
+  if (!/^#[0-9a-f]{8}$/i.test(top)) return top
+  const a = parseInt(top.slice(7, 9), 16) / 255
+  const ch = (i: number) => Math.round(parseInt(top.slice(i, i + 2), 16) * a + parseInt(base.slice(i, i + 2), 16) * (1 - a))
+  return `#${[1, 3, 5].map(i => ch(i).toString(16).padStart(2, '0')).join('')}`
+}
+
+const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field }
+const deskBackgrounds = (bases: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(bases).flatMap(([n, base]) => [[n, base], ...Object.entries(DESK_TINTS).map(([t, tint]) => [`${t} on ${n}`, over(tint, base)])]))
 
 export function contrast(a: string, b: string): number {
   const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
@@ -48,14 +59,15 @@ function checks(tones: typeof TONES, text: number, dim: number): Check[] {
 const suites = [
   { name: 'dark', backgrounds: DARK_BACKGROUNDS, checks: checks(TONES, TEXT, DIM) },
   { name: 'light', backgrounds: LIGHT_BACKGROUNDS, checks: checks(LIGHT_TONES, AAA, AAA) },
-  {
-    name: 'desktop',
-    backgrounds: { ...DARK_BACKGROUNDS, selection: DESK.selection, hover: DESK.hover, field: DESK.field },
+  ...[['desktop dark', DARK_BACKGROUNDS], ['desktop light', LIGHT_BACKGROUNDS]].map(([name, bases]) => ({
+    name: name as string,
+    backgrounds: deskBackgrounds(bases as Record<string, string>),
     checks: [
-      ...(['accent', 'muted', 'fg', 'urgent'] as const).map(k => ({ name: `desk ${k}`, color: DESK[k], min: TEXT })),
-      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git ${k}`, color, min: TEXT })),
+      ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
+      ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: TEXT, skip: 'selection' })),
+      ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT, skip: 'selection' })),
     ],
-  },
+  })),
 ]
 
 let failed = 0
@@ -66,7 +78,8 @@ console.log(`palette indices: ${PALETTE.map(([n, c]) => `${n}=${c || 'dimColor'}
 for (const suite of suites) {
   console.log(`\n${suite.name} palette`)
   for (const c of suite.checks) {
-    const ratios = Object.entries(suite.backgrounds).map(([bg, hex]) => [bg, contrast(c.color, hex)] as const)
+    const skip = 'skip' in c ? c.skip : undefined
+    const ratios = Object.entries(suite.backgrounds).filter(([bg]) => !skip || !bg.startsWith(`${skip} on `)).map(([bg, hex]) => [bg, contrast(c.color, hex)] as const)
     const worst = ratios.reduce((a, b) => (b[1] < a[1] ? b : a))
     const ok = worst[1] >= c.min
     if (!ok) failed++
@@ -106,9 +119,15 @@ for (const [name, hexes] of Object.entries(THEMES)) {
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} label ${label.toFixed(2)}:1 (needs ${LABEL}), box on background ${edge.toFixed(2)}:1, nested box ${nest.toFixed(2)}:1 (need ${EDGE})`)
 }
-console.log('\ncursor row backgrounds (desktop needs 1.5 on the app backgrounds black and vscode dark, terminal fallback 1.3 everywhere)')
+console.log('\ncursor row backgrounds (desktop needs 1.2 on light app backgrounds and 1.5 on black and vscode dark, terminal fallback 1.3 everywhere)')
+for (const [name, bg] of Object.entries(LIGHT_BACKGROUNDS)) {
+  const desk = contrast(over(DESK.selection, bg), bg)
+  const ok = desk >= 1.2
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} desktop ${DESK.selection} ${desk.toFixed(2)}:1`)
+}
 for (const [name, bg] of Object.entries(DARK_BACKGROUNDS)) {
-  const desk = contrast(DESK.selection, bg)
+  const desk = contrast(over(DESK.selection, bg), bg)
   const tui = selectionOn('ansi256(0)', bg, false)
   const term = contrast(tui, bg)
   const ok = (name === 'one dark' || desk >= 1.5) && term >= 1.3

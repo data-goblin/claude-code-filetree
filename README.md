@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.7.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -30,6 +30,11 @@
 
 > [!NOTE]
 > filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**. It shows in the right sidebar, which in the terminal needs the fullscreen layout (`/tui fullscreen`) and a terminal at least 110 columns wide; the Desktop app docks it on its own. `/filetree` shows or hides it, also while Claude is working, and `/filetree open` opens it, or brings it forward from behind another tab, without hiding it. `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree. Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app.
+
+
+<p align="center">
+  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
+</p>
 
 ---
 
@@ -55,7 +60,8 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 - File tree of the cwd, or of a folder pinned with `/filetree <path>`, with search across unopened folders, case-sensitive or by regular expression, scoped to one folder, with the matched characters highlighted in each result, and sortable Name, Git and value column headers
 - The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown (fewer in the Desktop app when lines are long), and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
-- Git status per file and folder, line counts on changed files, and branch, upstream and ahead/behind in the header
+- Git status per file and folder, line counts on changed files, and the branch with ahead/behind in the header (the upstream name with the `Remote branch` setting)
+- The collapse button closes every folder; when every folder is closed it becomes expand all, which opens up to three levels and at most 150 folders, skipping `.git`
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Git and GitHub commands Claude runs show as a status line at the bottom of the pane
@@ -111,7 +117,7 @@ i:            search in the folder under the cursor (Backspace on an empty query
 z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
 q:            search: file contents instead of names (the contents toggle in the search row); j / k pick a match, Enter opens it
-a:            auto-collapse: close folders opened for Claude once its activity fades
+a:            auto-collapse: close folders opened for Claude 10 seconds after its last touch; turning it on also closes the ones it opened while off
 n / g / m:    sort by name / git changes / value column: desc, asc, off (or click the header)
 p:            show or hide the preview or treemap
 f / b:        scroll the preview a page
@@ -131,7 +137,7 @@ Space:        Quick Look on macOS
 
 Resize the pane with the mouse or the `pane:grow` and `pane:shrink` keybindings.
 
-`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
+`/filetree keys` adds alt+l (keys from the prompt to the tree) and alt+h (keys back to the prompt) to your `keybindings.json` after asking. They work in the terminal only: the Desktop app does not read `keybindings.json`. It keeps your other bindings, asks before replacing one of yours on the same key (a Global alt+l counts too), keeps the file's indentation, and leaves a file it cannot parse or write untouched.
 
 ## Settings
 
@@ -146,6 +152,7 @@ Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
 Long file:        500 | a line count | off
+Remote branch:    off | on
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off
@@ -192,7 +199,14 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 ## Contributing
 
-Turn on the pre-commit hook once per clone; it runs `claude plugin validate` and the plugin tests before each commit that touches the plugin:
+Open pull requests against a release branch, not `main`:
+
+- Fixes: the patch branch, such as `release/0.7.1`
+- Features: the minor branch, such as `release/0.8.0`
+
+Keep the version of that branch.
+
+Turn on the git hooks once per clone. The pre-commit hook runs the fast checks in seconds: grep rules, types, oxlint, and `claude plugin validate` when the manifests change. The pre-push hook checks the version against the release branch and runs the plugin tests:
 
 ```bash
 git config core.hooksPath .githooks

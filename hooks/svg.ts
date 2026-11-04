@@ -18,6 +18,9 @@ export const ICONS = {
   'root-folder': `${FOLDER}M12 11a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5`,
   'folder-up-line': `${FOLDER}M12 17v-6M9 13.5l3-3 3 3`,
   fold: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5M12 7v5l4 2',
+  'folder-minus': `${FOLDER}M9 13h6`,
+  'square-plus': 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2M8 12h8M12 8v8',
+  'square-minus': 'M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2M8 12h8',
   'folder-git': `${FOLDER}M12 11a2 2 0 1 0 0 4 2 2 0 1 0 0-4M8 13h2M14 13h2`,
   file: FILE,
   'file-text': `${FILE}M8 13h8M8 17h5`,
@@ -35,6 +38,7 @@ export const ICONS = {
   'file-git': `${FILE}M12 11v2.5M12 16.5V19M12 13.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 1 0 0-3`,
   'file-link': `${FILE}M11 18l3-3-3-3M14 15H8`,
   ban: 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M4.9 4.9l14.2 14.2',
+  cursor: 'M12.586 12.586 19 19M3.688 3.037a.497.497 0 0 0-.651.651l6.5 15.999a.501.501 0 0 0 .947-.062l1.569-6.083a2 2 0 0 1 1.448-1.479l6.124-1.579a.5.5 0 0 0 .063-.947z',
   crosshair: 'M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16M12 2v4M12 18v4M2 12h4M18 12h4',
   refresh: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5',
   eye: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6',
@@ -57,6 +61,7 @@ export const ICONS = {
   pencil: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
   'external-link': 'M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
   'arrow-down': 'M12 5v14M19 12l-7 7-7-7',
+  cloud: 'M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z',
   globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
   archive: 'M3 3h18v5H3zM4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4',
   undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
@@ -150,18 +155,17 @@ const GIT_ICONS: Record<string, IconName> = {
 export const activityIcon = (plain: string): IconName => GIT_ICONS[plain] ?? 'git-commit'
 
 export const DESK = {
-  accent: '#4b8ef0',
+  accent: '#3b82f6',
   muted: '#85858c',
-  guide: '#303034',
-  fg: '#d6d6d6',
-  urgent: '#ef5350',
-  selection: '#393c44',
-  hover: '#232427',
-  field: '#252525',
-  edge: '#333336',
-  toolOn: '#2c3442',
-  addBg: '#1d3324',
-  delBg: '#3b2226',
+  guide: '#808080',
+  urgent: '#e5484d',
+  selection: '#80808066',
+  hover: '#8080801f',
+  field: '#8080801a',
+  edge: '#80808040',
+  toolOn: '#3b82f633',
+  addBg: '#3fb9502e',
+  delBg: '#ef53502e',
 } as const
 
 const ANSI: Record<number, string> = {
@@ -175,12 +179,21 @@ const ANSI: Record<number, string> = {
 }
 
 export const DESK_GIT: Record<string, string> = {
-  A: '#3fb950',
-  '?': '#3fb950',
-  R: '#4b8ef0',
-  C: '#4b8ef0',
-  M: '#d99a1e',
-  T: '#d99a1e',
+  A: '#339641',
+  '?': '#339641',
+  R: '#4583dd',
+  C: '#4583dd',
+  M: '#ab7a18',
+  T: '#ab7a18',
+}
+
+export const DESK_GIT_TEXT: Record<string, string> = {
+  A: 'success',
+  '?': 'success',
+  R: 'suggestion',
+  C: 'suggestion',
+  M: '#a67c00',
+  T: '#a67c00',
 }
 
 export function lighten(color: string, by = 0.3): string {
@@ -223,11 +236,15 @@ export const STEP_PX = 16
 
 export function rowSvg(depth: number, chevron: 'open' | 'closed' | null, icon: IconName | null, color: string, chevronColor: string = DESK.muted, gap: number = GAP_PX): string {
   const w = depth * STEP_PX + STEP_PX * 2 + gap
-  const guides = Array.from({ length: depth }, (_, i) => `<rect x="${i * STEP_PX + 7.5}" y="0" width="1" height="${ROW_PX}" fill="${DESK.guide}" stroke="none"/>`).join('')
+  const guides = Array.from({ length: depth }, (_, i) => `<rect x="${i * STEP_PX + 7.5}" y="0" width="1" height="${ROW_PX}" fill="${DESK.guide}" fill-opacity="0.35" stroke="none"/>`).join('')
   const x = depth * STEP_PX
   const chev = chevron ? glyph(chevron === 'open' ? 'chevron-down' : 'chevron-right', chevronColor, x + (STEP_PX - CHEVRON_PX) / 2, (ROW_PX - CHEVRON_PX) / 2, CHEVRON_PX, 3.2) : ''
   const pic = icon ? glyph(icon, color, x + STEP_PX, (ROW_PX - 16) / 2, 16) : ''
   return frame(w, ROW_PX, guides + chev + pic)
+}
+
+export function lineSvg(color: string, h: number): string {
+  return `<svg xmlns="${NS}" width="4000" height="${h}"><rect width="4000" height="${h}" fill="${color}"/></svg>`
 }
 
 export function barSvg(color: string): string {

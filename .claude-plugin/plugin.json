@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -107,6 +107,16 @@
       "description": "In the loc column, a file with more lines than this number shows its line count in red. off: never. Default 500.",
       "default": "500"
     },
+    "remote": {
+      "type": "string",
+      "title": "Remote branch",
+      "description": "on: the branch row shows the upstream branch next to the ahead and behind counts. off: only the counts show.",
+      "default": "off",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "hints": {
       "type": "string",
       "title": "Hints",
@@ -120,7 +130,7 @@
     "collapse": {
       "type": "string",
       "title": "Auto-collapse",
-      "description": "on: folders the tree opened to show Claude's reads and writes close again once that activity fades, unless you opened or moved into them. off: they stay open. The toolbar toggle and the a key flip it.",
+      "description": "on: folders the tree opened to show Claude's reads and writes close again 10 seconds after Claude last touched them, unless you opened or moved into them; turning it on also closes the ones opened while it was off. off: they stay open. The toolbar toggle and the a key flip it.",
       "default": "off",
       "options": [
         "on",

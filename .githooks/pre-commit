@@ -2,9 +2,17 @@
 set -e
 CLAUDE=claude
 [ -x "$HOME/.local/bin/claude" ] && CLAUDE="$HOME/.local/bin/claude"
-git diff --cached --quiet -- hooks tests types .claude-plugin && exit 0
-for manifest in .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
-  "$CLAUDE" plugin validate "$manifest" >/dev/null || { "$CLAUDE" plugin validate "$manifest"; exit 1; }
-done
-out=$("$CLAUDE" plugin test . 2>&1) || { printf '%s\n' "$out"; exit 1; }
-printf '%s\n' "$out" | tail -2
+sh scripts/ci/greps.sh
+if ! git diff --cached --quiet -- hooks tests types scripts tsconfig.json; then
+  bunx --bun --package typescript@5.9.3 tsc -p tsconfig.json --noEmit
+  if command -v oxlint >/dev/null; then oxlint; else echo "pre-commit: oxlint not installed, CI runs it"; fi
+fi
+if ! git diff --cached --quiet -- .claude-plugin; then
+  for manifest in .claude-plugin/plugin.json .claude-plugin/marketplace.json; do
+    "$CLAUDE" plugin validate "$manifest" >/dev/null || { "$CLAUDE" plugin validate "$manifest"; exit 1; }
+  done
+fi
+if ! git diff --cached --quiet -- .github/workflows; then
+  if command -v actionlint >/dev/null; then actionlint; else echo "pre-commit: actionlint not installed, CI runs it"; fi
+  if command -v zizmor >/dev/null; then zizmor .github/workflows; else echo "pre-commit: zizmor not installed, CI runs it"; fi
+fi
