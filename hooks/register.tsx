@@ -1670,7 +1670,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
     if (isIgnored(t.root, path) || (!t.showHidden && relative(t.root, path).split('/').some(x => x.startsWith('.')))) return
     const body = m[2] ?? ''
     if (fits && !(exact && body.length > GREP_LINE)) {
-      const ok = fits(body.length > GREP_LINE ? body.slice(0, GREP_LINE) : body)
+      const ok = fits(body)
       if (work.left < 0) {
         note ||= 'search stopped: the pattern is too costly'
         costly = true

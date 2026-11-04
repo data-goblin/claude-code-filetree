@@ -5010,3 +5010,25 @@ test('moving through content results tells Claude about the highlighted file, no
 test('file references keep folders written with brackets or parentheses', () => {
   expect(fileRefs('see src/app/[id]/page.tsx:12, src/app/(auth)/login.tsx:15 and (src/a.ts:7)').map(r => `${r.path}:${r.line}`)).toEqual(['src/app/[id]/page.tsx:12', 'src/app/(auth)/login.tsx:15', 'src/a.ts:7'])
 })
+
+test('the regex fallback reads whole lines, so a long line cannot pass ^\\s*$ on its blank prefix', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `a.ts\x001\x00${' '.repeat(12_000)}x\nc.ts\x003\x00\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^\\s*$', true)
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(ids).toContain(`grep:3:${root}/c.ts`)
+  expect(ids).not.toContain(`grep:1:${root}/a.ts`)
+  await ui.unmount()
+})
+
+test('the regex fallback reads whole lines, so a match past 10,000 characters is found', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `b.md\x002\x00${'b'.repeat(12_000)} needle\n`), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '\\sneedle', true)
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toContain(`grep:2:${root}/b.md`)
+  await ui.unmount()
+})
