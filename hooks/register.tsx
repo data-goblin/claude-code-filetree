@@ -1439,14 +1439,10 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
 }
 
 async function markOpened($: EngineInterface, opened: string[], touched: string[]): Promise<void> {
-  if (!autoCollapseOn(await get($))) {
-    clearAutoCollapse()
-    return
-  }
   const until = (await $.clock.now()) + ACTIVITY_TTL_MS
   for (const d of opened) if (!autoOpened.has(d)) autoOpened.set(d, until)
   for (const d of autoOpened.keys()) if (touched.some(p => p === d || inside(d, p))) autoOpened.set(d, until)
-  armCollapse($)
+  if (autoCollapseOn(await get($))) armCollapse($)
 }
 
 function armCollapse($: EngineInterface): void {
@@ -1482,10 +1478,7 @@ function autoCollapseOn(t: FileTree): boolean {
 async function autoCollapse($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const t = await get($)
-  if (!autoCollapseOn(t)) {
-    clearAutoCollapse()
-    return
-  }
+  if (!autoCollapseOn(t)) return
   const shut: string[] = []
   for (const [dir, until] of [...autoOpened]) {
     if (until > now) continue
@@ -2937,7 +2930,15 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
     await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
-    if (!autoCollapseOn(await get($))) clearAutoCollapse()
+    if (autoCollapseOn(await get($))) {
+      const open = new Set((await get($)).expanded)
+      for (const d of [...autoOpened.keys()]) if (!open.has(d)) autoOpened.delete(d)
+      armCollapse($)
+    } else {
+      collapseTimer?.cancel()
+      collapseTimer = null
+      collapseAt = 0
+    }
   }
   else if (previewActs.has(id) && id !== 'external') previewActs.get(id)?.()
   else if (id === 'scope') await scopeSearch($, '')
