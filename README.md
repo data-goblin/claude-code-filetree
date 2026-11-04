@@ -122,7 +122,7 @@ x:            guard or unguard the entry under the cursor (off limits to Claude'
 w:            list the files Claude wrote outside the repo this session (shown once there are any)
 y / Y:        copy the relative / absolute path, or of every marked entry, one per line
 u:            copy the file name, or the names of every marked entry
-v / V:        mark or unmark the entry under the cursor / clear all marks
+v / V:        mark or unmark the entry under the cursor / clear all marks (or press the "N marked" count in the footer)
 "?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); j, k, the arrows, f, b, Page Up/Down, Home and End scroll it, and any other key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS
 ```

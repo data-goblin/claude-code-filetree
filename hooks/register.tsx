@@ -4535,7 +4535,7 @@ export const register: Register = (on, options) => {
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
-            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Box> : null}
+            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${marks.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Button></Box> : null}
             {footerName && !tipText ? <Box flexShrink={0} marginLeft={2}><Text {...mutedText}>selected: </Text></Box> : null}
             {footerName && !tipText ? (
               <Box flexShrink={1}>

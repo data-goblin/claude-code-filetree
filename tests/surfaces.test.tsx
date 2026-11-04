@@ -5152,3 +5152,19 @@ test('a translated ASCII regex runs grep under the C locale, and a plain search 
   await ui.unmount()
 })
 
+test('the footer count of marks is a button that clears them', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['a.txt', 'file'], ['b.txt', 'file']] } }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ press: `${root}/a.txt` }, { in: 'rows' })
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('1 marked')
+  await ui.press({ key: 'marked-clear' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).not.toContain('1 marked')
+  await ui.unmount()
+})
