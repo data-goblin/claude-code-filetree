@@ -5045,3 +5045,21 @@ test('scrolling content results with the wheel tells Claude about the highlighte
   expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/b.md`)
   await ui.unmount()
 })
+
+test('/filetree keys writes nothing when keybindings.json changes while it asks', { timeoutMs: 20_000 }, async ($, on) => {
+  const text = `${JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+e': 'chat:externalEditor' } }] }, null, 2)}\n`
+  const { w, clock } = keysWorld(on, text, ['Add them'])
+  const edited = `${JSON.stringify({ bindings: [{ context: 'Chat', bindings: { 'ctrl+g': 'chat:externalEditor' } }] }, null, 2)}\n`
+  const ask = w.tool
+  w.tool = e => {
+    const r = ask?.(e)
+    if (r && w.files) w.files[KEYS_FILE] = edited
+    return r
+  }
+  await $.session.start({ cwd: '/home/k/proj', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const r = await $.command.run(keysRun)
+  expect(JSON.stringify(r)).toContain('changed while you were asked')
+  expect(w.files?.[KEYS_FILE]).toBe(edited)
+})
+

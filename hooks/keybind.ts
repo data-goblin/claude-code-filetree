@@ -147,6 +147,8 @@ export async function bindKeys($: EngineInterface, home: string): Promise<string
     const pick = await ask(`Add ${adds} to ${path}, so alt+l moves the keys to the file tree and alt+h gives them back?`, [ADD, 'Cancel'])
     if (pick !== ADD) return `Cancelled; nothing changed in ${path}.`
   }
+  const now = (await $.fs.exists(path)) ? await $.fs.read(path).catch(() => null) : undefined
+  if (now !== text) return `${path} changed while you were asked; run /filetree keys again. Nothing changed.`
   const refused = await writeKeys($, place, plan.merge(replace)).catch((err: unknown) => (err instanceof Error ? err.message : String(err)))
   if (refused) return `Did not write: ${refused}.`
   return `Wrote ${path}: alt+l moves the keys to the file tree, alt+h (or Escape) gives them back. Claude Code picks the change up within about 3 seconds.`
