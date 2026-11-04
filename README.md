@@ -11,9 +11,23 @@
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
 
+<details open>
+<summary><b>Claude Code CLI</b></summary>
+
 <p align="center">
   <img src="media/filetree-shimmer.gif" alt="filetree shimmering the file Claude is editing" width="900">
 </p>
+
+</details>
+
+<details>
+<summary><b>Claude Code in Desktop App</b></summary>
+
+<p align="center">
+  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
+</p>
+
+</details>
 
 **Key features:**
 
@@ -24,11 +38,6 @@
    * Search with `s` or `i` (in highlighted folder) or `q` (in file contents)
    * Diff files with `d` or all changed files in a folder
 * Terminal-first features: File previews, directory size treemap, and more
-
-
-<p align="center">
-  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
-</p>
 
 ---
 
