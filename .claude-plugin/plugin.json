@@ -107,6 +107,16 @@
       "description": "In the loc column, a file with more lines than this number shows its line count in red. off: never. Default 500.",
       "default": "500"
     },
+    "remote": {
+      "type": "string",
+      "title": "Remote branch",
+      "description": "on: the branch row shows the upstream branch next to the ahead and behind counts. off: only the counts show.",
+      "default": "off",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "hints": {
       "type": "string",
       "title": "Hints",

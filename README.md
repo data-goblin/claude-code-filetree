@@ -146,6 +146,7 @@ Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
 Long file:        500 | a line count | off
+Remote branch:    off | on
 Hints:            on | off
 Search spacing:   on | off
 Column headers:   on | off

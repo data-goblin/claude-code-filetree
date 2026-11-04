@@ -202,6 +202,8 @@ let lastRoot = ''
 let columnDefault: Column = 'date'
 let showAge = false
 let showHints = true
+let showRemote = false
+const ROOT_PRESS = '\u0000root'
 let hintRoot = ''
 let reloading = 0
 let previewActs = new Map<string, () => void>()
@@ -3030,6 +3032,7 @@ export const register: Register = (on, options) => {
   columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
   showHints = options?.hints !== 'off'
+  showRemote = options?.remote === 'on'
   focusOnOpen = options?.focus !== 'off'
   ignoreNames = typeof options?.ignore === 'string' ? options.ignore.split(/[\s,]+/).filter(Boolean) : []
   searchGap = options?.spacing !== 'off'
@@ -3295,6 +3298,11 @@ export const register: Register = (on, options) => {
       }
       return {}
     }
+    if (data.press === ROOT_PRESS) {
+      await selectRoot($)
+      await focusPane($, (await get($)).root, 'hk-tree')
+      return {}
+    }
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
       if (ghost) {
@@ -3541,6 +3549,7 @@ export const register: Register = (on, options) => {
     }
     const deskSel = palette.theme.selection ?? DESK.selection
     const deskHover = palette.hover ?? DESK.hover
+    const deskCur = e.props.isFocused ? deskSel : deskHover
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
         <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
@@ -3963,8 +3972,8 @@ export const register: Register = (on, options) => {
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentInk} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
-        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskSel : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskSel : deskHover }}>
-          {n.id === t.cursor && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
+          {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
           {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
@@ -4122,7 +4131,7 @@ export const register: Register = (on, options) => {
               <Text key={`root-count-${i}`} color={c.c}>{c.t}</Text>
             ))}
           </Box>
-          {b.upstream ? (
+          {b.upstream && showRemote ? (
             <Box flexDirection="row" flexShrink={1} overflow="hidden" marginLeft={2} alignItems={desk ? 'center' : undefined}>
               {desk && Svg
                 ? <Svg key="remote-icon" source={iconSvg('cloud', mutedInk, 14)} alt="remote branch" width={14} height={14} />
@@ -4428,11 +4437,12 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
-            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
-              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2} height={ROW_PX} />
-              <Button key="root" plain onPress={() => void selectRoot($).then(() => focusPane($, t.root, 'hk-tree'))}>
-                {e.props.isFocused ? <Text bold color={accentInk}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
-              </Button>
+            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
+              <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk, DESK.muted, 0)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
+              {e.props.isFocused ? <Text bold color={accentInk}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:root" module="./hit.tsx" props={{ id: ROOT_PRESS, keys: false } satisfies HitProps} width="100%" height="100%" />
+              </Box>
             </Box>
             <Box flexGrow={1} />
             <Box flexDirection="row" alignItems="center" flexShrink={0}>

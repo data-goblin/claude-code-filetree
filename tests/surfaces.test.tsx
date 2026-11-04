@@ -391,7 +391,8 @@ test('macOS Claude Code app: desktop pane draws, selects, opens with open', { ti
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   const shown = await texts(ui)
-  for (const word of ['README.md', 'notes.md', 'src', 'main', 'origin/main']) expect(shown).toContain(word)
+  for (const word of ['README.md', 'notes.md', 'src', 'main']) expect(shown).toContain(word)
+  expect(shown).not.toContain('origin/main')
   expect(NERD.test(shown)).toBe(false)
   await ui.post({ press: `${root}/README.md` }, { in: `hit:${root}/README.md` })
   await clock.settle()
@@ -5159,7 +5160,7 @@ test('desktop (#47): a key that reaches every Client in the pane moves the curso
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   const mounted = clientKeys(await ui.drawn())
-  const rows = mounted.get('hooks/hit.tsx') ?? []
+  const rows = (mounted.get('hooks/hit.tsx') ?? []).filter(k => k !== 'hit:root')
   const all = [...mounted.values()].flat()
   expect(rows.length).toBeGreaterThan(30)
   const cursor = async () => {
