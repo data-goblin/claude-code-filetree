@@ -51,6 +51,7 @@ type World = {
   tops?: Record<string, string>
   real?: Record<string, string>
   grep?: string
+  bytes?: Record<string, string>
   fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
@@ -86,7 +87,7 @@ function world(on: On, w: World, ran: Ran) {
   on('fs.read', (_$, e) => {
     if (w.theme && isTheme(e.path)) return { value: w.theme.toml }
     const file = norm(e.path).replace(/^[A-Za-z]:/, '')
-    if (e.as === 'bytes') return { value: { base64: btoa(PNG_1PX + file) } }
+    if (e.as === 'bytes') return { value: { base64: btoa(PNG_1PX + (w.bytes?.[file] ?? file)) } }
     const text = w.files?.[file]
     if (text !== undefined) return { value: text }
     throw new Error('no theme file')
@@ -5190,11 +5191,12 @@ test('the footer count of marks is a button that clears them', { timeoutMs: 20_0
   await ui.unmount()
 })
 
-test('split preview: a picture that decodes past the image limit shows a note instead of blanking the pane', { timeoutMs: 20_000 }, async ($, on) => {
+test('split preview: a picture past the image byte limit shows a note instead of blanking the pane, and a large but small-on-disk picture still draws', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/opt/k/proj'
   const clock = world(on, {
     os: 'linux', env: { HOME: '/opt/k', XDG_RUNTIME_DIR: '/run/user/1000' }, cwd: root, top: '', status: '', numstat: '',
-    dirs: { [root]: [['big.png', 'file']] },
+    dirs: { [root]: [['big.png', 'file'], ['wide.png', 'file']] },
+    bytes: { [`${root}/big.png`]: 'x'.repeat(2_200_000) },
     stdout: { 'od -An -tu1': '137 80 78 71 13 10 26 10 0 0 0 13 73 72 68 82 0 0 4 176 0 0 3 32' },
   }, [])
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
@@ -5203,6 +5205,10 @@ test('split preview: a picture that decodes past the image limit shows a note in
   await clock.settle()
   await ui.press({ key: 'split' })
   await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain(pngOf(`${root}/wide.png`))
+  await ui.post({ key: 'k' }, { in: 'rows' })
   await clock.settle()
   await clock.settle()
   const shown = JSON.stringify(await ui.drawn())
@@ -5264,5 +5270,15 @@ test('desktop (#47): a key that reaches every Client in the pane moves the curso
   for (const k of all) await ui.key({ key: 'k', in: k })
   await clock.settle()
   expect(await cursor()).toEqual([`${root}/f05.ts`])
+  await ui.input({ key: 'q', text: 'f1', kind: 'change' })
+  await clock.advance(1000)
+  await clock.settle()
+  const left = clientKeys(await ui.drawn()).get('hooks/hit.tsx') ?? []
+  expect(left).not.toContain(`hit:${root}/f05.ts`)
+  await new Promise(done => setTimeout(done, 1600))
+  const before = await cursor()
+  for (const k of left) await ui.key({ key: 'j', in: k })
+  await clock.settle()
+  expect(await cursor()).not.toEqual(before)
   await ui.unmount()
 })

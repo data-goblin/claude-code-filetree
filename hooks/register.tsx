@@ -4288,8 +4288,9 @@ export const register: Register = (on, options) => {
         if (pic.state === 'ready' && Image) {
           const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), peekRows)
           status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
-          const big = pic.width * pic.height * 4 > IMAGE_BYTES
-          const png = big ? '' : await pngOf($, pic)
+          const raw = await pngOf($, pic)
+          const big = Math.floor(raw.length * 3 / 4) > IMAGE_BYTES
+          const png = big ? '' : raw
           content = big ? <Text {...mutedText}>{`${name}: too large to preview here`}</Text> : png ? <Image key="peek-image" source={{ png }} columns={fit.columns} rows={fit.rows} alt={name} /> : <Text {...mutedText}>{name}</Text>
         } else content = <Text {...mutedText}>{pic.state === 'pending' ? 'decoding…' : pic.state === 'failed' ? pic.note : 'images show in the terminal'}</Text>
       } else {
