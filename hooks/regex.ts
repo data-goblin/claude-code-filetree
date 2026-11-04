@@ -252,6 +252,7 @@ function longest(prog: Op[], text: string, from: number, work: { left: number })
       const pc = stack.pop() as number
       if (seen[pc] === mark) continue
       seen[pc] = mark
+      if (--work.left < 0) return
       const op = prog[pc]
       if (!op) continue
       if (op.op === 'match') best = Math.max(best, at)
@@ -274,20 +275,41 @@ function longest(prog: Op[], text: string, from: number, work: { left: number })
     for (const pc of list) {
       const op = prog[pc]
       if (op?.op === 'char' && op.test(c)) add(next, pc + 1, at + 1)
+      if (work.left < 0) return -1
     }
     list = next
   }
-  return best
+  return work.left < 0 ? -1 : best
 }
 
-const SPAN_WORK = 4_000
+const SPAN_WORK = 20_000
+const SPAN_POOL = 200_000
+const SPAN_WINDOW_MS = 250
+const spanPool = { left: SPAN_POOL, at: 0 }
+let spanMemo: { key: string; fn: ((text: string) => [number, number][]) | null } | null = null
 
 export function compileSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
+  const key = `${ignoreCase ? 'i' : 'c'}${src}`
+  if (spanMemo?.key === key) return spanMemo.fn
+  const fn = buildSpans(src, ignoreCase)
+  spanMemo = { key, fn }
+  spanPool.left = SPAN_POOL
+  spanPool.at = Date.now()
+  return fn
+}
+
+function buildSpans(src: string, ignoreCase: boolean): ((text: string) => [number, number][]) | null {
   try {
     const prog = compile(parse(src, ignoreCase))
     return text => {
       const out: [number, number][] = []
-      const work = { left: SPAN_WORK }
+      const now = Date.now()
+      if (now - spanPool.at > SPAN_WINDOW_MS) {
+        spanPool.left = SPAN_POOL
+        spanPool.at = now
+      }
+      const grant = Math.min(SPAN_WORK, spanPool.left)
+      const work = { left: grant }
       for (let at = 0; at < text.length && work.left > 0; ) {
         const end = longest(prog, text, at, work)
         if (end > at) {
@@ -295,6 +317,7 @@ export function compileSpans(src: string, ignoreCase: boolean): ((text: string) 
           at = end
         } else at += 1
       }
+      spanPool.left -= grant - Math.max(0, work.left)
       return out
     }
   } catch (err) {

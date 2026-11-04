@@ -4735,6 +4735,14 @@ test('match highlighting does bounded work: a pattern with overlapping alternati
   expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
 })
 
+test('match highlighting charges every NFA step: nested optional repeats over 200 long paths return at once', () => {
+  const spans = compileSpans('((a?){100}){5}z|a', false)
+  const start = performance.now()
+  for (let i = 0; i < 200; i++) spans?.(`/${'a'.repeat(1000)}/${i}`)
+  expect(performance.now() - start).toBeLessThan(1000)
+  expect(compileSpans('ab', false)?.('xxabyyab')).toEqual([[2, 4], [6, 8]])
+})
+
 test('file references with a line include extensionless names like Dockerfile, never bare numbers', () => {
   expect(fileRefs('Edit Dockerfile:12, Makefile#L3-L5 and src/a.ts:7; port 8080:1 is not a file').map(r => `${r.path}:${r.line}-${r.end}`)).toEqual(['Dockerfile:12-12', 'Makefile:3-5', 'src/a.ts:7-7'])
 })
