@@ -1,16 +1,18 @@
 #!/bin/sh
 set -e
 rule=$(cd "$(dirname "$0")" && pwd)/version.sh
+unset $(git rev-parse --local-env-vars)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 git init -q -b main .
-git config user.email t@t && git config user.name t && git config commit.gpgsign false && git config tag.gpgsign false
+[ "$(git rev-parse --absolute-git-dir)" = "$(pwd -P)/.git" ] || { echo "version-test: not in its own scratch repo" >&2; exit 1; }
+g() { git -c user.email=t@t -c user.name=t -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
 mkdir .claude-plugin
 at() {
   printf '{"version": "%s"}\n' "$1" > .claude-plugin/plugin.json
   printf 'version-%s-blue\n' "$1" > README.md
-  git add -A && git commit -qm "$1" && git rev-parse HEAD
+  g add -A && g commit -qm "$1" && git rev-parse HEAD
 }
 remote() { git update-ref "refs/remotes/origin/$1" "$2"; }
 fails=0
@@ -19,7 +21,7 @@ expect() {
   if sh "$rule" "$@" >/dev/null 2>&1; then got=pass; else got=fail; fi
   [ "$got" = "$want" ] || { echo "version-test: $* gave $got, wanted $want" >&2; fails=1; }
 }
-v070=$(at 0.7.0); git tag v0.7.0
+v070=$(at 0.7.0); g tag v0.7.0
 v071=$(at 0.7.1)
 v072=$(at 0.7.2)
 v080=$(at 0.8.0)
