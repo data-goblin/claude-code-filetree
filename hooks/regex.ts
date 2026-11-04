@@ -364,7 +364,7 @@ function ereClass(src: string, i: number): { ere: string; next: number } | null 
       else toks.push({ ch: e })
       continue
     }
-    if (c === '[' || !PLAIN.test(c)) return null
+    if (c === '[' || c === '^' || !PLAIN.test(c)) return null
     toks.push(c === '-' ? { dash: true } : { ch: c })
     j += 1
   }

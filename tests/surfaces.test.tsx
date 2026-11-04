@@ -4951,3 +4951,9 @@ test('a costly regex over long lines stops the content search with a notice inst
   expect(JSON.stringify(await ui.drawn())).toContain('search stopped: the pattern is too costly')
   await ui.unmount()
 })
+
+test('a class with a literal caret is never translated for grep, so [-^] cannot turn into a negation', () => {
+  expect(toEre('[-^]')).toBeNull()
+  expect(toEre('[a^]')).toBeNull()
+  expect(toEre('[^a]')).toBe('[^a]')
+})
