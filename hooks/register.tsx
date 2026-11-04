@@ -538,6 +538,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   marks = []
   linkStates.clear()
   searchIndex = null
+  grepClear()
   sizeEpoch += 1
   sizeQueue = []
   await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
@@ -1614,8 +1615,12 @@ async function grepTargets($: EngineInterface, t: FileTree): Promise<string[]> {
   return kids.filter(k => !skip.has(k.name) && (t.showHidden || !k.name.startsWith('.'))).map(k => join(dir, k.name))
 }
 
+function ereFor(t: FileTree, q: string): string | null {
+  return t.searchCase ? toEre(q) : null
+}
+
 function grepArgv(t: FileTree, q: string, targets: string[]): string[] {
-  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (toEre(q) ?? '^') : q]
+  const how = [...(t.searchCase ? [] : ['-i']), t.searchRegex ? '-E' : '-F', '-e', t.searchRegex ? (ereFor(t, q) ?? '^') : q]
   if (t.top) return ['git', '--no-optional-locks', '-C', t.root, 'grep', '-n', '-I', '-z', '--no-color', '--no-column', '--no-full-name', '--untracked', ...how, '--', t.searchScope ? relative(t.root, t.searchScope) : '.']
   return ['grep', '-rnIH', '--null', ...grepSkip(t).map(n => `--exclude-dir=${n === '.*' ? n : globLiteral(n)}`), ...(t.showHidden ? [] : ['--exclude=.*']), ...how, '--', ...targets]
 }
@@ -1656,7 +1661,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
   const files = new Map<string, GrepHit[]>()
   const work = { left: GREP_WORK }
   const fits = t.searchRegex ? compileRegex(q, !t.searchCase, work) : null
-  const exact = t.searchRegex && toEre(q) !== null
+  const exact = t.searchRegex && ereFor(t, q) !== null
   let count = 0
   let capped = false
   let costly = false

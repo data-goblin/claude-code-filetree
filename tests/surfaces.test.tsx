@@ -4598,7 +4598,7 @@ test('a content-search hit right after a line longer than the preview budget sti
   await ui.unmount()
 })
 
-test('regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
+test('a case-sensitive regex content search hands grep the same pattern in POSIX ERE and keeps only lines the tree regex matches', { timeoutMs: 20_000 }, async ($, on) => {
   expect(toEre('\\d+(?:px|em)?')).toBe('[0-9]+(px|em)?')
   expect(toEre('ab*?[\\w-]\\d')).toBe('ab*[0-9A-Za-z_-][0-9]')
   for (const unsafe of ['a\\sb', '[^]', '[]', '[^]x', '(a|)', '|a', '()', '[a-c-e]', '[\\d-z]', '[é]', '[[:alpha:]]', '\\bword', 'a\\nb']) expect(toEre(unsafe)).toBeNull()
@@ -4621,6 +4621,7 @@ test('regex content search hands grep the same pattern in POSIX ERE and keeps on
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.post({ key: 'c' }, { in: 'rows' })
   await ui.post({ key: 'q' }, { in: 'rows' })
   await ui.input({ key: 'q', text: '\\d+', kind: 'change' })
   await clock.settle()
@@ -5079,3 +5080,17 @@ test('patterns that can match a non-ASCII character are never translated for gre
   expect(compileRegex('^..$', false, { left: 1000 })?.('😀')).toBe(true)
   expect(toEre('needle\\d+')).toBe('needle[0-9]+')
 })
+
+test('a regex content search that ignores case scans every line, so Unicode case folding cannot hide a match from grep', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00K\n'), ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await contentSearch($, clock, '^[a-z]$', true)
+  const argv = ran.find(a => a[0] === 'git' && a.includes('grep')) ?? []
+  expect(argv[argv.indexOf('-e') + 1]).toBe('^')
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toContain(`grep:1:${root}/a.ts`)
+  await ui.unmount()
+})
+
