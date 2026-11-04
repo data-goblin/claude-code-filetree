@@ -25,18 +25,19 @@ v070=$(at 0.7.0); g tag v0.7.0
 v071=$(at 0.7.1)
 v072=$(at 0.7.2)
 v080=$(at 0.8.0)
-expect pass push refs/heads/release/0.7.x "$v071"
-expect fail push refs/heads/release/0.7.x "$v070"
-remote release/0.7.x "$v071"
-expect pass push refs/heads/release/0.7.x "$v071"
-expect fail push refs/heads/release/0.7.x "$v072"
-remote release/0.8.x "$v080"
+expect pass push refs/heads/release/0.7.1 "$v071"
+expect fail push refs/heads/release/0.7.1 "$v070"
+remote release/0.7.1 "$v071"
+expect pass push refs/heads/release/0.7.1 "$v071"
+expect fail push refs/heads/release/0.7.1 "$v072"
+expect fail push refs/heads/release/0.7.3 "$v072"
+remote release/0.8.0 "$v080"
 expect pass push refs/heads/fix/a "$v071"
 expect pass push refs/heads/feat/b "$v080"
 expect fail push refs/heads/fix/a "$v072"
 git checkout -q "$v071"
-expect pass pr release/0.7.x
-expect fail pr release/0.8.x
+expect pass pr release/0.7.1
+expect fail pr release/0.8.0
 expect pass pr main
 git checkout -q "$v070"
 expect fail pr main

@@ -38,8 +38,9 @@
 ## Branches
 
 - Two release branches exist at all times, both cut from `main` after each release:
-  - `release/<major>.<minor>.x`, now `release/0.7.x` at 0.7.1: fixes and small changes, released as the next patch
-  - `release/<major>.<minor+1>.x`, now `release/0.8.x` at 0.8.0: new features, new settings and behaviour changes, released as the next minor
+  - `release/<next patch>`, now `release/0.7.1`: fixes and small changes
+  - `release/<next minor>.0`, now `release/0.8.0`: new features, new settings and behaviour changes
+- A release branch is named after the version it carries; the version check refuses a `release/*` branch whose `.claude-plugin/plugin.json` says otherwise
 - Target every PR at one of them, never at `main`: a fix or small change goes to the patch branch, anything else to the feature branch; when unsure, the feature branch
 - The commit that cuts a release branch sets its version in `.claude-plugin/plugin.json` and the README badge (`Clean(release): open 0.7.1`); PRs keep the version of the branch they target, and the version-bump workflow and `.githooks/pre-push` refuse anything else
 - After every merge into the patch branch, merge the patch branch into the feature branch with a merge commit, so fixes reach the next minor
@@ -51,6 +52,6 @@
 - Everything merged since the last release ships in the next morning release; once today's release is out, new merges wait for tomorrow's
 - Only an emergency hotfix ships the same day: a security issue, a bug that breaks things badly, or a UI that is badly broken
 - A release is a PR from a release branch into `main`, merged with a merge commit; sign a `v<version>` tag on that merge and publish the GitHub release from it. The keeper has no signing key, so it hands the release to an agent on a machine that has one
-- After a patch release (v0.7.1): cut a new `release/0.7.x` from `main` at 0.7.2, and merge `main` into `release/0.8.x`
-- After a feature release (v0.8.0): delete both release branches, then cut `release/0.8.x` at 0.8.1 and `release/0.9.x` at 0.9.0 from `main`
+- After a patch release (v0.7.1): delete `release/0.7.1`, cut `release/0.7.2` from `main`, and merge `main` into `release/0.8.0`
+- After a feature release (v0.8.0): delete both release branches, then cut `release/0.8.1` and `release/0.9.0` from `main`
 - The release notes cover every PR merged since the last release, including versions that never got their own release
