@@ -78,6 +78,7 @@ const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
 const GREP_WORK = 50_000_000
 const GREP_LINE = 10_000
+const IMAGE_BYTES = 2_097_152
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
 const NAME_MIN = 10
@@ -4287,8 +4288,9 @@ export const register: Register = (on, options) => {
         if (pic.state === 'ready' && Image) {
           const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), peekRows)
           status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
-          const png = await pngOf($, pic)
-          content = png ? <Image key="peek-image" source={{ png }} columns={fit.columns} rows={fit.rows} alt={name} /> : <Text {...mutedText}>{name}</Text>
+          const big = pic.width * pic.height * 4 > IMAGE_BYTES
+          const png = big ? '' : await pngOf($, pic)
+          content = big ? <Text {...mutedText}>{`${name}: too large to preview here`}</Text> : png ? <Image key="peek-image" source={{ png }} columns={fit.columns} rows={fit.rows} alt={name} /> : <Text {...mutedText}>{name}</Text>
         } else content = <Text {...mutedText}>{pic.state === 'pending' ? 'decoding…' : pic.state === 'failed' ? pic.note : 'images show in the terminal'}</Text>
       } else {
         if (isDoc && (peeked?.path !== target || (docKind === 'pdf' && peeked.page !== page))) {

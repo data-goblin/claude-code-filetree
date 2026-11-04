@@ -5190,6 +5190,27 @@ test('the footer count of marks is a button that clears them', { timeoutMs: 20_0
   await ui.unmount()
 })
 
+test('split preview: a picture that decodes past the image limit shows a note instead of blanking the pane', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/opt/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/opt/k', XDG_RUNTIME_DIR: '/run/user/1000' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['big.png', 'file']] },
+    stdout: { 'od -An -tu1': '137 80 78 71 13 10 26 10 0 0 0 13 73 72 68 82 0 0 4 176 0 0 3 32' },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'split' })
+  await ui.post({ key: 'j' }, { in: 'rows' })
+  await clock.settle()
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).toContain('big.png: too large to preview here')
+  expect(shown).not.toContain(pngOf(`${root}/big.png`))
+  await ui.unmount()
+})
+
 function deskRowsWorld(on: On, count: number) {
   const root = '/home/k/proj'
   const clock = world(on, { os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: Array.from({ length: count }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.ts`, 'file']) } }, [])
