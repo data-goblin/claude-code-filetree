@@ -3,7 +3,7 @@ name: platforms
 on:
   workflow_dispatch:
   push:
-    branches: [main, 'release/**']
+    branches: [main]
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
   pull_request:
     paths: ['hooks/**', 'tests/**', 'types/**', 'scripts/check-open.ts', '.claude-plugin/**', '.github/workflows/platforms.yml']
