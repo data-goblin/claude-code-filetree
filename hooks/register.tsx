@@ -225,6 +225,7 @@ let shortcutsSetting: 'auto' | 'always' | 'off' = 'auto'
 let shortcutsShown = false
 let shortcutsTop = 0
 let deskKeysAt = 0
+let deskGrepShown = Infinity
 let shortcutsMax = 0
 let shortcutsPage = 1
 let treemapSetting: 'auto' | 'image' | 'cells' | 'off' = 'auto'
@@ -1649,7 +1650,8 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
     void $.ui.invalidate('ui.render')
     return
   }
-  const stream = $.process.spawn({ argv: grepArgv(t, q, targets), ...(t.top ? { env: { GIT_OPTIONAL_LOCKS: '0' } } : {}) })
+  const ascii = t.searchRegex && ereFor(t, q) !== null
+  const stream = $.process.spawn({ argv: grepArgv(t, q, targets), ...(t.top || ascii ? { env: { ...(t.top ? { GIT_OPTIONAL_LOCKS: '0' } : {}), ...(ascii ? { LC_ALL: 'C' } : {}) } } : {}) })
   const stop = () => stopStream(stream)
   grep.stop = stop
   let note = ''
@@ -1778,7 +1780,7 @@ async function openRef($: EngineInterface, href: string, surface: RenderSurface)
 }
 
 async function grepNav($: EngineInterface, key: string, surface?: RenderSurface): Promise<boolean> {
-  const last = grep.rows.length - 1
+  const last = Math.min(grep.rows.length, surface === 'desktop' ? deskGrepShown : Infinity) - 1
   const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -10, pagedown: 10, home: -Infinity, end: Infinity }
   if (key in by) {
     grep.sel = Math.max(0, Math.min(last, grep.sel + (by[key] ?? 0)))
@@ -4018,6 +4020,7 @@ export const register: Register = (on, options) => {
         deskGrep.push(g)
       }
     }
+    if (desk && grepping) deskGrepShown = deskGrep.length
     const deskGrepNote = deskGrep.length < grep.rows.length ? `first ${deskGrep.length} of ${grep.rows.length} rows; keep typing to narrow` : grepNote
     const deskTree = () => {
       if (grepping) return (

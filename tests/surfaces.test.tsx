@@ -60,6 +60,7 @@ const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"un
 const opens: unknown[] = []
 const registered: unknown[] = []
 const envs: Record<string, string>[] = []
+const spawns: { argv: string[]; env: Record<string, string> }[] = []
 
 function world(on: On, w: World, ran: Ran) {
   mock.env(on, w.env)
@@ -215,6 +216,7 @@ function world(on: On, w: World, ran: Ran) {
   on('process.spawn', async function* (_$, e) {
     const argv: string[] = [...e.argv]
     ran.push(argv)
+    spawns.push({ argv, env: { ...e.env } })
     if (argv[0] === 'du' && w.abortDu?.includes(argv.at(-1) ?? '')) {
       w.abortDu = w.abortDu.filter(d => d !== argv.at(-1))
       return { deny: 'aborted' }
@@ -5109,5 +5111,44 @@ test('desktop: content results stay inside the drawing budget and say how many r
   await clock.settle()
   const drawn = JSON.stringify(await ui.drawn())
   expect(drawn).toMatch(/first \d+ of 400 rows; keep typing to narrow/)
+  for (let i = 0; i < 420; i++) await ui.press({ key: 'hk-j' })
+  await clock.settle()
+  const lit: string[] = []
+  const walk = (n: unknown): void => {
+    if (Array.isArray(n)) return n.forEach(walk)
+    if (!n || typeof n !== 'object') return
+    const o = n as { props?: { key?: unknown; backgroundColor?: unknown } }
+    const key = o.props?.key
+    if (typeof key === 'string' && key.startsWith('grep-row:') && o.props?.backgroundColor) lit.push(key)
+    Object.values(n).forEach(walk)
+  }
+  walk(await ui.drawn())
+  expect(lit.length).toBe(1)
   await ui.unmount()
 })
+
+test('a translated ASCII regex runs grep under the C locale, and a plain search keeps the host locale', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, 'a.ts\x001\x00abc\n', { top: '' }), [])
+  const grepEnv = () => spawns.filter(x => x.argv.includes('-rnIH')).at(-1)?.env ?? {}
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.post({ key: 'c' }, { in: 'rows' })
+  await ui.post({ key: 'q' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: '[a-z]+', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(grepEnv().LC_ALL).toBe('C')
+  await ui.post({ key: 'r' }, { in: 'rows' })
+  await ui.input({ key: 'q', text: 'abc', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(grepEnv().LC_ALL).toBeUndefined()
+  await ui.unmount()
+})
+
