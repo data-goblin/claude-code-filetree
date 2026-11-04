@@ -4009,10 +4009,20 @@ export const register: Register = (on, options) => {
         deskParts.push(rowParts(r))
       }
     }
+    const deskGrep: GrepHit[] = []
+    if (desk && grepping) {
+      let size = 0
+      for (const g of grep.rows) {
+        size += DESK_ROW_CHARS + 6 * grepId(g).length + g.text.length
+        if (size > ROWS_BUDGET) break
+        deskGrep.push(g)
+      }
+    }
+    const deskGrepNote = deskGrep.length < grep.rows.length ? `first ${deskGrep.length} of ${grep.rows.length} rows; keep typing to narrow` : grepNote
     const deskTree = () => {
       if (grepping) return (
         <Box key="grep-list" flexDirection="column">
-          {grep.rows.map((g, k) => (
+          {deskGrep.map((g, k) => (
             <Box key={`grep-row:${grepId(g)}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : undefined} hover={{ backgroundColor: k === grep.sel ? deskSel : deskHover }}>
               {g.line ? <Box key={`grep-line:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
                 {Svg ? <Svg key={`grep-guide:${grepId(g)}`} source={rowSvg(1, null, null, mutedInk)} alt={`line ${g.line}`} width={STEP_PX * 3 + GAP_PX} height={ROW_PX} /> : null}
@@ -4029,9 +4039,9 @@ export const register: Register = (on, options) => {
               </Box>
             </Box>
           ))}
-          {grepNote ? (
+          {deskGrepNote ? (
             <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
-              <Text {...mutedText}>{grepNote}</Text>
+              <Text {...mutedText}>{deskGrepNote}</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
               </Box>
@@ -4394,7 +4404,7 @@ export const register: Register = (on, options) => {
       )
     }
     const hidden: [string, () => void][] = zjump.on ? [] : [
-      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, shortcutsShown ? e.surface : undefined).then(park)]),
+      ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, shortcutsShown || grepping ? e.surface : undefined).then(park)]),
       ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
     ]

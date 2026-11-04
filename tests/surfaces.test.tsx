@@ -5094,3 +5094,20 @@ test('a regex content search that ignores case scans every line, so Unicode case
   await ui.unmount()
 })
 
+test('desktop: content results stay inside the drawing budget and say how many rows they hold back', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const long = `${'d'.repeat(200)}`
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 200 }, (_, i) => `${long}/f${i}.ts\x001\x00${'x'.repeat(300)}`).join('\n')}\n`), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: `hit:${root}/a.ts` })
+  await ui.input({ key: 'q', text: 'x', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toMatch(/first \d+ of 400 rows; keep typing to narrow/)
+  await ui.unmount()
+})
