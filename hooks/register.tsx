@@ -4139,19 +4139,19 @@ export const register: Register = (on, options) => {
 
     const chip = (a: Activity) => {
       const tone = a.state === 'failed' ? 'red' : a.tone
-      const color = tones[tone]?.solid ?? theme.accent
+      const color = desk && tone === 'green' ? 'success' : desk && tone === 'red' ? 'error' : tones[tone]?.solid ?? theme.accent
       const icon = unicode ? a.plain : a.nerd
       const hash = a.state === 'done' && a.kind === 'git commit' ? a.detail.split(' ')[0] ?? '' : ''
       return (
         <Box flexDirection="row" marginLeft={2} alignItems={desk ? 'center' : undefined}>
           {desk && Svg
-            ? <Svg key={`chip-${a.id}`} source={iconSvg(activityIcon(a.plain), color, 14)} alt={a.kind} width={14} height={14} />
+            ? <Svg key={`chip-${a.id}`} source={iconSvg(activityIcon(a.plain), tone === 'green' ? (DESK_GIT.A ?? accentInk) : tone === 'red' ? DESK.urgent : (tones[tone]?.solid ?? accentInk), 14)} alt={a.kind} width={14} height={14} />
             : <Text color={color}>{icon + ' '}</Text>}
           {desk ? <Text> </Text> : null}
           <Text bold={a.state === 'running'} color={color}>
             {a.state === 'running' ? `${a.label}…` : a.label}
           </Text>
-          {hash && <Text {...mutedText}>{` ${hash}`}</Text>}
+          {hash && <Text color={color}>{` ${hash}`}</Text>}
         </Box>
       )
     }
