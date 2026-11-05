@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.8.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -147,8 +147,8 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 Open pull requests against a release branch, not `main`:
 
-- Fixes: the patch branch, such as `release/0.7.2`
-- Features: the minor branch, such as `release/0.8.0`
+- Fixes: the patch branch, such as `release/0.8.1`
+- Features: the minor branch, such as `release/0.9.0`
 
 Keep the version of that branch.
 
