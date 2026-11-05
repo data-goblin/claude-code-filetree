@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -99,6 +99,27 @@
         "size",
         "loc",
         "files"
+      ]
+    },
+    "dates": {
+      "type": "string",
+      "title": "Date format",
+      "description": "How the date column writes a day: year-month-day (2026-11-04 15:40), day-month (04-11 15:40) or month-day (11-04 15:40). day-month and month-day leave out the year. The age column is unchanged.",
+      "default": "year-month-day",
+      "options": [
+        "year-month-day",
+        "day-month",
+        "month-day"
+      ]
+    },
+    "clock": {
+      "type": "string",
+      "title": "Clock",
+      "description": "How the date column writes the time: 24h (15:40) or 12h (3:40 PM).",
+      "default": "24h",
+      "options": [
+        "24h",
+        "12h"
       ]
     },
     "long": {

@@ -41,4 +41,11 @@ expect fail pr release/0.8.0
 expect pass pr main
 git checkout -q "$v070"
 expect fail pr main
+remote release/0.8.1 "$v072"
+v081=$(at 0.8.1)
+expect pass push refs/heads/release/0.8.1 "$v081"
+expect fail push refs/heads/release/0.8.1 "$v080"
+git checkout -q "$v081"
+expect pass pr release/0.8.1
 exit "$fails"
+

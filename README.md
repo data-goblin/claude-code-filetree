@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.7.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -72,7 +72,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
 - File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
 - Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
-- The selected file and up to 100 marked entries go to Claude as context ([context](docs/context.md))
+- The selected file and up to 100 marked entries go to Claude as context; shift+click or shift+j / shift+k mark a range ([context](docs/context.md))
 - Split preview of code, Markdown, images, video frames, PDF and Word pages ([preview and treemap](docs/preview-treemap.md))
 - Treemap of a folder by bytes or lines, with Claude's activity lit ([preview and treemap](docs/preview-treemap.md))
 - Diff of a file or every changed file in a folder, in the pane or your diff tool ([diff](docs/diff.md))
@@ -97,6 +97,8 @@ Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
 Right column:     date | age | size | loc | files
+Date format:      year-month-day | day-month | month-day
+Clock:            24h | 12h
 Long file:        500 | a line count | off
 Remote branch:    off | on
 Hints:            on | off
@@ -145,7 +147,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 Open pull requests against a release branch, not `main`:
 
-- Fixes: the patch branch, such as `release/0.7.1`
+- Fixes: the patch branch, such as `release/0.7.2`
 - Features: the minor branch, such as `release/0.8.0`
 
 Keep the version of that branch.

@@ -48,6 +48,10 @@ import {
   replaceChildren,
   rollUp,
   stamp,
+  dateFormat,
+  clockSetting,
+  type DateFormat,
+  type Clock,
   toNodes,
   underAny,
   visibleRows,
@@ -149,6 +153,7 @@ let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let marks: string[] = []
+let markAnchor = ''
 type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
@@ -203,6 +208,8 @@ let listSeq = 0
 let lastRoot = ''
 let columnDefault: Column = 'date'
 let showAge = false
+let dateSetting: DateFormat = 'year-month-day'
+let clock: Clock = '24h'
 let showHints = true
 let showRemote = false
 const ROOT_PRESS = '\u0000root'
@@ -542,6 +549,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   lastRoot = root
   hintRoot = ''
   marks = []
+  markAnchor = ''
   linkStates.clear()
   searchIndex = null
   grepClear()
@@ -1288,10 +1296,28 @@ function linkNote(state: LinkState | null | undefined): string {
 }
 
 function toggleMark($: EngineInterface, id: string): void {
+  markAnchor = id
   if (marks.includes(id)) marks = marks.filter(m => m !== id)
   else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
   else marks = [...marks, id]
   void $.ui.invalidate('ui.render')
+}
+
+function addMarks($: EngineInterface, ids: string[]): void {
+  const fresh = ids.filter(id => id && !marks.includes(id))
+  const room = Math.max(0, MARK_LIMIT - marks.length)
+  if (fresh.length > room) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  marks = [...marks, ...fresh.slice(0, room)]
+  void $.ui.invalidate('ui.render')
+}
+
+async function markRange($: EngineInterface, id: string): Promise<void> {
+  const ids = rowsOf(await get($)).map(r => r.node.id)
+  const to = ids.indexOf(id)
+  const from = markAnchor ? ids.indexOf(markAnchor) : -1
+  addMarks($, from < 0 || to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
+  markAnchor = id
+  await patch($, () => ({ cursor: id, selected: id }))
 }
 
 function clearMarks($: EngineInterface): void {
@@ -2870,7 +2896,13 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   } else if (key === 'p' && surface !== 'desktop') await toggleSplit($)
   else if (t.split && splitShown && surface !== 'desktop' && (key === '[' || key === ']') && turnPage($, key === ']' ? 1 : -1)) return
   else if (t.split && splitShown && surface !== 'desktop' && key in peek) scrollSplit($, peekTop + (peek[key] ?? 0))
-  else if (key === 'up' || key === 'k') await move(-1)
+  else if ((shift && ['up', 'k', 'down', 'j'].includes(key)) || key === 'J' || key === 'K') {
+    if (cur) addMarks($, [cur.id])
+    await move(key === 'up' || key === 'k' || key === 'K' ? -1 : 1)
+    const next = (await get($)).cursor
+    if (next && next !== t.root) addMarks($, [next])
+    if (next) markAnchor = next
+  } else if (key === 'up' || key === 'k') await move(-1)
   else if (key === 'down' || key === 'j') await move(1)
   else if (key === 'pageup') await move(-10)
   else if (key === 'pagedown') await move(10)
@@ -3050,6 +3082,8 @@ export const register: Register = (on, options) => {
   followWork = options?.work !== 'off'
   columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
   showAge = options?.column === 'age'
+  dateSetting = dateFormat(options?.dates)
+  clock = clockSetting(options?.clock)
   showHints = options?.hints !== 'off'
   showRemote = options?.remote === 'on'
   focusOnOpen = options?.focus !== 'off'
@@ -3324,16 +3358,26 @@ export const register: Register = (on, options) => {
     }
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
+      const n = t.nodes.find(x => x.id === data.press)
+      if (data.shift && !data.ctrl && (ghost || n)) {
+        if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
+        await markRange($, data.press)
+        if (autoOpened.size) claimMarks((await get($)).cursor)
+        return {}
+      }
       if (ghost) {
+        markAnchor = ghost.id
         await patch($, () => ({ cursor: ghost.id, selected: ghost.id }))
         await diffFile($, ghost.id)
         return {}
       }
-      const n = t.nodes.find(x => x.id === data.press)
       if (!n) return {}
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
-      if (data.ctrl || data.shift) await openNode($, n)
-      else await press($, n)
+      if (data.ctrl) await openNode($, n)
+      else {
+        markAnchor = n.id
+        await press($, n)
+      }
       if (autoOpened.size) claimMarks((await get($)).cursor)
       return {}
     }
@@ -3840,7 +3884,7 @@ export const register: Register = (on, options) => {
             ? humanSize(n.size, sizePad)
             : ''
         : n.kind === 'file' || n.kind === 'dir'
-          ? (when => (when ? (showAge ? age(when, now) : stamp(when)) : ''))(n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime)
+          ? (when => (when ? (showAge ? age(when, now) : stamp(when, dateSetting, clock)) : ''))(n.kind === 'dir' ? (dirTimes.get(n.id)?.[1] ?? 0) : n.mtime)
           : ''
       const counts = n.kind === 'dir' ? t.counts[n.id] : undefined
       const cells: Partial<Record<Col, Seg>> = {}
