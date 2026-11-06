@@ -228,7 +228,7 @@ let longFile = 500
 let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
-const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false }
+const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false, when: {} as Record<string, number> }
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -1981,6 +1981,7 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
   const gone = ranked.filter((_, k) => !there[k])
   if (gone.some(p => p in seen)) await forgetVisits($, gone)
   zjump.rows = ranked.filter((_, k) => there[k])
+  zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
   void $.ui.invalidate('ui.render')
 }
@@ -4029,7 +4030,7 @@ export const register: Register = (on, options) => {
     const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
     const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
-    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
@@ -4084,8 +4085,9 @@ export const register: Register = (on, options) => {
     }
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
+    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
     const jumpSpecs: RowSpec[] = zjump.rows.length
-      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
+      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
@@ -4168,6 +4170,8 @@ export const register: Register = (on, options) => {
               {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
               <Text>{dir.split('/').filter(Boolean).pop() ?? dir}</Text>
               <Box flexGrow={1} flexShrink={1} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
+              {metricSpan ? <Box width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text {...mutedText}>{jumpWhen(dir)}</Text></Box> : null}
+              <Box width={2} flexShrink={0} />
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
               </Box>

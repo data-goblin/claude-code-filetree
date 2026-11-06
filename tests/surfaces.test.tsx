@@ -5473,3 +5473,27 @@ test('Follow work in an app without /cd re-roots the tree and leaves Claude wher
   expect(await root()).toBe(`${b}/b.ts`)
   await ui.unmount()
 })
+
+test('desktop: jump mode heads the date column Last accessed and dates each remembered folder by its last visit', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const at = 1_799_990_000_000
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/Users/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/Users/k/kept': [['c.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('Modified')
+  await ui.post({ key: 'z' }, { in: `hit:${root}/a.ts` })
+  await clock.advance(100)
+  await clock.settle()
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('Last accessed')
+  expect(drawn).not.toContain('"Modified"')
+  expect(drawn).toContain(stamp(at))
+})
