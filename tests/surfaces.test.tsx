@@ -4195,7 +4195,7 @@ test('the contents toggle searches file contents, groups matches per file, opens
   await ui.unmount()
 })
 
-test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc clear them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+test('v marks rows: y and Y copy every mark, the marks go to Claude, V clears them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/home/k/proj'
   const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
   const copied: string[] = []
@@ -4207,14 +4207,13 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  for (const name of ['a.txt', 'src']) {
-    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
-    await clock.advance(1000)
-    await ui.post({ key: 'v' }, { in: 'rows' })
-  }
+  await ui.post({ press: `${root}/a.txt` }, { in: 'rows' })
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await ui.post({ key: 'k' }, { in: 'rows' })
+  await ui.post({ key: 'v' }, { in: 'rows' })
   await clock.settle()
-  const marked = (rows: RowSpec[]) => rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
-  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([`${root}/src`, `${root}/a.txt`])
+  const lit = (rows: RowsProps) => rows.rows.filter(r => r.on).map(r => r.id)
+  expect(lit(treeRows(await ui.drawn()))).toEqual([`${root}/src`, `${root}/a.txt`])
   expect(JSON.stringify(await ui.drawn())).toContain('2 marked')
   for (const key of ['y', 'Y']) await ui.post({ key }, { in: 'rows' })
   await clock.settle()
@@ -4223,64 +4222,156 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   expect(JSON.stringify(sent)).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/a.txt\\n${root}/src`)
   await ui.post({ key: 'V' }, { in: 'rows' })
   await clock.settle()
-  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([])
+  expect(lit(treeRows(await ui.drawn()))).toEqual([`${root}/src`])
+  expect(JSON.stringify(await ui.drawn())).not.toContain(' marked')
   const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await desktop.post({ press: `${root}/b.txt` }, { in: `hit:${root}/b.txt` })
+  await desktop.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${root}/b.txt` })
+  await desktop.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${root}/b.txt` })
   await desktop.post({ key: 'v' }, { in: `hit:${root}/b.txt` })
   await clock.settle()
-  expect(svgs(await desktop.drawn()).filter(s => s.alt.startsWith('marked ')).map(s => s.alt)).toEqual(['marked b.txt'])
+  expect(JSON.stringify(await desktop.drawn())).toContain('1 marked')
   await desktop.post({ key: 'V' }, { in: `hit:${root}/b.txt` })
   await clock.settle()
-  expect(svgs(await desktop.drawn()).some(s => s.alt.startsWith('marked '))).toBe(false)
+  expect(JSON.stringify(await desktop.drawn())).not.toContain(' marked')
   await desktop.unmount()
   await ui.unmount()
 })
 
 const RANGE_WORLD = (root: string): World => ({ os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file'], ['c.txt', 'file'], ['d.txt', 'file']], [`${root}/src`]: [['e.ts', 'file']] } })
 
+type Mods = { shift?: true; ctrl?: true; alt?: true }
+
 async function rangeMount($: Engine, surface: 'terminal' | 'desktop') {
   const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
-  const marked = async () => {
-    const tree = await ui.drawn()
-    return surface === 'desktop'
-      ? svgs(tree).filter(s => s.alt.startsWith('marked ')).map(s => s.alt.slice('marked '.length))
-      : treeRows(tree).rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id.split('/').pop() ?? '')
+  const click = async (id: string, mods: Mods = {}) => {
+    const y = surface === 'desktop' ? 0 : treeRows(await ui.drawn()).rows.findIndex(r => r.id === id)
+    const at = { x: 2, y, button: 'left' as const, ...mods, ...zone(id) }
+    await ui.pointer({ type: 'down', ...at })
+    await ui.pointer({ type: 'up', ...at })
   }
-  return { ui, zone, marked }
+  const shaded = async (): Promise<{ id: string; bg: string }[]> => {
+    const tree = await ui.drawn()
+    if (surface === 'desktop') {
+      return every(tree, n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('row:')).flatMap(n => {
+        const props = propsOf(n)
+        return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' ? [{ id: keyOf(n).slice(4), bg: props.backgroundColor }] : []
+      })
+    }
+    const specs = treeRows(tree).rows
+    return kids(await ui.drawn({ in: 'rows' })).flatMap((box, i) => {
+      const props = propsOf(box)
+      return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' ? [{ id: specs[i]?.id ?? '', bg: props.backgroundColor }] : []
+    })
+  }
+  const marked = async () => (await shaded()).map(s => s.id.split('/').pop() ?? '')
+  const selBg = async () => (surface === 'desktop' ? [...new Set((await shaded()).map(s => s.bg))] : [treeRows(await ui.drawn()).activeBg])
+  return { ui, zone, click, marked, shaded, selBg }
 }
 
+const sentTo = async ($: Engine) => JSON.stringify(await $.prompt.submit({ text: 'look at these', wait: false, origin: { kind: 'composer' } }))
+
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`shift+click marks every row from the last clicked or marked row to the clicked one, in tree order, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+  test(`a click selects one row, shift+click selects the range from the anchor in tree order, and every selected row gets the selection background, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const ran: Ran = []
     const clock = world(on, RANGE_WORLD(root), ran)
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { click, marked, shaded, selBg, ui } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/d.txt` }, zone(`${root}/d.txt`))
+    await click(`${root}/d.txt`)
+    await clock.settle()
+    expect(await marked()).toEqual(['d.txt'])
+    const one = await selBg()
+    expect(one).toHaveLength(1)
+    expect(one[0]).not.toBe('')
     await clock.advance(1000)
-    await ui.post({ press: `${root}/a.txt`, shift: true }, zone(`${root}/a.txt`))
+    await click(`${root}/a.txt`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
-    await clock.advance(1000)
-    await ui.post({ press: `${root}/src`, shift: true }, zone(`${root}/src`))
+    expect([...new Set((await shaded()).map(s => s.bg))]).toEqual(one)
+    expect(JSON.stringify(await ui.drawn())).not.toContain('"alt":"marked ')
+    await click(`${root}/src`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['src', 'a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    await click(`${root}/c.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['c.txt', 'd.txt'])
+    const sent = await sentTo($)
+    expect(sent).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/c.txt\\n${root}/d.txt`)
+    expect(sent).toContain(`selected in the file tree; \\"this\\" or \\"it\\" in the prompt likely refers to it: ${root}/c.txt`)
+    await clock.advance(1000)
+    await click(`${root}/b.txt`)
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt'])
+    expect(await sentTo($)).not.toContain('marked these entries')
     expect(ran.some(a => a[0] === 'open')).toBe(false)
     await ui.unmount()
   })
 
-  test(`shift+j / shift+k and shift+down / shift+up mark the row, move and mark the next, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+  test(`ctrl+click and alt+click on macOS add or drop one row and open nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const ran: Ran = []
+    const clock = world(on, RANGE_WORLD(root), ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { click, marked, ui } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await click(`${root}/c.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'c.txt'])
+    expect(await sentTo($)).toContain(`refers to them:\\n${root}/a.txt\\n${root}/c.txt`)
+    await click(`${root}/b.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    await click(`${root}/a.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt', 'c.txt'])
+    await click(`${root}/c.txt`, { alt: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt'])
+    await click(`${root}/b.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual([])
+    const sent = await sentTo($)
+    expect(sent).not.toContain('marked these entries')
+    expect(sent).not.toContain('selected in the file tree')
+    expect(ran.some(a => a[0] === 'open')).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`the clear selection button clears every selected row, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, RANGE_WORLD(root), [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { click, marked, ui } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/a.txt` }, zone(`${root}/a.txt`))
+    await click(`${root}/a.txt`)
+    await click(`${root}/c.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    await (surface === 'desktop' ? tap(ui, 'unselect') : ui.press({ key: 'unselect' }))
+    await clock.settle()
+    expect(await marked()).toEqual([])
+    const sent = await sentTo($)
+    expect(sent).not.toContain('marked these entries')
+    expect(sent).not.toContain('selected in the file tree')
+    await ui.unmount()
+  })
+
+  test(`shift+j / shift+k and shift+down / shift+up select the row, move and select the next, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
     await clock.advance(1000)
     await ui.post({ key: 'j', shift: true }, zone(`${root}/a.txt`))
     await clock.settle()
@@ -4294,10 +4385,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
     await ui.post({ key: 'j' }, zone(`${root}/a.txt`))
     await ui.post({ key: 'j' }, zone(`${root}/b.txt`))
-    await ui.post({ key: 'j' }, zone(`${root}/c.txt`))
     await clock.settle()
     expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
-    await ui.post({ key: 'down', shift: true }, zone(`${root}/d.txt`))
+    await ui.post({ key: 'down', shift: true }, zone(`${root}/c.txt`))
     await clock.settle()
     expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
     await ui.unmount()
@@ -4308,11 +4398,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const clock = world(on, { ...RANGE_WORLD(root), status: '## main\0 D gone.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n' }, [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { ui, click, marked } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/b.txt` }, zone(`${root}/b.txt`))
+    await click(`${root}/b.txt`)
     await clock.advance(1000)
-    await ui.post({ press: `${root}/gone.ts`, shift: true }, zone(`${root}/gone.ts`))
+    await click(`${root}/gone.ts`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['b.txt', 'c.txt', 'd.txt', 'gone.ts'])
     expect(await texts(ui)).not.toContain('"format":"diff"')
@@ -4325,33 +4415,18 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const clock = world(on, RANGE_WORLD(root), [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { ui, click, marked } = await rangeMount($, surface)
     await clock.settle()
     await $.tool.call({ tool: 'Read', file_path: `${root}/src/e.ts` })
     await clock.settle()
     await clock.advance(3_000)
     await clock.settle()
-    await ui.post({ press: `${root}/src/e.ts`, shift: true }, zone(`${root}/src/e.ts`))
+    await click(`${root}/src/e.ts`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['e.ts'])
     await clock.advance(11_000)
     await clock.settle()
     expect(await marked()).toEqual(['e.ts'])
-    await ui.unmount()
-  })
-
-  test(`ctrl+click opens the file and marks nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
-    const root = '/home/k/proj'
-    const ran: Ran = []
-    const clock = world(on, RANGE_WORLD(root), ran)
-    await $.session.start({ cwd: root, surface, isInteractive: true })
-    await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
-    await clock.settle()
-    await ui.post({ press: `${root}/b.txt`, ctrl: true }, zone(`${root}/b.txt`))
-    await clock.settle()
-    expect(ran).toContainEqual(['open', '--', `${root}/b.txt`])
-    expect(await marked()).toEqual([])
     await ui.unmount()
   })
 }

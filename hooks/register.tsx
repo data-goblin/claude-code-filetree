@@ -159,6 +159,8 @@ const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let marks: string[] = []
 let markAnchor = ''
+let markBase: string[] = []
+let unpicked = ''
 type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
@@ -556,6 +558,8 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   hintRoot = ''
   marks = []
   markAnchor = ''
+  markBase = []
+  unpicked = ''
   linkStates.clear()
   searchIndex = null
   grepClear()
@@ -1085,9 +1089,9 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
   return { key: has(data, 'key') ? data.key : undefined, over: has(data, 'over') ? data.over : undefined, scrollTo: has(data, 'scrollTo') ? data.scrollTo : undefined }
 }
 
-function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
+function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
-  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
+  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
 }
 
 async function startGit($: EngineInterface, actions: GitAction[]): Promise<number[]> {
@@ -1301,11 +1305,20 @@ function linkNote(state: LinkState | null | undefined): string {
   return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
 }
 
-function toggleMark($: EngineInterface, id: string): void {
+function picked(t: FileTree, id: string): boolean {
+  return marks.includes(id) || (id === t.cursor && (Boolean(t.selected) || id !== unpicked))
+}
+
+function anchorAt(id: string): void {
   markAnchor = id
+  markBase = marks.filter(m => m !== id)
+}
+
+function toggleMark($: EngineInterface, id: string): void {
   if (marks.includes(id)) marks = marks.filter(m => m !== id)
   else if (marks.length >= MARK_LIMIT) $.ui.toast(`at most ${MARK_LIMIT} marks; V clears them`)
   else marks = [...marks, id]
+  anchorAt(id)
   void $.ui.invalidate('ui.render')
 }
 
@@ -1318,16 +1331,41 @@ function addMarks($: EngineInterface, ids: string[]): void {
 }
 
 async function markRange($: EngineInterface, id: string): Promise<void> {
-  const ids = rowsOf(await get($)).map(r => r.node.id)
+  const t = await get($)
+  const ids = rowsOf(t).map(r => r.node.id)
+  if (!ids.includes(markAnchor)) anchorAt(ids.includes(t.cursor) ? t.cursor : id)
   const to = ids.indexOf(id)
-  const from = markAnchor ? ids.indexOf(markAnchor) : -1
-  addMarks($, from < 0 || to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
-  markAnchor = id
+  const from = ids.indexOf(markAnchor)
+  marks = markBase
+  addMarks($, to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
+  unpicked = ''
   await patch($, () => ({ cursor: id, selected: id }))
+}
+
+async function pickRow($: EngineInterface, id: string): Promise<void> {
+  const t = await get($)
+  const on = picked(t, id)
+  const held = t.cursor !== id && picked(t, t.cursor) && rowsOf(t).some(r => r.node.id === t.cursor) ? [t.cursor] : []
+  const base = [...marks, ...held.filter(h => !marks.includes(h))]
+  if (!on && base.length >= MARK_LIMIT) {
+    $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+    return
+  }
+  marks = on ? base.filter(m => m !== id) : [...base, id]
+  unpicked = on ? id : ''
+  anchorAt(id)
+  await patch($, () => ({ cursor: id, selected: on ? '' : id }))
+}
+
+function pickOnly(id: string): void {
+  marks = []
+  unpicked = ''
+  anchorAt(id)
 }
 
 function clearMarks($: EngineInterface): void {
   marks = []
+  markBase = []
   void $.ui.invalidate('ui.render')
 }
 
@@ -2933,7 +2971,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
     await move(key === 'up' || key === 'k' || key === 'K' ? -1 : 1)
     const next = (await get($)).cursor
     if (next && next !== t.root) addMarks($, [next])
-    if (next) markAnchor = next
+    if (next) anchorAt(next)
   } else if (key === 'up' || key === 'k') await move(-1)
   else if (key === 'down' || key === 'j') await move(1)
   else if (key === 'pageup') await move(-10)
@@ -3006,7 +3044,12 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
   else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
-  else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
+  else if (id === 'unselect') {
+    clearMarks($)
+    markAnchor = ''
+    unpicked = ''
+    await patch($, () => ({ selected: '', cursor: '' }))
+  }
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
   else if (id === 'outside') await showOutside($)
@@ -3384,6 +3427,7 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (data.press === ROOT_PRESS) {
+      pickOnly(t.root)
       await selectRoot($)
       focusPane($, (await get($)).root, 'hk-tree')
       return {}
@@ -3391,25 +3435,23 @@ export const register: Register = (on, options) => {
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
       const n = t.nodes.find(x => x.id === data.press)
-      if (data.shift && !data.ctrl && (ghost || n)) {
+      if (!ghost && !n) return {}
+      const flip = data.ctrl === true || (data.alt === true && (await osName($)) === 'darwin')
+      if (data.shift === true || flip) {
         if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
-        await markRange($, data.press)
+        await (data.shift === true ? markRange($, data.press) : pickRow($, data.press))
         if (autoOpened.size) claimMarks((await get($)).cursor)
         return {}
       }
+      pickOnly(data.press)
       if (ghost) {
-        markAnchor = ghost.id
         await patch($, () => ({ cursor: ghost.id, selected: ghost.id }))
         await diffFile($, ghost.id)
         return {}
       }
       if (!n) return {}
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
-      if (data.ctrl) await openNode($, n)
-      else {
-        markAnchor = n.id
-        await press($, n)
-      }
+      await press($, n)
       if (autoOpened.size) claimMarks((await get($)).cursor)
       return {}
     }
@@ -3861,7 +3903,7 @@ export const register: Register = (on, options) => {
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
       ...(outside.length ? [{ id: 'outside', label: `${unicode ? '⚠' : '\u{ea6c}'} ${outside.length}`, dim: false, hint: `${outside.length} file${outside.length === 1 ? '' : 's'} written outside the repo`, icon: 'warning' as const }] : []),
-      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
+      ...(t.selected || marks.length ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
       { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
@@ -3968,12 +4010,12 @@ export const register: Register = (on, options) => {
       const rel = relative(t.root, n.id)
       const spans = searching ? matchSpans(t.query, Boolean(t.searchCase), Boolean(t.searchRegex), rel) : []
       const hl = (text: string) => (spans.length ? highlight(text, spans, rel.length - n.name.length) : [{ t: text, hit: false }])
-      const isMarked = marks.includes(n.id)
+      const isPicked = picked(t, n.id)
       const isLink = links.has(n.id)
       const link = isLink ? linkStates.get(n.id) : undefined
       if (isLink && !linkStates.has(n.id)) void classifyLink($, n.id)
       const linkColor = link?.kind === 'broken' || link?.kind === 'circular' ? theme.urgent : link?.kind === 'outside' ? warnColor : theme.muted
-      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0) - (isLink ? 2 : 0))
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isLink ? 2 : 0))
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
@@ -3986,7 +4028,6 @@ export const register: Register = (on, options) => {
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
         ...(lit ? [{ t: name, sh: tone, dim: isDim, b: isBright }] : hl(name).map(x => ({ t: x.t, c: x.hit ? theme.accent : nameColor, b: x.hit || n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' }))),
         ...(isLink ? [{ t: ' →', c: linkColor }] : []),
-        ...(isMarked ? [{ t: ' ●', c: theme.accent }] : []),
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
         const cell = cells[c]
@@ -3994,7 +4035,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked, isLink, link, linkColor, parts: hl(n.name) }
+      return { spec: { id: n.id, left: clean(left), right: clean(right), ...(isPicked ? { on: true as const } : {}) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isPicked, isLink, link, linkColor, parts: hl(n.name) }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -4071,13 +4112,12 @@ export const register: Register = (on, options) => {
         ? <Text color={tone?.solid ?? accentText} bold={p.isBright || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
-        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={p.isPicked ? deskCur : undefined} hover={{ backgroundColor: p.isPicked ? deskCur : deskHover }}>
           {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
           {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
           {p.isLink ? <Box flexGrow={1} /> : null}
-          {p.isMarked && Svg ? <Svg key={`mark:${n.id}`} source={iconSvg('mark', accentInk, 12)} alt={`marked ${n.name}`} width={12} height={12} /> : null}
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
             {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
@@ -4643,7 +4683,7 @@ export const register: Register = (on, options) => {
           <Client
             key="rows"
             module="./rows.tsx"
-            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : picked(t, t.cursor) ? t.cursor : '', ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
