@@ -1,6 +1,6 @@
 import { LIGHT_TONES, TONES } from '../hooks/git'
 import { GIT_COLOR } from '../hooks/icons'
-import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
+import { ADD_COLOR, DEL_COLOR, JUMP_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
 import { DESK, DESK_GIT, DESK_GIT_TEXT, selectionOn } from '../hooks/svg'
@@ -27,7 +27,7 @@ function over(top: string, base: string): string {
   return `#${[1, 3, 5].map(i => ch(i).toString(16).padStart(2, '0')).join('')}`
 }
 
-const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field }
+const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field, cursor: DESK.cursor }
 const deskBackgrounds = (bases: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(bases).flatMap(([n, base]) => [[n, base], ...Object.entries(DESK_TINTS).map(([t, tint]) => [`${t} on ${n}`, over(tint, base)])]))
 
@@ -43,6 +43,7 @@ const PALETTE = [
   ['selection', DEFAULT_THEME.selection],
   ['add', ADD_COLOR],
   ['del', DEL_COLOR],
+  ['jump', JUMP_COLOR],
   ...Object.entries(GIT_COLOR).map(([k, color]) => [`git ${k}`, color]),
 ]
 
@@ -63,7 +64,7 @@ const suites = [
     name: name as string,
     backgrounds: deskBackgrounds(bases as Record<string, string>),
     checks: [
-      ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
+      ...(['accent', 'jump', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
       ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: TEXT, skip: 'selection' })),
       ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT, skip: 'selection' })),
     ],
@@ -140,6 +141,20 @@ for (const [name, bg] of Object.entries(LIGHT_BACKGROUNDS)) {
   const ok = term >= 1.3
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} terminal ${tui} ${term.toFixed(2)}:1`)
+}
+console.log('\njump chip text on its tint inside the search field')
+for (const [name, base] of Object.entries({ ...DARK_BACKGROUNDS, ...LIGHT_BACKGROUNDS })) {
+  const ratio = contrast(DESK.jump, over(DESK.jumpOn, over(DESK.field, base)))
+  const ok = ratio >= TEXT
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} ${DESK.jump} ${ratio.toFixed(2)}:1 (needs ${TEXT}:1)`)
+}
+console.log('\njump folder icon on the selected jump row')
+for (const [name, base] of Object.entries({ ...DARK_BACKGROUNDS, ...LIGHT_BACKGROUNDS })) {
+  const ratio = contrast(DESK.jump, over(DESK.jumpSel, base))
+  const ok = ratio >= TEXT
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} ${DESK.jump} ${ratio.toFixed(2)}:1 (needs ${TEXT}:1)`)
 }
 console.log(failed ? `\n${failed} color${failed === 1 ? '' : 's'} below the contrast gate` : '\nevery color passes')
 process.exit(failed ? 1 : 0)
