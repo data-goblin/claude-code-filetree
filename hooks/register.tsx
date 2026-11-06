@@ -53,11 +53,12 @@ import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
 import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, stopStream, cwdOf, has, messageOf, focusPane, unlessAborted, strings, faint, toHex, clean, weigh } from './util'
-import { get, patch, put, setActivities, saveShimmer, activities, readConfig, SHIMMER_KEY } from './store'
+import { get, patch, setActivities, saveShimmer, activities, readConfig, SHIMMER_KEY } from './store'
 import { isIgnored, loadDirs, pruneArgs, PRUNE, realOf, revealPaths, listAll, broad, HOME_PRUNE, globLiteral, watchTree, sinceNow } from './listing'
 import { type Job, detectRepo, refreshGit, git, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground, ACTIVITY_TTL_MS } from './gitstate'
 import { staleSizes, takeLoc, walkSize, wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
-import { clearAutoCollapse, claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal } from './activity'
+import { claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal } from './activity'
+import { reset, followCwd, settleRoot } from './root'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
@@ -106,7 +107,6 @@ const workRepos = new Map<string, Promise<string | null>>()
 export type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
 export type GrepHit = { path: string; line: number; text: string }
 type SearchFlag = 'searchCase' | 'searchRegex' | 'searchContent'
-let lastRoot = ''
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -127,53 +127,7 @@ export function staleGrep($: EngineInterface): void {
   void $.ui.invalidate('ui.render')
 }
 
-async function reset($: EngineInterface, root: string, focus = false, ready?: Promise<void>): Promise<void> {
-  const prev = await get($)
-  flashing.generation += 1
-  flashing.blink?.cancel()
-  flashing.blink = null
-  if (root) void recordVisit($, root)
-  clearAutoCollapse()
-  metrics.dirTimes.clear()
-  metrics.timeFailed.clear()
-  metrics.timeTries.clear()
-  metrics.locTries.clear()
-  metrics.fileCounts.clear()
-  metrics.countTries.clear()
-  metrics.countQueue = []
-  metrics.timeQueue = []
-  lastRoot = root
-  ui.hintRoot = ''
-  marking.marks = []
-  marking.markAnchor = ''
-  marking.markBase = []
-  linking.linkStates.clear()
-  tree.searchIndex = null
-  grepClear()
-  metrics.sizeEpoch += 1
-  metrics.sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : settings.columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
-  const title = `Files: ${root.split('/').pop() || root}`
-  const listed = loadDirs($, [root])
-  const repo = detectRepo($)
-  await ready
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!settings.noDock) await $.ui.open({ id: PANE, title })
-  await listed
-  await repo
-  await refreshGit($)
-}
-
 const DU_DARWIN_SH = 'du -kxH -d 2 -- "$1"; find -x "$1" -mindepth 1 -maxdepth 2 -type f -exec du -kH -- {} +'
-
-export async function followCwd($: EngineInterface): Promise<boolean> {
-  if (!tree.follow) return false
-  const cwd = await cwdOf($)
-  const t = await get($)
-  if (t.root === cwd) return false
-  await reset($, cwd)
-  return true
-}
 
 function headerMessage(data: unknown): { over: unknown; press: unknown } {
   return { over: has(data, 'over') ? data.over : undefined, press: has(data, 'press') ? data.press : undefined }
@@ -186,12 +140,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-async function settleRoot($: EngineInterface): Promise<void> {
-  const root = tree.follow || !lastRoot ? await cwdOf($) : lastRoot
-  const t = await get($)
-  if (t.root !== root || t.nodes.length === 0) await reset($, root)
 }
 
 async function copyPaths($: EngineInterface, ids: string[], how: 'relative' | 'absolute' | 'name', surface?: RenderSurface): Promise<void> {
@@ -378,7 +326,7 @@ function grepStop(): void {
   grep.stop = null
 }
 
-function grepClear(): void {
+export function grepClear(): void {
   grepStop()
   grep.seq += 1
   grep.key = ''
@@ -707,7 +655,7 @@ async function visits($: EngineInterface): Promise<Record<string, Visit>> {
   return visitsCache
 }
 
-async function recordVisit($: EngineInterface, dir: string): Promise<void> {
+export async function recordVisit($: EngineInterface, dir: string): Promise<void> {
   const all = { ...(await visits($)) }
   const prev = all[dir]
   all[dir] = { n: (prev?.n ?? 0) + 1, at: await $.clock.now() }
