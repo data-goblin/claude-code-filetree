@@ -10,7 +10,6 @@ import { allGuards, GUARD_TOOLS, guardIn, loadGuards, noteOutside, guardFor } fr
 import { emptyTree, inside, posix, relative, useDrives } from './tree'
 import { scrollShortcuts } from './keys'
 import { settings, machine, tree, vcs, ui, previewing, pics, working, guarding, grep, zjump } from './state'
-import { PANE } from './consts'
 import { exists, shortPath, cwdOf, has, strings } from './util'
 import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
 import { watchTree, sinceNow } from './listing'
@@ -24,6 +23,7 @@ import { readOptions } from './options'
 import { onMessage } from './messages'
 import { renderPane } from './pane'
 
+const PANE = 'filetree'
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const GIT_POLL_MS = 2000
 const AGE_TICK_MS = 60_000
