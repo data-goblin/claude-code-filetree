@@ -1,4 +1,4 @@
-import { type EngineInterface, type HookStream, type ProcessSpawnResult, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
+import { type EngineInterface, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
 import { herdrError, herdrOpenCommand, herdrPane, herdrSplit, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
 import { bindKeys } from './keybind'
@@ -60,6 +60,7 @@ import { compileRegex, toEre } from './regex'
 import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
 import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
+import { exists, shortPath, osName, stopStream, cwdOf, has, messageOf, focusPane, unlessAborted, strings, faint, toHex, clean, weigh } from './util'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
@@ -143,7 +144,6 @@ let watchMissing = false
 let watchTimer: Timer | null = null
 const watchQueue = new Set<string>()
 const WATCH_MS = 150
-let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
 let markId = 0
 let listSeq = 0
 let lastRoot = ''
@@ -169,37 +169,6 @@ let staleTimer: Timer | null = null
 type PictureJob = { path: string; key: string; kind: 'png' | 'image' | 'video' | 'pdf' | 'office'; sig: string; mtime: number; size: number; page: number; px: number; pdf: string }
 export type Picture = { state: 'pending' } | { state: 'ready'; file: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
 
-function osName($: EngineInterface): Promise<'linux' | 'darwin' | 'win32'> {
-  platform ??= (async () => {
-    if ((await $.env.get('OS')) === 'Windows_NT') return 'win32'
-    try {
-      return (await $.process.run(['uname', '-s'], { timeoutMs: 3_000 })).stdout.trim() === 'Darwin' ? 'darwin' : 'linux'
-    } catch {
-      return 'linux'
-    }
-  })()
-  return platform
-}
-
-async function cwdOf($: EngineInterface): Promise<string> {
-  return posix(await $.session.cwd())
-}
-
-function clean(segs: Seg[]): Seg[] {
-  for (const seg of segs) for (const [k, v] of Object.entries(seg)) if (v === undefined) Reflect.deleteProperty(seg, k)
-  return segs
-}
-
-function toHex(c: Rgb): string {
-  return `#${c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`
-}
-
-function faint(hex: string): string {
-  const v = parseInt(hex.slice(1), 16)
-  const ch = (shift: number) => Math.round(0x26 + (((v >> shift) & 255) - 0x26) * 0.3)
-  return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
-}
-
 async function readConfig($: EngineInterface): Promise<void> {
   const rows = await $.config.list()
   const theme = rows.find(r => r.key === 'theme')
@@ -217,11 +186,6 @@ async function saveShimmer($: EngineInterface, lit: boolean): Promise<string> {
   if (!key) return ''
   const result = await $.config.set({ key, value: lit ? 'on' : 'off' }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
   return result.deny ?? ''
-}
-
-function weigh(el: unknown): [number, number] {
-  const text = JSON.stringify(el) ?? ''
-  return [text.length, text.split('"type":').length - 1]
 }
 
 function get(_$: EngineInterface): Promise<FileTree> {
@@ -1254,15 +1218,6 @@ function clearMarks($: EngineInterface): void {
   void patch($, cur => ({ selected: cur.cursor }))
 }
 
-async function exists($: EngineInterface, path: string): Promise<boolean> {
-  try {
-    await $.fs.stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 async function afterBash($: EngineInterface, jobs: Job[]): Promise<void> {
   const reads = vcs.queuedReads
   vcs.queuedReads = []
@@ -2117,27 +2072,6 @@ async function loadPreview($: EngineInterface, path: string, line?: number): Pro
   previewing.previewed = await readPreview($, path, 1, line)
 }
 
-function stopStream(stream: HookStream<unknown, ProcessSpawnResult>): void {
-  void stream.return({ code: null, signal: null }).catch(() => undefined)
-}
-
-function has<K extends string>(v: unknown, key: K): v is Record<K, unknown> {
-  return typeof v === 'object' && v !== null && key in v
-}
-
-function messageOf(err: unknown): string {
-  return String((has(err, 'message') ? err.message : undefined) ?? err)
-}
-
-function strings(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x: unknown): x is string => typeof x === 'string') : []
-}
-
-function unlessAborted(err: unknown): null {
-  if (/aborted/.test(messageOf(err))) throw err
-  return null
-}
-
 async function docText($: EngineInterface, path: string, page: number): Promise<string> {
   const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase()
   const argv = ext === 'pdf' ? ['timeout', '10', 'pdftotext', '-f', String(page), '-l', String(page), '-layout', '--', path, '-'] : ext === 'docx' || ext === 'odt' || ext === 'rtf' ? ['timeout', '10', 'pandoc', '-t', 'gfm', '--wrap=none', '--', path] : []
@@ -2541,10 +2475,6 @@ async function mapKey($: EngineInterface, key: string): Promise<boolean> {
   if (kind !== 'dir') return false
   drillTile($, pick, t.cursor)
   return true
-}
-
-function focusPane($: EngineInterface, root: string, key: string): void {
-  void $.ui.open({ id: PANE, title: `Files: ${root.split('/').pop() || root}`, focus: true }).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
 }
 
 function toggleShortcuts($: EngineInterface, open = !ui.shortcutsShown): void {
@@ -3057,10 +2987,6 @@ async function showOutside($: EngineInterface): Promise<void> {
 async function selectRoot($: EngineInterface): Promise<void> {
   mapping.mapLock = null
   await patch($, cur => ({ cursor: cur.root, selected: cur.root, scroll: null }))
-}
-
-function shortPath(path: string): string {
-  return machine.home && inside(machine.home, path) ? `~${path.slice(machine.home.length)}` : path
 }
 
 export const register: Register = (on, options) => {
