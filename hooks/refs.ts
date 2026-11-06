@@ -1,7 +1,17 @@
-export type FileRef = { path: string; line: number; end: number }
+import type { EngineInterface, RenderSurface } from 'claude-code'
+import { resolve } from './git'
+import { machine } from './state'
+import { inside } from './tree'
+import { get } from './store'
+import { PANE } from './consts'
+import { openHit } from './grep'
+
+type FileRef = { path: string; line: number; end: number }
 
 const REF = /(?<![\w.@~+/\\:\])-])((?:[A-Za-z]:[\\/])?(?:[\w.@~+/\\-]|\[[\w.@~+-]+\]|\([\w.@~+-]+\))+)(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?)(?![\w])/g
 const LIMIT = 20
+
+const refCache = new Map<string, Promise<FileRef[]>>()
 
 export function fileRefs(text: string): FileRef[] {
   const out: FileRef[] = []
@@ -25,7 +35,7 @@ export function refHref(ref: FileRef): string {
   return `file://${encodeURI(/^[A-Za-z]:/.test(ref.path) ? `/${ref.path}` : ref.path)}#L${ref.line}${ref.end > ref.line ? `-L${ref.end}` : ''}`
 }
 
-export function parseHref(href: string): FileRef | null {
+function parseHref(href: string): FileRef | null {
   const m = /^file:\/\/(.+)#L(\d+)(?:-L(\d+))?$/.exec(href)
   if (!m) return null
   const raw = decodeURI(m[1] ?? '')
@@ -52,4 +62,32 @@ export function markdownSplit(text: string, at: number): [string, string] {
   const tail = defs ? `\n\n${defs}` : ''
   if (fence) return [`${lines.slice(0, end).join('\n')}\n${fence}${tail}`, `${[open, ...lines.slice(end)].join('\n')}${tail}`]
   return [lines.slice(0, cut).join('\n') + tail, lines.slice(cut).join('\n') + tail]
+}
+
+export function refsIn($: EngineInterface, text: string, root: string, cwd: string): Promise<FileRef[]> {
+  const key = `${root}\0${cwd}\0${text}`
+  const known = refCache.get(key)
+  if (known) return known
+  const found = (async () => {
+    const out: FileRef[] = []
+    for (const r of fileRefs(text)) {
+      const path = resolve(cwd, r.path, machine.home)
+      if (!inside(root, path) || path === root || out.some(o => o.path === path && o.line === r.line && o.end === r.end)) continue
+      const kind = await $.fs.stat(path).then(st => st.kind, () => '')
+      if (kind === 'file') out.push({ ...r, path })
+    }
+    return out
+  })()
+  refCache.set(key, found)
+  if (refCache.size > 200) refCache.delete(refCache.keys().next().value ?? key)
+  return found
+}
+
+export async function openRef($: EngineInterface, href: string, surface: RenderSurface): Promise<void> {
+  const ref = parseHref(href)
+  if (!ref) return
+  const t = await get($)
+  if (!inside(t.root, ref.path)) return
+  void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
+  await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
 }
