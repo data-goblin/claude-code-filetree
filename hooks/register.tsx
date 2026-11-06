@@ -85,6 +85,7 @@ const GREP_LINE = 10_000
 const IMAGE_BYTES = 2_097_152
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
+const DESK_SHIMMER_MAX = 4
 const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
 const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
@@ -4032,8 +4033,10 @@ export const register: Register = (on, options) => {
       const tone = tones[p.tone]
       const iconInk = p.lit ? (tone?.solid ?? accentInk) : p.isGuard ? ink(theme.urgent, DESK.urgent) : ink(p.iconColor, n.kind === 'dir' ? accentInk : mutedInk)
       const strike = p.status === 'D' && n.kind !== 'dir'
-      const name = p.lit
+      const name = p.lit && deskShimmer
         ? <Client key={`lit:${n.id}`} module="./rows.tsx" props={{ rows: [{ id: '', left: clean([{ t: n.name, sh: p.tone, b: p.isBright }]), right: [] }], active: '', activeBg: '', hoverBg: '', tones: rowColors.tones, pointer: false } satisfies RowsProps} />
+        : p.lit
+        ? <Text color={tone?.solid ?? accentText} bold={p.isBright || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
@@ -4090,6 +4093,7 @@ export const register: Register = (on, options) => {
         deskParts.push(rowParts(r))
       }
     }
+    const deskShimmer = deskParts.filter(x => x.lit).length <= DESK_SHIMMER_MAX
     const deskGrep: GrepHit[] = []
     if (desk && grepping) {
       let size = 0

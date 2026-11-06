@@ -689,6 +689,25 @@ test('desktop: a long tree draws every row and leaves the wheel to the app', { t
   await ui.unmount()
 })
 
+test('desktop: past a few lit rows the names stop running their own shimmer clock so the page is not flooded', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 12 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: '', dirs: { [root]: names }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const litClients = async () => every(await ui.drawn(), n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:')).length
+  for (const [name] of names.slice(0, 3)) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+  await clock.settle()
+  expect(await litClients()).toBe(3)
+  for (const [name] of names.slice(3, 10)) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+  await clock.settle()
+  expect(await litClients()).toBe(0)
+  expect(await texts(ui)).toContain('"children":["f09.txt"]')
+  await ui.unmount()
+})
+
 test('desktop: a very large open tree is cut with a note so the drawn tree stays within the engine bounds', { timeoutMs: 30_000 }, async ($, on) => {
   const root = '/Users/k/huge'
   const names = Array.from({ length: 5000 }, (_, i): [string, 'file'] => [`file-number-${String(i).padStart(5, '0')}.txt`, 'file'])
