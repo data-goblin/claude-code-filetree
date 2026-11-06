@@ -8,7 +8,7 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
-import { type Candidate, type Visit, frecency, parseZoxide, rankJump, recentJump } from './jump'
+import { canCd, jumpKey, jumpOpen, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
 import { pickRepo, shellPaths, shellWrites, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
@@ -56,16 +56,12 @@ import { claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal 
 import { reset, followCwd, settleRoot } from './root'
 import { picks, copyPaths, markRow, anchorAt, addMarks, clearMarks, copyPath, pickOnly, markRange, pickRow } from './select'
 import { classifyLink, linkNote } from './links'
-import { scopeSearch, indexPaths, searchFlag, search, jump } from './search'
+import { scopeSearch, searchFlag, search, jump } from './search'
 import { openHit, grepOn, grepNav, grepAct, grepId, grepKey, grepRun, GREP_LIMIT, type GrepHit } from './grep'
 import { isGhost, rowsOf, sortBy, ghostsOf } from './order'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
-const VISITS = { plugin: 'filetree', key: 'visits' } as const
-const ZOXIDE_TTL_MS = 10_000
-const JUMP_INDEX_LIMIT = 4000
 const JUMP_BLUR_MS = 400
-const JUMP_RECENT = 10
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const RUNNING_MAX_MS = 600_000
@@ -95,9 +91,6 @@ let ageTick: Timer | null = null
 const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
 let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
-const jumpExists = new Map<string, boolean>()
-let zoxideCache: { at: number; rows: Candidate[] } | null = null
-let visitsCache: Record<string, Visit> | null = null
 let deskKeysAt = 0
 export type Column = FileTree['column']
 
@@ -122,104 +115,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-async function zoxideRows($: EngineInterface): Promise<Candidate[]> {
-  const now = await $.clock.now()
-  if (zoxideCache && now - zoxideCache.at < ZOXIDE_TTL_MS) return zoxideCache.rows
-  let rows: Candidate[] = []
-  try {
-    const run = await $.process.run(['zoxide', 'query', '--list', '--score'], { timeoutMs: 3_000 })
-    if (run.exitCode === 0) rows = parseZoxide(run.stdout).map(c => ({ path: posix(c.path).replace(/([^:])\/+$/, '$1'), score: c.score }))
-  } catch {
-    rows = []
-  }
-  zoxideCache = { at: now, rows }
-  return rows
-}
-
-async function visits($: EngineInterface): Promise<Record<string, Visit>> {
-  visitsCache ??= ((await $.state.get(VISITS)).value as Record<string, Visit> | undefined) ?? {}
-  return visitsCache
-}
-
-export async function recordVisit($: EngineInterface, dir: string): Promise<void> {
-  const all = { ...(await visits($)) }
-  const prev = all[dir]
-  all[dir] = { n: (prev?.n ?? 0) + 1, at: await $.clock.now() }
-  const keep = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, 500)
-  visitsCache = Object.fromEntries(keep)
-  await $.state.set(VISITS, visitsCache)
-}
-
-async function jumpRefresh($: EngineInterface): Promise<void> {
-  const mine = ++zjump.seq
-  const t = await get($)
-  const now = await $.clock.now()
-  const [zox, seen, index] = await Promise.all([zoxideRows($), visits($), indexPaths($, t)])
-  if (mine !== zjump.seq || !zjump.on) return
-  const cands: Candidate[] = [...zox]
-  for (const [path, v] of Object.entries(seen)) cands.push({ path: posix(path), score: frecency(v, now) })
-  const dirs = new Set<string>([t.root])
-  for (const n of t.nodes) if (n.kind === 'dir') dirs.add(n.id)
-  for (const p of index.paths) {
-    if (dirs.size >= JUMP_INDEX_LIMIT) break
-    for (let d = dirname(p); d.length > t.root.length && !dirs.has(d); d = dirname(d)) dirs.add(d)
-  }
-  for (const d of dirs) cands.push({ path: d, score: 0 })
-  const typed = zjump.query.trim() !== ''
-  const recent = typed ? [] : recentJump(seen).map(posix).filter(p => p !== t.root).slice(0, JUMP_RECENT * 2)
-  const ranked = typed ? rankJump(cands, zjump.query) : [...new Set([...recent, ...rankJump(cands, '').filter(p => p !== t.root)])]
-  const known = new Set([t.root, ...dirs])
-  const remembered = new Set(Object.keys(seen).map(posix))
-  const there = await Promise.all(ranked.map(async p => known.has(p) || !remembered.has(p) || (jumpExists.get(p) ?? jumpExists.set(p, await $.fs.exists(p).catch(() => false)).get(p) ?? false)))
-  if (mine !== zjump.seq || !zjump.on) return
-  const gone = ranked.filter((_, k) => !there[k])
-  if (gone.some(p => p in seen)) await forgetVisits($, gone)
-  if (mine !== zjump.seq || !zjump.on) return
-  zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
-  zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
-  zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
-  void $.ui.invalidate('ui.render')
-}
-
-async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
-  visitsCache = Object.fromEntries(Object.entries(await visits($)).filter(([dir]) => !dirs.includes(posix(dir))))
-  await $.state.set(VISITS, visitsCache)
-}
-
-function jumpBlurCancel(): void {
-  ui.jumpBlur?.cancel()
-  ui.jumpBlur = null
-}
-
-function jumpOpen($: EngineInterface): void {
-  jumpBlurCancel()
-  zjump.on = true
-  jumpExists.clear()
-  zjump.held = false
-  zjump.query = ''
-  zjump.sel = 0
-  zjump.rows = []
-  void jumpRefresh($)
-  $.clock.after(50, async () => focusPane($, (await get($)).root, 'jump'))
-}
-
-async function jumpInput($: EngineInterface, value: string): Promise<void> {
-  if (!zjump.on) return
-  zjump.query = value
-  zjump.sel = 0
-  await jumpRefresh($)
-}
-
-function jumpClose($: EngineInterface, refocus = false): void {
-  jumpBlurCancel()
-  zjump.on = false
-  zjump.query = ''
-  zjump.rows = []
-  zjump.seq += 1
-  void $.ui.invalidate('ui.render')
-  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, 'hk-tree'))
 }
 
 async function repoOf($: EngineInterface, path: string): Promise<string | null> {
@@ -277,50 +172,6 @@ async function considerWork($: EngineInterface): Promise<void> {
     })
   } finally {
     workDeciding = false
-  }
-}
-
-async function canCd($: EngineInterface): Promise<boolean> {
-  return (await $.command.list().catch(() => [])).some(c => c.name === 'cd')
-}
-
-async function jumpTo($: EngineInterface, dir: string): Promise<void> {
-  if (!(await $.fs.exists(dir).catch(() => false))) {
-    await forgetVisits($, [dir])
-    void $.ui.toast(`${shortPath(dir)} no longer exists`)
-    void jumpRefresh($)
-    return
-  }
-  jumpClose($, true)
-  working.workLast = await $.clock.now()
-  tree.follow = false
-  await reset($, dir)
-  if (!settings.jumpMovesClaude || (await cwdOf($)) === dir || !(await canCd($))) return
-  $.clock.after(0, async () => {
-    try {
-      await $.command.run({ command: 'cd', args: dir })
-    } catch (error) {
-      void $.ui.toast(`could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  })
-}
-
-async function jumpKey($: EngineInterface, key: string): Promise<void> {
-  if (key === 'escape') jumpClose($, true)
-  else if (key === 'return' || key === 'enter') {
-    const dir = zjump.rows[zjump.sel]
-    if (dir) await jumpTo($, dir)
-  } else if (key === 'up' || key === 'down') {
-    zjump.sel = Math.max(0, Math.min(zjump.rows.length - 1, zjump.sel + (key === 'up' ? -1 : 1)))
-    void $.ui.invalidate('ui.render')
-  } else if (key === 'backspace' || key === 'delete') {
-    zjump.query = zjump.query.slice(0, -1)
-    zjump.sel = 0
-    await jumpRefresh($)
-  } else if (key === 'space' || key === ' ' || [...key].length === 1) {
-    zjump.query += key === 'space' ? ' ' : key
-    zjump.sel = 0
-    await jumpRefresh($)
   }
 }
 
