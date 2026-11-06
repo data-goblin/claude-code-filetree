@@ -42,7 +42,7 @@ Space:        Quick Look on macOS
 
 In the Desktop app the tree's hidden hotkeys lose shift, so shift+j there moves without marking. Click a row first: shift+click and shift+arrows on a clicked row mark ranges.
 
-Marked entries show the same selection background as the selected entry, and only the shaded entries go to Claude and to `y`, `Y` and `u`. With entries marked, the entry under the cursor shows the cursor without the background until `v` marks it. The clear selection button in the header clears the marks and the selected entry. On macOS, alt+click marks one entry because neither the Desktop app nor the terminal reports cmd with a click.
+Marked entries show the same selection background as the selected entry, and only the shaded entries go to Claude and to `y`, `Y` and `u`. With entries marked, the entry under the cursor shows the accent cursor mark, and in the Desktop app an accent tint instead of the selection background, until `v` marks it. The clear selection button in the header clears the marks and the selected entry. On macOS, alt+click marks one entry because neither the Desktop app nor the terminal reports cmd with a click.
 
 <img src="media/shortcuts.gif" alt="? opens the grouped shortcuts overlay over the tree, and ? closes it" width="800">
 

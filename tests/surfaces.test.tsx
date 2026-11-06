@@ -7,7 +7,7 @@ import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, compileSpans, toEre } from '../hooks/regex'
 import { fileRefs, markdownSplit } from '../hooks/refs'
-import { ICONS } from '../hooks/svg'
+import { DESK, ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
@@ -4444,7 +4444,7 @@ async function rangeMount($: Engine, surface: 'terminal' | 'desktop') {
     if (surface === 'desktop') {
       return every(tree, n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('row:')).flatMap(n => {
         const props = propsOf(n)
-        return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' ? [{ id: keyOf(n).slice(4), bg: props.backgroundColor }] : []
+        return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' && props.backgroundColor !== DESK.cursor ? [{ id: keyOf(n).slice(4), bg: props.backgroundColor }] : []
       })
     }
     const specs = treeRows(tree).rows
@@ -4603,6 +4603,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const tree = await ui.drawn()
     expect(JSON.stringify(tree)).toContain('2 marked')
     if (surface === 'desktop') expect(every(tree, n => isKeyed(n, 'Box', `bar:${root}/c.txt`))).toHaveLength(1)
+    if (surface === 'desktop') {
+      const bg = (id: string) => (propsOf(search(tree, n => isKeyed(n, 'Box', `row:${root}/${id}`))) as { backgroundColor?: string } | undefined)?.backgroundColor
+      expect(bg('c.txt')).toBe(DESK.cursor)
+      expect(bg('a.txt')).toBeDefined()
+      expect(bg('a.txt')).not.toBe(DESK.cursor)
+      expect(bg('d.txt')).toBeUndefined()
+    }
     else expect(treeRows(tree).rows.find(r => r.id === `${root}/c.txt`)?.left.some(s => s.t === '▎ ')).toBe(true)
     await ui.post({ key: 'y' }, zone(`${root}/c.txt`))
     await clock.settle()

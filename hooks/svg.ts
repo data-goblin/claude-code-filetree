@@ -167,6 +167,7 @@ export const DESK = {
   field: '#8080801a',
   edge: '#80808040',
   toolOn: '#3b82f633',
+  cursor: '#4b8ef01f',
   addBg: '#3fb9502e',
   delBg: '#ef53502e',
 } as const
