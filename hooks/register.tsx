@@ -59,6 +59,7 @@ import { type Job, detectRepo, refreshGit, git, gitChanged, headOf, type Pending
 import { staleSizes, takeLoc, walkSize, wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
 import { claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal } from './activity'
 import { reset, followCwd, settleRoot } from './root'
+import { picks, copyPaths, markRow, anchorAt, addMarks, clearMarks, copyPath, pickOnly, markRange, pickRow } from './select'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
@@ -70,8 +71,6 @@ const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { b
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const RUNNING_MAX_MS = 600_000
 const GREP_LIMIT = 200
-const MARK_LIMIT = 100
-const MARKS_FULL = `at most ${MARK_LIMIT} marks; press "${MARK_LIMIT} marked" in the footer to clear them`
 const GREP_MS = 15_000
 const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
@@ -142,18 +141,6 @@ function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unkno
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
 }
 
-async function copyPaths($: EngineInterface, ids: string[], how: 'relative' | 'absolute' | 'name', surface?: RenderSurface): Promise<void> {
-  const t = await get($)
-  const one = (id: string) => (how === 'name' ? id.slice(id.lastIndexOf('/') + 1) || id : how === 'relative' && id !== t.root && inside(t.root, id) ? id.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : id)
-  const text = ids.map(one).join('\n')
-  const done = await $.ui.copy({ text, ...(surface ? { surface } : {}) })
-  $.ui.toast(!done.isCopied ? `Could not copy the ${how === 'name' ? 'name' : 'path'}${ids.length > 1 ? 's' : ''}` : ids.length > 1 ? `Copied ${ids.length} ${how === 'name' ? 'names' : 'paths'}` : `Copied ${text}`)
-}
-
-function copyPath($: EngineInterface, id: string, absolute: boolean, surface?: RenderSurface): Promise<void> {
-  return copyPaths($, [id], absolute ? 'absolute' : 'relative', surface)
-}
-
 async function linkTarget($: EngineInterface, id: string): Promise<string> {
   if ((await osName($)) === 'win32') return ''
   try {
@@ -204,66 +191,6 @@ function linkNote(state: LinkState | null | undefined): string {
   if (!state) return ' →'
   const to = state.target ? ` ${shortPath(state.target)}` : ''
   return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
-}
-
-function picks(t: FileTree): { ids: string[]; marked: boolean } {
-  return marking.marks.length ? { ids: marking.marks, marked: true } : { ids: t.selected ? [t.selected] : [], marked: false }
-}
-
-export function anchorAt(id: string): void {
-  marking.markAnchor = id
-  marking.markBase = marking.marks.filter(m => m !== id)
-}
-
-function flip($: EngineInterface, t: FileTree, id: string, pin: boolean): boolean {
-  const { ids, marked } = picks(t)
-  const on = ids.includes(id)
-  if (!on && ids.length >= MARK_LIMIT) {
-    $.ui.toast(MARKS_FULL)
-    return false
-  }
-  marking.marks = on && pin && !marked ? [id] : on ? ids.filter(m => m !== id) : [...ids, id]
-  anchorAt(id)
-  return true
-}
-
-async function markRow($: EngineInterface, id: string): Promise<void> {
-  if (flip($, await get($), id, true)) await patch($, cur => ({ selected: marking.marks.length ? cur.selected : '' }))
-}
-
-function addMarks($: EngineInterface, ids: string[]): void {
-  const fresh = ids.filter(id => id && !marking.marks.includes(id))
-  const room = Math.max(0, MARK_LIMIT - marking.marks.length)
-  if (fresh.length > room) $.ui.toast(MARKS_FULL)
-  marking.marks = [...marking.marks, ...fresh.slice(0, room)]
-  void $.ui.invalidate('ui.render')
-}
-
-async function markRange($: EngineInterface, id: string): Promise<void> {
-  const t = await get($)
-  const ids = rowsOf(t).map(r => r.node.id)
-  if (!ids.includes(marking.markAnchor)) anchorAt(ids.includes(t.cursor) ? t.cursor : id)
-  const to = ids.indexOf(id)
-  const from = ids.indexOf(marking.markAnchor)
-  marking.marks = marking.markBase
-  addMarks($, to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
-  await patch($, () => ({ cursor: id, selected: id }))
-}
-
-async function pickRow($: EngineInterface, id: string): Promise<void> {
-  if (flip($, await get($), id, false)) await patch($, () => ({ cursor: id, selected: marking.marks.length ? id : '' }))
-}
-
-function pickOnly(id: string): void {
-  marking.marks = []
-  anchorAt(id)
-}
-
-function clearMarks($: EngineInterface): void {
-  if (!marking.marks.length) return
-  marking.marks = []
-  marking.markBase = []
-  void patch($, cur => ({ selected: cur.cursor }))
 }
 
 export type Indexed = { paths: string[]; rel: string[] }
