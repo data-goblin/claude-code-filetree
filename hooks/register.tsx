@@ -16,7 +16,7 @@ import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, 
 import { colorOf, narrowEmoji, finePointerOk, cellPixels, ghosttyColors, fontState, NERD_PROBE } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
-import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
+import { fileRefs, markdownSplit, refHref, refsIn, openRef } from './refs'
 import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, JUMP_COLOR, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
@@ -124,36 +124,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-const refCache = new Map<string, Promise<FileRef[]>>()
-
-function refsIn($: EngineInterface, text: string, root: string, cwd: string): Promise<FileRef[]> {
-  const key = `${root}\0${cwd}\0${text}`
-  const known = refCache.get(key)
-  if (known) return known
-  const found = (async () => {
-    const out: FileRef[] = []
-    for (const r of fileRefs(text)) {
-      const path = resolve(cwd, r.path, machine.home)
-      if (!inside(root, path) || path === root || out.some(o => o.path === path && o.line === r.line && o.end === r.end)) continue
-      const kind = await $.fs.stat(path).then(st => st.kind, () => '')
-      if (kind === 'file') out.push({ ...r, path })
-    }
-    return out
-  })()
-  refCache.set(key, found)
-  if (refCache.size > 200) refCache.delete(refCache.keys().next().value ?? key)
-  return found
-}
-
-async function openRef($: EngineInterface, href: string, surface: RenderSurface): Promise<void> {
-  const ref = parseHref(href)
-  if (!ref) return
-  const t = await get($)
-  if (!inside(t.root, ref.path)) return
-  void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
-  await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
 }
 
 const GIT_RANK: Record<string, number> = { D: 5, M: 4, T: 4, R: 3, C: 3, A: 2, '?': 1 }
