@@ -7,7 +7,7 @@ import { CLEAN, fitCells, pictureKind, picture, pngOf } from './peek'
 import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { diffGroups, diffWindow, GROUP } from './diff'
+import { diffGroups, diffWindow, GROUP, diffCounts } from './diff'
 import { jumpKey, jumpOpen, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
 import { shellPaths, shellWrites, noteWork, considerWork } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn } from './loc'
@@ -301,20 +301,6 @@ function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): 
   }
   toggleShortcuts($, false)
   return false
-}
-
-function diffCounts(source: string): [number, number] {
-  let add = 0
-  let del = 0
-  let inHunk = false
-  for (const line of source.split('\n')) {
-    if (line.startsWith('diff --git ')) inHunk = false
-    else if (line.startsWith('@@')) inHunk = true
-    else if (!inHunk) continue
-    else if (line.startsWith('+')) add++
-    else if (line.startsWith('-')) del++
-  }
-  return [add, del]
 }
 
 function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
