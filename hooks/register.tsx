@@ -8,7 +8,7 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
-import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { type Candidate, type Visit, frecency, parseZoxide, rankJump, recentJump } from './jump'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
@@ -66,6 +66,8 @@ const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
+const JUMP_BLUR_MS = 400
+const JUMP_RECENT = 10
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
@@ -229,7 +231,8 @@ let longFile = 500
 let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
-const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
+const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false, when: {} as Record<string, number> }
+const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 let autoCollapseDefault = false
@@ -1301,7 +1304,7 @@ function linkNote(state: LinkState | null | undefined): string {
 function toggleMark($: EngineInterface, id: string): void {
   markAnchor = id
   if (marks.includes(id)) marks = marks.filter(m => m !== id)
-  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  else if (marks.length >= MARK_LIMIT) $.ui.toast(`at most ${MARK_LIMIT} marks; V clears them`)
   else marks = [...marks, id]
   void $.ui.invalidate('ui.render')
 }
@@ -1309,7 +1312,7 @@ function toggleMark($: EngineInterface, id: string): void {
 function addMarks($: EngineInterface, ids: string[]): void {
   const fresh = ids.filter(id => id && !marks.includes(id))
   const room = Math.max(0, MARK_LIMIT - marks.length)
-  if (fresh.length > room) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  if (fresh.length > room) $.ui.toast(`at most ${MARK_LIMIT} marks; V clears them`)
   marks = [...marks, ...fresh.slice(0, room)]
   void $.ui.invalidate('ui.render')
 }
@@ -1595,7 +1598,7 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
   for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
-  if (match.partial) void $.ui.toast(`filetree: regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
+  if (match.partial) void $.ui.toast(`regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
   await revealPaths($, hits)
   const shown = await get($)
   const ids = new Set(shown.nodes.map(n => n.id))
@@ -1973,13 +1976,29 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
     for (let d = dirname(p); d.length > t.root.length && !dirs.has(d); d = dirname(d)) dirs.add(d)
   }
   for (const d of dirs) cands.push({ path: d, score: 0 })
-  zjump.rows = rankJump(cands, zjump.query).filter(p => p !== t.root || zjump.query.trim() !== '')
+  const typed = zjump.query.trim() !== ''
+  const recent = typed ? [] : recentJump(seen).map(posix).filter(p => p !== t.root).slice(0, JUMP_RECENT * 2)
+  const ranked = typed ? rankJump(cands, zjump.query) : [...new Set([...recent, ...rankJump(cands, '').filter(p => p !== t.root)])]
+  const known = new Set([t.root, ...dirs])
+  const remembered = new Set(Object.keys(seen).map(posix))
+  const there = await Promise.all(ranked.map(async p => known.has(p) || !remembered.has(p) || (jumpExists.get(p) ?? jumpExists.set(p, await $.fs.exists(p).catch(() => false)).get(p) ?? false)))
+  if (mine !== zjump.seq || !zjump.on) return
+  const gone = ranked.filter((_, k) => !there[k])
+  if (gone.some(p => p in seen)) await forgetVisits($, gone)
+  zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
+  zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
   void $.ui.invalidate('ui.render')
 }
 
+async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
+  visitsCache = Object.fromEntries(Object.entries(await visits($)).filter(([dir]) => !dirs.includes(posix(dir))))
+  await $.state.set(VISITS, visitsCache)
+}
+
 function jumpOpen($: EngineInterface): void {
   zjump.on = true
+  jumpExists.clear()
   zjump.held = false
   zjump.query = ''
   zjump.sel = 0
@@ -2042,7 +2061,7 @@ async function considerWork($: EngineInterface): Promise<void> {
     const repo = pickRepo(workTouches, current, now, workLast)
     if (!repo || inside(repo, base)) return
     workLast = now
-    if (!jumpMovesClaude) {
+    if (!jumpMovesClaude || !(await canCd($))) {
       follow = false
       await reset($, repo)
       return
@@ -2050,10 +2069,10 @@ async function considerWork($: EngineInterface): Promise<void> {
     $.clock.after(0, async () => {
       try {
         await $.command.run({ command: 'cd', args: repo })
-        void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
+        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
         $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
       } catch (error) {
-        void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+        void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
       }
     })
   } finally {
@@ -2061,17 +2080,27 @@ async function considerWork($: EngineInterface): Promise<void> {
   }
 }
 
+async function canCd($: EngineInterface): Promise<boolean> {
+  return (await $.command.list().catch(() => [])).some(c => c.name === 'cd')
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
+  if (!(await $.fs.exists(dir).catch(() => false))) {
+    await forgetVisits($, [dir])
+    void $.ui.toast(`${shortPath(dir)} no longer exists`)
+    void jumpRefresh($)
+    return
+  }
   jumpClose($, true)
   workLast = await $.clock.now()
   follow = false
   await reset($, dir)
-  if (!jumpMovesClaude || (await cwdOf($)) === dir) return
+  if (!jumpMovesClaude || (await cwdOf($)) === dir || !(await canCd($))) return
   $.clock.after(0, async () => {
     try {
       await $.command.run({ command: 'cd', args: dir })
     } catch (error) {
-      void $.ui.toast(`filetree: could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
+      void $.ui.toast(`could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
     }
   })
 }
@@ -3524,8 +3553,9 @@ export const register: Register = (on, options) => {
       return <Empty />
     }
     if (zjump.on) {
+      zjump.focused = Boolean(e.props.isFocused)
       if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($) : undefined))
+      else if (zjump.held) $.clock.after(JUMP_BLUR_MS, () => (zjump.on && zjump.held && !zjump.focused ? jumpClose($) : undefined))
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
@@ -3571,11 +3601,11 @@ export const register: Register = (on, options) => {
       return (
         <Box key={`${key}-diff`} flexDirection="column">
           {rows.map((r, j) => r.kind === '@' ? (
-            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" height={ROW_PX} paddingLeft={1} backgroundColor={DESK.hover}>
+            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" paddingLeft={1} backgroundColor={DESK.hover}>
               <Text dimColor size="footnote" tabular wrap="truncate-end">{r.text}</Text>
             </Box>
           ) : (
-            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" height={ROW_PX} backgroundColor={tintOf(r.kind)}>
+            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" backgroundColor={tintOf(r.kind)}>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
               <Box width={2} flexShrink={0} flexDirection="row" justifyContent="center"><Text color={r.kind === '+' ? add : r.kind === '-' ? del : mutedInk} mono>{r.kind === ' ' ? '' : r.kind}</Text></Box>
@@ -4005,7 +4035,7 @@ export const register: Register = (on, options) => {
     const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
     const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
-    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
@@ -4060,8 +4090,9 @@ export const register: Register = (on, options) => {
     }
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
+    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
     const jumpSpecs: RowSpec[] = zjump.rows.length
-      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
+      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
@@ -4132,7 +4163,7 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
           {deskGrepNote ? (
-            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="grep-note" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>{deskGrepNote}</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
@@ -4144,16 +4175,18 @@ export const register: Register = (on, options) => {
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
-            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
+            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
               {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
-              <Text>{dir.split('/').filter(Boolean).pop() ?? dir}</Text>
-              <Box flexGrow={1} flexShrink={1} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
+              <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.split('/').filter(Boolean).pop() ?? dir}</Text></Box>
+              <Box flexGrow={1} flexShrink={3} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
+              {metricSpan ? <Box width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text {...mutedText}>{jumpWhen(dir)}</Text></Box> : null}
+              <Box width={2} flexShrink={0} />
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
               </Box>
             </Box>
           )) : (
-            <Box key="jump-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="jump-none" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>no matching folder</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:jump-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
