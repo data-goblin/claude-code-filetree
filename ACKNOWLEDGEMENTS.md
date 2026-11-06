@@ -37,6 +37,7 @@ pull request credits them even when the code that shipped was rewritten.
 
 - Dropping the classic and prompt.attachment hooks that Team and Enterprise sessions skip: [@Liquidmasl](https://github.com/Liquidmasl) ([#27](https://github.com/data-goblin/claude-code-filetree/issues/27))
 - The report that the Desktop pane drew nothing, which led to the 0.6.0 Desktop redesign: [@vitalized](https://github.com/vitalized) ([#41](https://github.com/data-goblin/claude-code-filetree/issues/41))
+- Pointing at the burst of per-row click clients, which led to one click target for the whole Desktop tree: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
 
 ## Bug reports
 

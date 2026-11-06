@@ -15,7 +15,7 @@ import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
 import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
-import type { HitProps } from './hit'
+import type { HitProps, HitsProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
@@ -86,6 +86,7 @@ const IMAGE_BYTES = 2_097_152
 const ROWS_BUDGET = 80_000
 const DESK_ROWS = 400
 const DESK_SHIMMER_MAX = 4
+const HIT_TABLES = 32
 const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
 const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
@@ -192,6 +193,10 @@ let searchIndex: { root: string; paths: Promise<Indexed> } | null = null
 let activityId = 0
 let pointer = true
 let hovered = ''
+let deskHovered = ''
+let hitSeq = 0
+const hitTables = new Map<number, string[]>()
+const hitLast = new Map<string, number>()
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
@@ -1080,9 +1085,27 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
   return { key: has(data, 'key') ? data.key : undefined, over: has(data, 'over') ? data.over : undefined, scrollTo: has(data, 'scrollTo') ? data.scrollTo : undefined }
 }
 
-function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
+function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown; at: unknown; gen: unknown; hover: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
-  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
+  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy'), at: at('at'), gen: at('gen'), hover: at('hover') }
+}
+
+function hitTable(list: string, ids: string[]): number {
+  const gen = hitLast.get(list)
+  const prev = gen === undefined ? undefined : hitTables.get(gen)
+  if (gen !== undefined && prev && prev.length === ids.length && prev.every((id, i) => id === ids[i])) return gen
+  const next = ++hitSeq
+  hitTables.set(next, ids)
+  hitLast.set(list, next)
+  for (const old of hitTables.keys()) {
+    if (hitTables.size <= HIT_TABLES) break
+    hitTables.delete(old)
+  }
+  return next
+}
+
+function hitId(gen: unknown, at: unknown): string {
+  return typeof gen === 'number' && typeof at === 'number' ? (hitTables.get(gen)?.[at] ?? '') : ''
 }
 
 async function startGit($: EngineInterface, actions: GitAction[]): Promise<number[]> {
@@ -3327,7 +3350,18 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap' && !e.element.startsWith('hit:')) || !e.data || typeof e.data !== 'object') return next(e)
-    const data = rowsMessage(e.data)
+    const raw = rowsMessage(e.data)
+    if (typeof raw.hover === 'number') {
+      const id = hitId(raw.gen, raw.hover)
+      if (id !== deskHovered) {
+        deskHovered = id
+        void $.ui.invalidate('ui.render')
+      }
+      return {}
+    }
+    const target = typeof raw.at === 'number' ? hitId(raw.gen, raw.at) : null
+    if (target === '') return {}
+    const data = target === null ? raw : { ...raw, press: raw.press === true ? target : undefined, copy: raw.copy === true ? target : undefined }
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
@@ -4039,7 +4073,7 @@ export const register: Register = (on, options) => {
         ? <Text color={tone?.solid ?? accentText} bold={p.isBright || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
-        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : n.id === deskHovered ? deskHover : undefined}>
           {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
@@ -4050,12 +4084,14 @@ export const register: Register = (on, options) => {
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
             {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
           </Box>
-          <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-            <Client key={`hit:${n.id}`} module="./hit.tsx" props={{ id: n.id } satisfies HitProps} width="100%" height="100%" />
-          </Box>
         </Box>
       )
     }
+    const hits = (list: string, ids: string[]) => (
+      <Box key={`hits:${list}`} position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Client key={`hit:${list}`} module="./hit.tsx" props={{ gen: hitTable(list, ids), rows: ids.length } satisfies HitsProps} width="100%" height="100%" />
+      </Box>
+    )
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const jumpSpecs: RowSpec[] = zjump.rows.length
@@ -4107,9 +4143,9 @@ export const register: Register = (on, options) => {
     const deskGrepNote = deskGrep.length < grep.rows.length ? `first ${deskGrep.length} of ${grep.rows.length} rows; keep typing to narrow` : grepNote
     const deskTree = () => {
       if (grepping) return (
-        <Box key="grep-list" flexDirection="column">
+        <Box key="grep-list" position="relative" flexDirection="column">
           {deskGrep.map((g, k) => (
-            <Box key={`grep-row:${grepId(g)}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : undefined} hover={{ backgroundColor: k === grep.sel ? deskSel : deskHover }}>
+            <Box key={`grep-row:${grepId(g)}`} flexDirection="row" alignItems="center" backgroundColor={k === grep.sel ? deskSel : grepId(g) === deskHovered ? deskHover : undefined}>
               {g.line ? <Box key={`grep-line:${grepId(g)}`} flexDirection="row" alignItems="center" flexGrow={1} flexShrink={1} overflow="hidden">
                 {Svg ? <Svg key={`grep-guide:${grepId(g)}`} source={rowSvg(1, null, null, mutedInk)} alt={`line ${g.line}`} width={STEP_PX * 3 + GAP_PX} height={ROW_PX} /> : null}
                 <Text dimColor tabular mono>{`${String(g.line).padStart(grepDigits)} `}</Text>
@@ -4120,44 +4156,39 @@ export const register: Register = (on, options) => {
                 <Text dimColor tabular>{g.text}</Text>
                 <Box width={2} flexShrink={0} />
               </Box>}
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client key={`hit:${grepId(g)}`} module="./hit.tsx" props={{ id: grepId(g) } satisfies HitProps} width="100%" height="100%" />
-              </Box>
             </Box>
           ))}
           {deskGrepNote ? (
-            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="grep-note" flexDirection="row" height={ROW_PX} alignItems="center">
               <Text {...mutedText}>{deskGrepNote}</Text>
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
-              </Box>
             </Box>
           ) : null}
+          {hits('grep', [...deskGrep.map(grepId), ...(deskGrepNote ? [''] : [])])}
         </Box>
       )
       if (zjump.on) return (
-        <Box key="jump-list" flexDirection="column">
+        <Box key="jump-list" position="relative" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
-            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
+            <Box key={`jump:${dir}`} flexDirection="row" alignItems="center" backgroundColor={k === zjump.sel ? deskSel : dir === deskHovered ? deskHover : undefined}>
               {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
               <Text>{dir.split('/').filter(Boolean).pop() ?? dir}</Text>
               <Box flexGrow={1} flexShrink={1} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
-              </Box>
             </Box>
           )) : (
-            <Box key="jump-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="jump-none" flexDirection="row" height={ROW_PX} alignItems="center">
               <Text {...mutedText}>no matching folder</Text>
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client key="hit:jump-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
-              </Box>
             </Box>
           )}
+          {hits('jump', zjump.rows.length ? zjump.rows : [''])}
         </Box>
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
-      for (const p of deskParts) out.push(deskRow(p))
+      if (deskParts.length) out.push(
+        <Box key="tree-rows" position="relative" flexDirection="column">
+          {deskParts.map(deskRow)}
+          {hits('tree', deskParts.map(p => p.n.id))}
+        </Box>,
+      )
       if (deskFrom > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskFrom} rows above, collapse folders or use search`}</Text>)
       const below = shown.length - deskFrom - deskParts.length
       if (below > 0) out.push(<Text key="more" {...mutedText}>{`  … ${below} more rows, collapse folders or use search`}</Text>)
