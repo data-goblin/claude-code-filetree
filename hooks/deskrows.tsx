@@ -1,17 +1,23 @@
 import type { Look } from './look'
-import type { Layout } from './layout'
+import { type Layout, DESK_ROWS } from './layout'
 import type { Grid } from './cells'
 import type { Columns } from './columns'
-import type { Specs } from './specs'
+import { type Specs, ROWS_BUDGET } from './specs'
 import { nodeIcon, ink, DESK, barSvg, ROW_PX, rowSvg, STEP_PX, GAP_PX, iconSvg } from './svg'
 import { clean, weigh, shortPath } from './util'
 import type { RowsProps } from './rows'
 import type { HitProps } from './hit'
 import { zjump, grep, ui, settings } from './state'
-import { DESK_TREE_CHARS, DESK_TREE_NODES, DESK_ROWS, DESK_SHIMMER_MAX, DESK_ROW_CHARS, DESK_ROW_PAGE, ROWS_BUDGET, DESK_PAGE_CHARS } from './register'
 import { type GrepHit, grepId } from './grep'
 import { dirname } from './tree'
 import type { RenderElement } from 'claude-code'
+
+const DESK_PAGE_CHARS = 200_000
+const DESK_ROW_PAGE = 1_000
+const DESK_TREE_CHARS = 180_000
+const DESK_TREE_NODES = 1_400
+const DESK_SHIMMER_MAX = 4
+const DESK_ROW_CHARS = 40
 
 export function deskRowsOf(c: Look & Layout & Grid & Columns & Specs) {
   const { e, t, Box, Text, Client, Svg, desk, theme, tones, rowColors, accentInk, accentText, mutedInk, deskCur, deskCursor, deskHover, tint, at, from, grepping, drawn, deskFrom, rowParts, tailCols, grepNote } = c

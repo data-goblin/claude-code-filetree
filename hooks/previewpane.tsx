@@ -1,6 +1,5 @@
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, RenderElement } from 'claude-code'
 import type { Look } from './look'
-import type { RenderElement } from 'claude-code'
 import { previewing, ui, settings, machine } from './state'
 import { loadPreview, previewLines, jumpDiff, scrollPreview, diffFile, editPreview, parkPreview, closePreview } from './preview'
 import { diffWindow, diffCounts, GROUP } from './diff'
@@ -11,7 +10,6 @@ import { type IconName, rowSvg, DESK, STEP_PX, ROW_PX, GAP_PX, nodeIcon } from '
 import { pressHeader } from './nav'
 import type { FileNode } from '../types'
 import { markdownSplit } from './refs'
-import { directPreview } from './register'
 import type { RowsProps } from './rows'
 
 export async function previewPane($: EngineInterface, v: Look): Promise<RenderElement> {
@@ -143,4 +141,21 @@ export async function previewPane($: EngineInterface, v: Look): Promise<RenderEl
       )}
     </Box>
   )
+}
+
+function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
+  const { Box, Text, Markdown, Code } = elements
+  if ('segments' in win) {
+    return (
+      <Box flexDirection="column">
+        {win.segments.map((g, i) => (
+          <Box key={`seg-${i}`} flexDirection="column">
+            {g.title ? <Text bold color={accent || undefined}>{g.title}</Text> : null}
+            {g.source ? <Code source={g.source} path={g.title || path} format="diff" wrap="truncate-end" /> : null}
+          </Box>
+        ))}
+      </Box>
+    )
+  }
+  return markdown ? <Markdown text={win.text} /> : <Code source={win.text} path={path} startLine={win.top + 1} wrap="truncate-end" />
 }

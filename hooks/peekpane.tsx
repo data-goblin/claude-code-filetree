@@ -1,4 +1,4 @@
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, RenderElement } from 'claude-code'
 import type { Look } from './look'
 import type { Layout } from './layout'
 import type { Columns } from './columns'
@@ -8,10 +8,10 @@ import { peekTarget, readPreview, previewLines } from './preview'
 import { inside, relative } from './tree'
 import { shortPath } from './util'
 import { pictureKind, picture, fitCells, pngOf } from './peek'
-import type { RenderElement } from 'claude-code'
 import { mapPane } from './mappane'
-import { IMAGE_BYTES } from './register'
 import type { RowsProps } from './rows'
+
+const IMAGE_BYTES = 2_097_152
 
 export async function peekPane($: EngineInterface, c: Look & Layout & Columns) {
   const { e, t, unicode, Box, Text, Button, Client, Image, theme, mutedText, rowColors, splitRows } = c

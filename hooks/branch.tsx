@@ -1,13 +1,12 @@
 import type { Look } from './look'
 import type { Layout } from './layout'
 import type { Toolbar } from './toolbar'
-import type { Grid } from './cells'
+import { type Grid, GIT_COLS } from './cells'
 import type { Columns } from './columns'
 import { settings } from './state'
 import { BRANCH_ROW } from './consts'
 import { rowSvg, STEP_PX, GAP_PX, ROW_PX, iconSvg } from './svg'
 import { BRANCH_ICON } from './git'
-import { GIT_COLS } from './register'
 
 export function branchRow(c: Look & Layout & Toolbar & Grid & Columns) {
   const { e, t, unicode, Box, Text, Svg, desk, theme, tones, mutedText, addColor, delColor, accentInk, mutedInk, bright, totals, rootCounts, tipText, tipProps, widths, branchCells, tailCols } = c

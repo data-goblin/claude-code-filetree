@@ -3,7 +3,6 @@ import { type PaneEvent, lookOf } from './look'
 import { settings, zjump, ui, machine, grep } from './state'
 import { PANE } from './consts'
 import { jumpBlurCancel, jumpClose } from './jump'
-import { JUMP_BLUR_MS } from './register'
 import { previewPane } from './previewpane'
 import { layoutOf } from './layout'
 import { toolbarOf, headerBar } from './toolbar'
@@ -17,6 +16,8 @@ import { branchRow, gitHint } from './branch'
 import { searchBar } from './searchbar'
 import type { RowsProps } from './rows'
 import { grepId, type GrepHit } from './grep'
+
+const JUMP_BLUR_MS = 400
 
 export async function renderPane($: EngineInterface, e: PaneEvent): Promise<RenderElement> {
   if (e.surface === 'terminal' && e.props.placement === 'inline') {

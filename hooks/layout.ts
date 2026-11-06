@@ -1,7 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 import type { Look } from './look'
 import { ui, settings, zjump, grep, previewing, metrics } from './state'
-import { HINT_MS, RUNNING_MAX_MS, DESK_ROWS } from './register'
 import { activities } from './store'
 import { ACTIVITY_TTL_MS } from './gitstate'
 import { rowsOf } from './order'
@@ -11,6 +10,10 @@ import { peekTarget } from './preview'
 import { BRANCH_ROW } from './consts'
 import { wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
 import { counted } from './loc'
+
+const RUNNING_MAX_MS = 600_000
+export const DESK_ROWS = 150
+const HINT_MS = 5_000
 
 export async function layoutOf($: EngineInterface, v: Look) {
   const { e, t, desk } = v

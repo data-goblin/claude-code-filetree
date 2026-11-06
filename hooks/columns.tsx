@@ -1,14 +1,13 @@
 import type { EngineInterface } from 'claude-code'
 import type { Look } from './look'
 import type { Layout } from './layout'
-import type { Grid } from './cells'
+import { type Grid, GIT_COLS, type Col, COLS } from './cells'
 import { relative, age, stamp } from './tree'
 import { DESK, lighten, rowSvg, STEP_PX, GAP_PX, ROW_PX, lineSvg } from './svg'
 import type { ButtonProps } from './button'
 import { scopeSearch, search } from './search'
 import { sortBy } from './order'
 import { settings, zjump } from './state'
-import { GIT_COLS, type Col, COLS } from './register'
 import type { Seg } from './rows'
 
 export function columnsOf($: EngineInterface, c: Look & Layout & Grid) {

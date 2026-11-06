@@ -1,5 +1,4 @@
-import type { RenderInputOf } from 'claude-code'
-import type { EngineInterface } from 'claude-code'
+import type { RenderInputOf, EngineInterface } from 'claude-code'
 import { settings, machine, guarding, ui } from './state'
 import { get } from './store'
 import type { Theme } from '../types'
@@ -10,13 +9,18 @@ import { GIT_COLOR } from './icons'
 import { ADD_COLOR, DEL_COLOR } from './palette'
 import { loadGuards, allGuards } from './guard'
 import { faint, toHex } from './util'
-import { LIGHT_SHIMMER, SHIMMER, WORDS, TOGGLES, DESK_ICON_COLS } from './register'
 import { rgbOf, over } from './pixmap'
 import type { ButtonProps } from './button'
 import { searchFlag } from './search'
 import { SPIN_MS } from './consts'
 
 export type PaneEvent = RenderInputOf<'Pane', 'terminal'> | RenderInputOf<'Pane', 'desktop'>
+
+const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
+const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
+export const DESK_ICON_COLS = 3
+const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
+export const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
 
 export async function lookOf($: EngineInterface, e: PaneEvent) {
   const unicode = settings.glyphSetting === 'plain' || settings.glyphSetting === 'text' || (settings.glyphSetting === 'auto' && (machine.noNerd || e.surface === 'desktop'))

@@ -1,11 +1,10 @@
 import { renderPane } from './pane'
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { Register, Timer } from 'claude-code'
 import { terminalTarget } from './open'
 import { bindKeys } from './keybind'
 import { CLEAN } from './peek'
 
-import type { FileTree } from '../types'
-import { gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
+import { gitActions, readOnly, readTargets, resolve } from './git'
 import { diffGroups } from './diff'
 import { jumpKey, jumpClose, jumpTo } from './jump'
 import { shellPaths, shellWrites, noteWork, considerWork } from './work'
@@ -39,33 +38,11 @@ import { pickTile, mapKey } from './scans'
 import { pressHeader, selectRoot, press, navigate } from './nav'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
-export const JUMP_BLUR_MS = 400
-export const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
-export const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
-export const RUNNING_MAX_MS = 600_000
-export const IMAGE_BYTES = 2_097_152
-export const ROWS_BUDGET = 80_000
-export const DESK_ROWS = 150
-export const DESK_PAGE_CHARS = 200_000
-export const DESK_ROW_PAGE = 1_000
-export const DESK_TREE_CHARS = 180_000
-export const DESK_TREE_NODES = 1_400
-export const DESK_SHIMMER_MAX = 4
-export const NAME_MIN = 10
-export const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
-export const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
-export type Col = (typeof COLS)[number]
-export const DESK_ICON_COLS = 3
-export const HINT_MS = 5_000
-export const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
-export const DESK_ROW_CHARS = 40
 const GIT_POLL_MS = 2000
 const AGE_TICK_MS = 60_000
 
 let gitPoll: Timer | null = null
 let ageTick: Timer | null = null
-export const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
-export type Column = FileTree['column']
 
 function headerMessage(data: unknown): { over: unknown; press: unknown } {
   return { over: has(data, 'over') ? data.over : undefined, press: has(data, 'press') ? data.press : undefined }
@@ -78,23 +55,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-export function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {
-  const { Box, Text, Markdown, Code } = elements
-  if ('segments' in win) {
-    return (
-      <Box flexDirection="column">
-        {win.segments.map((g, i) => (
-          <Box key={`seg-${i}`} flexDirection="column">
-            {g.title ? <Text bold color={accent || undefined}>{g.title}</Text> : null}
-            {g.source ? <Code source={g.source} path={g.title || path} format="diff" wrap="truncate-end" /> : null}
-          </Box>
-        ))}
-      </Box>
-    )
-  }
-  return markdown ? <Markdown text={win.text} /> : <Code source={win.text} path={path} startLine={win.top + 1} wrap="truncate-end" />
 }
 
 export const register: Register = (on, options) => {

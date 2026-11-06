@@ -10,7 +10,8 @@ import { dirname, inside, relative } from './tree'
 import type { FileNode } from '../types'
 import { GREP_LIMIT, grepId } from './grep'
 import { fileIcon } from './icons'
-import { ROWS_BUDGET } from './register'
+
+export const ROWS_BUDGET = 80_000
 
 export function specsOf(c: Look & Layout & Grid & Columns) {
   const { t, unicode, desk, theme, rows, grepping, room, from, max, pinned, shown, rowSpec, jumpWhen } = c

@@ -4,13 +4,17 @@ import type { Layout } from './layout'
 import type { Toolbar } from './toolbar'
 import type { FileNode } from '../types'
 import { settings, metrics, linking } from './state'
-import { type Col, COLS, NAME_MIN, GIT_COLS } from './register'
 import type { Seg, RowSpec } from './rows'
 import { formatLoc, counted } from './loc'
 import { humanSize, age, stamp, underAny, dirname, relative, matchSpans, highlight } from './tree'
 import { classifyLink } from './links'
 import { CHEVRON_OPEN, CHEVRON_CLOSED, GUARD, isMemory, BRAIN, fileIcon } from './icons'
 import { clean } from './util'
+
+const NAME_MIN = 10
+export const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
+export const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
+export type Col = (typeof COLS)[number]
 
 export function gridOf($: EngineInterface, c: Look & Layout & Toolbar) {
   const { t, unicode, desk, theme, rows, gitColors, addColor, delColor, warnColor, guarded, now, bright, dimmed, ignored, untracked, width, inSet, grepping, pinned, shown, drawn, totals } = c
