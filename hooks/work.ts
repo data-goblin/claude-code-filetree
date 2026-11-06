@@ -1,3 +1,12 @@
+import type { EngineInterface } from 'claude-code'
+import { dirname, posix, isAbsolute, inside } from './tree'
+import { git } from './gitstate'
+import { settings, machine, working, tree } from './state'
+import { canCd } from './jump'
+import { cwdOf, shortPath } from './util'
+import { get } from './store'
+import { reset, followCwd } from './root'
+
 export type Touch = { repo: string; write: boolean; at: number }
 
 export const WORK_WINDOW_MS = 180_000
@@ -5,6 +14,9 @@ export const WORK_COOLDOWN_MS = 120_000
 const LEAD = 1.5
 
 const WRITES = /(^|[;&|(\s])(sed\s+-i|tee|mv|cp|rm|mkdir|touch|truncate|install|patch|apply_patch)(\s|$)|[^&<>0-9]>{1,2}\s*[^&\s]|\bgit\s+(-C\s+\S+\s+)?(commit|add|apply|am|checkout|switch|restore|mv|rm|reset|merge|rebase|cherry-pick|stash|pull)\b|\.write(_text|_bytes)?\(|writeFile/
+
+let workDeciding = false
+const workRepos = new Map<string, Promise<string | null>>()
 
 export function shellWrites(command: string): boolean {
   return WRITES.test(command)
@@ -53,4 +65,62 @@ export function pickRepo(touches: Touch[], current: string, now: number, lastSwi
   if (!(s.writes >= 2 || (s.reads >= 4 && s.writes === 0))) return null
   const rival = Math.max(0, ...all.slice(1).map(([, r]) => r.score))
   return s.score > rival * LEAD ? repo : null
+}
+
+async function repoOf($: EngineInterface, path: string): Promise<string | null> {
+  const known = workRepos.get(path)
+  if (known) return known
+  const found = (async () => {
+    for (const dir of [path, dirname(path)]) {
+      try {
+        const run = await git($, dir, ['rev-parse', '--show-toplevel'], 3_000)
+        if (run.exitCode === 0 && run.stdout.trim()) return posix(run.stdout.trim())
+      } catch {}
+    }
+    return null
+  })()
+  workRepos.set(path, found)
+  if (workRepos.size > 2_000) workRepos.delete(workRepos.keys().next().value ?? path)
+  return found
+}
+
+export async function noteWork($: EngineInterface, paths: string[], write: boolean): Promise<void> {
+  if (!settings.followWork || paths.length === 0) return
+  const vault = machine.home ? [`${machine.home}/Git/agents`, `${machine.home}/Desktop/Git/agents`, `${machine.home}/git/agents`, `${machine.home}/vault`] : []
+  const kept = [...new Set(paths.map(posix))].filter(p => isAbsolute(p) && !workIgnored(p, machine.home, vault)).slice(0, 40)
+  const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', machine.home, vault)))
+  if (repos.size === 0) return
+  const now = await $.clock.now()
+  working.workTouches = [...working.workTouches.filter(t => now - t.at < 180_000), ...[...repos].map(repo => ({ repo, write, at: now }))].slice(-400)
+  if (!working.mainBusy) void considerWork($)
+}
+
+export async function considerWork($: EngineInterface): Promise<void> {
+  if (!settings.followWork || workDeciding) return
+  workDeciding = true
+  try {
+    const moves = settings.jumpMovesClaude && (await canCd($))
+    const base = moves ? await cwdOf($) : (await get($)).root
+    const current = (await repoOf($, base)) ?? base
+    const now = await $.clock.now()
+    const repo = pickRepo(working.workTouches, current, now, working.workLast)
+    if (!repo || inside(repo, base)) return
+    working.workLast = now
+    if (!moves) {
+      tree.follow = false
+      await reset($, repo)
+      return
+    }
+    $.clock.after(0, async () => {
+      try {
+        await $.command.run({ command: 'cd', args: repo })
+        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
+        $.clock.after(400, () => void (tree.follow ? followCwd($) : reset($, repo)))
+      } catch (error) {
+        void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    })
+  } finally {
+    workDeciding = false
+  }
 }

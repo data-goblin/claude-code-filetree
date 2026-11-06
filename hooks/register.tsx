@@ -8,8 +8,8 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
-import { canCd, jumpKey, jumpOpen, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
-import { pickRepo, shellPaths, shellWrites, workIgnored } from './work'
+import { jumpKey, jumpOpen, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
+import { shellPaths, shellWrites, noteWork, considerWork } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
@@ -31,7 +31,6 @@ import {
   humanSize,
   badPattern,
   inside,
-  isAbsolute,
   join,
   matchSpans,
   highlight,
@@ -89,8 +88,6 @@ const GUARDS = 'guards'
 let gitPoll: Timer | null = null
 let ageTick: Timer | null = null
 const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
-let workDeciding = false
-const workRepos = new Map<string, Promise<string | null>>()
 let deskKeysAt = 0
 export type Column = FileTree['column']
 
@@ -115,64 +112,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-async function repoOf($: EngineInterface, path: string): Promise<string | null> {
-  const known = workRepos.get(path)
-  if (known) return known
-  const found = (async () => {
-    for (const dir of [path, dirname(path)]) {
-      try {
-        const run = await git($, dir, ['rev-parse', '--show-toplevel'], 3_000)
-        if (run.exitCode === 0 && run.stdout.trim()) return posix(run.stdout.trim())
-      } catch {}
-    }
-    return null
-  })()
-  workRepos.set(path, found)
-  if (workRepos.size > 2_000) workRepos.delete(workRepos.keys().next().value ?? path)
-  return found
-}
-
-async function noteWork($: EngineInterface, paths: string[], write: boolean): Promise<void> {
-  if (!settings.followWork || paths.length === 0) return
-  const vault = machine.home ? [`${machine.home}/Git/agents`, `${machine.home}/Desktop/Git/agents`, `${machine.home}/git/agents`, `${machine.home}/vault`] : []
-  const kept = [...new Set(paths.map(posix))].filter(p => isAbsolute(p) && !workIgnored(p, machine.home, vault)).slice(0, 40)
-  const repos = new Set((await Promise.all(kept.map(p => repoOf($, p)))).filter((r): r is string => Boolean(r) && !workIgnored(r ?? '', machine.home, vault)))
-  if (repos.size === 0) return
-  const now = await $.clock.now()
-  working.workTouches = [...working.workTouches.filter(t => now - t.at < 180_000), ...[...repos].map(repo => ({ repo, write, at: now }))].slice(-400)
-  if (!working.mainBusy) void considerWork($)
-}
-
-async function considerWork($: EngineInterface): Promise<void> {
-  if (!settings.followWork || workDeciding) return
-  workDeciding = true
-  try {
-    const moves = settings.jumpMovesClaude && (await canCd($))
-    const base = moves ? await cwdOf($) : (await get($)).root
-    const current = (await repoOf($, base)) ?? base
-    const now = await $.clock.now()
-    const repo = pickRepo(working.workTouches, current, now, working.workLast)
-    if (!repo || inside(repo, base)) return
-    working.workLast = now
-    if (!moves) {
-      tree.follow = false
-      await reset($, repo)
-      return
-    }
-    $.clock.after(0, async () => {
-      try {
-        await $.command.run({ command: 'cd', args: repo })
-        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
-        $.clock.after(400, () => void (tree.follow ? followCwd($) : reset($, repo)))
-      } catch (error) {
-        void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
-      }
-    })
-  } finally {
-    workDeciding = false
-  }
 }
 
 const PREVIEW_CHARS = 90_000
