@@ -34,7 +34,7 @@
 * Show/nav all files in a directory (with support for Git status, nvim bindings)
 * Animations show where Claude is reading/working
 * Keyboard shortcuts:
-   * Nav directories with `z` (zoxide-like)
+   * Nav directories with `z` (zoxide-like) or `e` (type a path)
    * Search with `s` or `i` (in highlighted folder) or `q` (in file contents)
    * Diff files with `d` or all changed files in a folder
 * Terminal-first features: File previews, directory size treemap, and more
@@ -67,6 +67,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Search by name across unopened folders, by case or regular expression, scoped to one folder ([search](docs/search.md))
 - Search inside files with `git grep` or `grep -r`, and open a match at its line ([search](docs/search.md))
 - Jump to any folder zoxide style with `z` ([search](docs/search.md))
+- Go to any folder by path with `e` or the folder button, with Tab completion ([search](docs/search.md))
 - Git status per file and folder, line counts on changed files, and the branch with ahead and behind ([git](docs/git.md))
 - Git and GitHub commands Claude runs show as a status line ([git](docs/git.md))
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))

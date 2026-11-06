@@ -16,7 +16,8 @@ h / l:        collapse or go to parent / expand
 o, Enter:     open a file or toggle a folder
 s:            focus search
 i:            search in the folder under the cursor (Backspace on an empty query or × drops it)
-z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd, Esc cancels
+z:            jump to a folder, zoxide style: type fragments in order (the last one in the folder name), up/down to pick, Enter re-roots and moves Claude there with /cd where the app has /cd (the Desktop app does not), Esc cancels
+e:            go to a folder by path (or the folder button left of the search field): the field starts on the tree root, ~ is your home, a relative path starts at the tree root, Tab completes a folder name, up/down pick a subfolder, Enter re-roots and moves Claude there like z, Esc cancels
 c / r:        search: match case / regular expression (Aa / .* in the search row)
 q:            search: file contents instead of names (the contents toggle in the search row); j / k pick a match, Enter opens it
 a:            auto-collapse: close folders opened for Claude 10 seconds after its last touch; turning it on also closes the ones it opened while off

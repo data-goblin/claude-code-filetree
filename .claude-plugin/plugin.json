@@ -51,7 +51,7 @@
     "jump": {
       "type": "string",
       "title": "Jump moves Claude",
-      "description": "tree and Claude: picking a folder with z re-roots the tree and moves the session there with /cd, which asks first for a folder this session has not trusted. tree: z re-roots only the tree and Claude stays where it is.",
+      "description": "tree and Claude: picking a folder with z, or a path with e, re-roots the tree and moves the session there with /cd where the app has /cd (the Desktop app does not), which asks first for a folder this session has not trusted. tree: z and e re-root only the tree and Claude stays where it is.",
       "default": "tree and Claude",
       "options": [
         "tree and Claude",
