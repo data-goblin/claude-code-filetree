@@ -230,6 +230,7 @@ let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false, when: {} as Record<string, number> }
+let jumpBlur: Timer | null = null
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -1994,7 +1995,13 @@ async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
   await $.state.set(VISITS, visitsCache)
 }
 
+function jumpBlurCancel(): void {
+  jumpBlur?.cancel()
+  jumpBlur = null
+}
+
 function jumpOpen($: EngineInterface): void {
+  jumpBlurCancel()
   zjump.on = true
   jumpExists.clear()
   zjump.held = false
@@ -2013,6 +2020,7 @@ async function jumpInput($: EngineInterface, value: string): Promise<void> {
 }
 
 function jumpClose($: EngineInterface, refocus = false): void {
+  jumpBlurCancel()
   zjump.on = false
   zjump.query = ''
   zjump.rows = []
@@ -3553,8 +3561,13 @@ export const register: Register = (on, options) => {
     }
     if (zjump.on) {
       zjump.focused = Boolean(e.props.isFocused)
-      if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(JUMP_BLUR_MS, () => (zjump.on && zjump.held && !zjump.focused ? jumpClose($) : undefined))
+      if (e.props.isFocused) {
+        zjump.held = true
+        jumpBlurCancel()
+      } else if (zjump.held && !jumpBlur) jumpBlur = $.clock.after(JUMP_BLUR_MS, () => {
+        jumpBlur = null
+        if (zjump.on && zjump.held && !zjump.focused) jumpClose($)
+      })
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)

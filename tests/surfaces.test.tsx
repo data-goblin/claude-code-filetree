@@ -5633,3 +5633,40 @@ test('Follow work without /cd keeps the tree on the repo it moved to while the w
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
   await ui.unmount()
 })
+
+test('jump mode stays open through two short focus blips in a row, and a blip before Esc never closes the jump opened after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  const focus = async (isFocused: boolean, ms: number) => {
+    await ui.redraw({ ...paneProps(60), isFocused })
+    await clock.advance(ms)
+    await clock.settle()
+  }
+  const open = async () => JSON.stringify(await ui.drawn()).includes('"key":"jump"')
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 100)
+  await focus(false, 300)
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await focus(false, 300)
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(await open()).toBe(false)
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await ui.unmount()
+})
