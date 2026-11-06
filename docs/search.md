@@ -11,4 +11,4 @@ flowchart TB
 
 - The contents toggle in the search row (`q` from the tree, or a click on it) searches inside files instead of names, with `git grep` in a repo and `grep -r` outside one; matches are grouped per file with line numbers, the first 200 are shown (fewer in the Desktop app when lines are long), and Enter or a click opens the file in the split preview at that line (the full preview in the Desktop app)
 - `s` focuses search, `i` searches in the folder under the cursor, `c` and `r` match case and regular expressions
-- `z` jumps to a folder, zoxide style: type fragments in order, pick with up and down, and Enter re-roots the tree and moves Claude there with `/cd`
+- `z` jumps to a folder, zoxide style: type fragments in order, pick with up and down, and Enter re-roots the tree and moves Claude there with `/cd` where the app has `/cd` (the Desktop app does not); folders that no longer exist drop out of the list
