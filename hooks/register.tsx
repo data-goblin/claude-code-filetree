@@ -4647,7 +4647,7 @@ export const register: Register = (on, options) => {
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
             <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
             {zjump.on ? (
-              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentText}>jump</Text></Box>
+              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={palette.jump ? `${palette.jump}0f` : DESK.jumpOn}><Text color={palette.jump ?? DESK.jump}>jump</Text></Box>
             ) : scopeChip()}
             <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
               {zjump.on ? <>
@@ -4672,7 +4672,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : scopeChip()}
+            {zjump.on ? <Text key="jump-chip" color={palette.jump ?? JUMP_COLOR} bold>{'jump '}</Text> : scopeChip()}
             <Box flexGrow={1}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>

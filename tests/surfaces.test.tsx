@@ -5824,7 +5824,7 @@ test('terminal: jump mode heads the date column Last accessed and dates each rem
 
 for (const [label, options, terminalInk, deskInk] of [['default', {}, 'ansi256(5)', '#9a64f7'], ['palette jump=#ff00aa', { palette: 'jump=#ff00aa' }, '#ff00aa', '#ff00aa']] as const) {
   for (const surface of ['terminal', 'desktop'] as const) {
-    test(`${surface}: jump mode draws its folder glyphs in the jump color (${label}), apart from the blue tree folders`, { timeoutMs: 20_000, options: { glyphs: 'plain', ...options } }, async ($, on) => {
+    test(`${surface}: jump mode draws its folder glyphs and its chip in the jump color (${label}), apart from the blue tree folders`, { timeoutMs: 20_000, options: { glyphs: 'plain', ...options } }, async ($, on) => {
       const root = '/home/k/proj'
       on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at: 1_799_990_000_000 } }, version: 1 } } : next(e)))
       const clock = world(on, {
@@ -5850,6 +5850,8 @@ for (const [label, options, terminalInk, deskInk] of [['default', {}, 'ansi256(5
       await clock.advance(100)
       await clock.settle()
       expect(await folderInk('/home/k/kept', '/home/k/kept')).toBe(surface === 'desktop' ? deskInk : terminalInk)
+      const chipInk = (surface === 'desktop' ? deskInk : terminalInk).replace(/[()]/g, '\\$&')
+      expect(JSON.stringify(await ui.drawn())).toMatch(new RegExp(`"color":"${chipInk}"[^{}]*\\},"children":\\["jump ?"\\]`))
       await ui.unmount()
     })
   }

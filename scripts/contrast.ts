@@ -142,5 +142,12 @@ for (const [name, bg] of Object.entries(LIGHT_BACKGROUNDS)) {
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} terminal ${tui} ${term.toFixed(2)}:1`)
 }
+console.log('\njump chip text on its tint inside the search field')
+for (const [name, base] of Object.entries({ ...DARK_BACKGROUNDS, ...LIGHT_BACKGROUNDS })) {
+  const ratio = contrast(DESK.jump, over(DESK.jumpOn, over(DESK.field, base)))
+  const ok = ratio >= TEXT
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} ${DESK.jump} ${ratio.toFixed(2)}:1 (needs ${TEXT}:1)`)
+}
 console.log(failed ? `\n${failed} color${failed === 1 ? '' : 's'} below the contrast gate` : '\nevery color passes')
 process.exit(failed ? 1 : 0)
