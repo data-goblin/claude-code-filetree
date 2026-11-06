@@ -1,3 +1,8 @@
+import type { EngineInterface } from 'claude-code'
+import { osName, messageOf, stopStream } from './util'
+import { pics } from './state'
+import { isAbsolute, dirname } from './tree'
+
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico', 'jxl', 'qoi', 'tga'])
 const VIDEO = new Set(['mp4', 'm4v', 'mkv', 'webm', 'mov', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ogv'])
 
@@ -140,4 +145,138 @@ function fnv(text: string, seed: number): string {
 export function cacheName(path: string, mtime: number, size: number, page = 0, px = 0, ext = 'png'): string {
   const text = page ? `${path}\0${mtime}\0${size}\0${page}\0${px}` : `${path}\0${mtime}\0${size}`
   return `${fnv(text, 0x811c9dc5)}${fnv(text, 0x050c5d1f)}${fnv([...text].reverse().join(''), 0x2166136f)}${fnv(text, 0x9e3779b9)}.${ext}`
+}
+
+let converting = false
+let nextJob: PictureJob | null = null
+let current: { job: PictureJob; stop: () => void } | null = null
+type PictureJob = { path: string; key: string; kind: 'png' | 'image' | 'video' | 'pdf' | 'office'; sig: string; mtime: number; size: number; page: number; px: number; pdf: string }
+export type Picture = { state: 'pending' } | { state: 'ready'; file: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
+
+async function pngHeader($: EngineInterface, file: string): Promise<{ width: number; height: number } | null> {
+  const run = await $.process.run(['od', '-An', '-tu1', '-N24', '--', file], { timeoutMs: 5_000 })
+  return run.exitCode === 0 ? pngSize(Uint8Array.from(run.stdout.trim().split(/\s+/).map(Number))) : null
+}
+
+async function makePicture($: EngineInterface, job: PictureJob): Promise<Picture> {
+  try {
+    if ((await osName($)) === 'win32') return { state: 'failed', note: 'image preview needs Linux or macOS' }
+    let file = job.path
+    let size = job.kind === 'png' && job.size <= PNG_DIRECT_BYTES ? await pngHeader($, job.path) : null
+    if (size && (size.width > PNG_DIRECT_PIXELS || size.height > PNG_DIRECT_PIXELS)) size = null
+    let pages = 0
+    if (!size) {
+      const doc = job.kind === 'pdf' || job.kind === 'office'
+      const argv = ['sh', '-c', POSTER, 'sh', job.path, pics.pictureBase, pics.pictureSession, job.sig, doc ? job.kind : job.kind === 'video' ? 'video' : 'image', coderFor(job.path), String(CACHE_KEEP), POLICY, ...(doc ? [String(job.page), String(job.px), job.pdf] : [])]
+      const made = doc ? await spawnRun($, job, argv) : await $.process.run(argv, { timeoutMs: 30_000 })
+      if (!made) return { state: 'failed', note: 'cancelled' }
+      const why = made.stderr.trim().split('\n').filter(Boolean)[0] ?? ''
+      if (made.exitCode === EXIT_MISSING) return { state: 'failed', note: why || 'no decoder on PATH', missing: true }
+      if (made.exitCode === EXIT_LOCKED) return { state: 'failed', note: 'encrypted' }
+      if (made.exitCode === EXIT_FAILED) return { state: 'failed', note: `could not decode${why ? `: ${why}` : ''}` }
+      const [out = '', count = ''] = made.stdout.trim().split('\n')
+      if (made.exitCode !== 0 || !isAbsolute(out)) return { state: 'failed', note: why || `could not decode, exit ${made.exitCode}` }
+      file = out
+      pages = Number(count) || 0
+      pics.sessionDir = dirname(file)
+      size = await pngHeader($, file)
+    }
+    return size ? { state: 'ready', file, generation: Math.floor(job.mtime) + job.page * 7 + job.px, ...size, ...(pages ? { pages } : {}) } : { state: 'failed', note: 'could not read the picture size' }
+  } catch (err) {
+    return { state: 'failed', note: messageOf(err).split('\n')[0] ?? 'could not decode' }
+  }
+}
+
+function forget($: EngineInterface, path: string): void {
+  const old = pics.pictures.get(path)
+  pics.pictures.delete(path)
+  if (old?.picture.state === 'ready' && old.picture.file !== path) void $.process.run(['rm', '-f', '--', old.picture.file], { timeoutMs: 5_000 }).catch(() => undefined)
+}
+
+let shownPng: { file: string; generation: number; png: string } | null = null
+
+export async function pngOf($: EngineInterface, pic: { file: string; generation: number }): Promise<string> {
+  if (shownPng?.file === pic.file && shownPng.generation === pic.generation) return shownPng.png
+  shownPng = null
+  const { base64 } = await $.fs.read(pic.file, { as: 'bytes' }).catch(() => ({ base64: '' }))
+  if (base64) shownPng = { file: pic.file, generation: pic.generation, png: base64 }
+  return base64
+}
+
+async function spawnRun($: EngineInterface, job: PictureJob, argv: string[]): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
+  const stream = $.process.spawn({ argv })
+  let stopped = false
+  current = { job, stop: () => { stopped = true; stopStream(stream) } }
+  let stdout = ''
+  let stderr = ''
+  let exitCode = 1
+  try {
+    for (;;) {
+      const step = await stream.next()
+      if (step.done) {
+        exitCode = step.value?.code ?? 1
+        break
+      }
+      if (step.value.stream === 'stdout') stdout += step.value.text
+      else stderr += step.value.text
+    }
+  } catch {
+    if (!stopped) throw new Error('could not start sh')
+  } finally {
+    current = null
+  }
+  return stopped ? null : { exitCode, stdout, stderr }
+}
+
+async function convert($: EngineInterface, job: PictureJob): Promise<void> {
+  if (converting) {
+    if (nextJob && pics.pictures.get(nextJob.key)?.sig === nextJob.sig) pics.pictures.delete(nextJob.key)
+    if (current && current.job.path !== job.path && (current.job.kind === 'pdf' || current.job.kind === 'office')) current.stop()
+    nextJob = job
+    return
+  }
+  converting = true
+  let cur: PictureJob | null = job
+  while (cur) {
+    const made = await makePicture($, cur)
+    const entry = pics.pictures.get(cur.key)
+    if (entry?.sig === cur.sig && made.state === 'failed' && made.note === 'cancelled') pics.pictures.delete(cur.key)
+    else if (entry?.sig === cur.sig) entry.picture = made
+    else if (made.state === 'ready' && made.file !== cur.path) void $.process.run(['rm', '-f', '--', made.file], { timeoutMs: 5_000 }).catch(() => undefined)
+    void $.ui.invalidate('ui.render')
+    cur = nextJob
+    nextJob = null
+  }
+  converting = false
+}
+
+export async function picture($: EngineInterface, path: string, page = 0, px = 0): Promise<Picture | null> {
+  const kind = pictureKind(path)
+  if (!kind) return null
+  const stat = await $.fs.stat(path).catch(() => null)
+  if (!stat) return { state: 'failed', note: 'could not read' }
+  if (stat.kind !== 'file') return { state: 'failed', note: 'not a regular file' }
+  const doc = kind === 'pdf' || kind === 'office'
+  const at = doc ? Math.max(1, page) : 0
+  const wide = doc ? Math.max(200, Math.min(1600, Math.round(px / 100) * 100)) : 0
+  const key = doc ? `${path}\0${at}` : path
+  const sig = cacheName(path, stat.mtimeMs, stat.size, at, wide)
+  const pdf = kind === 'office' ? cacheName(path, stat.mtimeMs, stat.size, 0, 0, 'pdf') : ''
+  const known = pics.pictures.get(key)
+  const gone = known?.sig === sig && known.picture.state === 'ready' && known.picture.file !== path && !(await $.fs.stat(known.picture.file).then(f => f.kind === 'file', () => false))
+  if (gone && known.retried) known.picture = { state: 'failed', note: 'the preview cache was cleared' }
+  if (gone && !known.retried) pics.pictures.delete(key)
+  else if (known?.sig === sig) {
+    pics.pictures.delete(key)
+    pics.pictures.set(key, known)
+    return known.picture
+  }
+  if (known && pics.pictures.has(key)) forget($, key)
+  pics.pictures.set(key, { sig, picture: { state: 'pending' }, retried: gone })
+  for (const old of pics.pictures.keys()) {
+    if (pics.pictures.size <= CACHE_KEEP) break
+    forget($, old)
+  }
+  void convert($, { path, key, kind, sig, mtime: stat.mtimeMs, size: stat.size, page: at, px: wide, pdf })
+  return { state: 'pending' }
 }
