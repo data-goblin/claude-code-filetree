@@ -1,4 +1,4 @@
-import { type EngineInterface, type Register, type RenderElement, type RenderSurface, type Timer, update } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
 import { herdrError, herdrOpenCommand, herdrPane, herdrSplit, isBinaryPath, LINUX_LAUNCH, openCommand, openWithCommand, terminalTarget, tmuxCommand, tmuxOpenCommand, words } from './open'
 import type { ButtonProps } from './button'
 import { bindKeys } from './keybind'
@@ -61,9 +61,9 @@ import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
 import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, stopStream, cwdOf, has, messageOf, focusPane, unlessAborted, strings, faint, toHex, clean, weigh } from './util'
+import { get, patch, put, setActivities, saveShimmer, activities, readConfig, SHIMMER_KEY } from './store'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
-const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
@@ -121,7 +121,6 @@ const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
-const SHIMMER_KEY = /^filetree(@[^.]+)?\.shimmer$/
 
 let gitPoll: Timer | null = null
 let gitDirOf = { root: '', dir: '' }
@@ -168,52 +167,6 @@ const staleQueue = new Set<string>()
 let staleTimer: Timer | null = null
 type PictureJob = { path: string; key: string; kind: 'png' | 'image' | 'video' | 'pdf' | 'office'; sig: string; mtime: number; size: number; page: number; px: number; pdf: string }
 export type Picture = { state: 'pending' } | { state: 'ready'; file: string; generation: number; width: number; height: number; pages?: number } | { state: 'failed'; note: string; missing?: boolean }
-
-async function readConfig($: EngineInterface): Promise<void> {
-  const rows = await $.config.list()
-  const theme = rows.find(r => r.key === 'theme')
-  const light = typeof theme?.value === 'string' && theme.value.startsWith('light')
-  const shimmer = rows.find(r => SHIMMER_KEY.test(r.key))
-  const lit = shimmer ? shimmer.value !== 'off' : settings.shimmerOn
-  if (light === machine.lightTerminal && lit === settings.shimmerOn) return
-  machine.lightTerminal = light
-  settings.shimmerOn = lit
-  void $.ui.invalidate('ui.render')
-}
-
-async function saveShimmer($: EngineInterface, lit: boolean): Promise<string> {
-  const key = (await $.config.list().catch(() => [])).find(r => SHIMMER_KEY.test(r.key))?.key
-  if (!key) return ''
-  const result = await $.config.set({ key, value: lit ? 'on' : 'off' }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
-  return result.deny ?? ''
-}
-
-function get(_$: EngineInterface): Promise<FileTree> {
-  tree.cached ??= emptyTree('')
-  return Promise.resolve(tree.cached)
-}
-
-function put($: EngineInterface, fn: (t: FileTree) => FileTree): Promise<void> {
-  tree.cached = fn(tree.cached ?? emptyTree(''))
-  tree.snapshot ??= $.clock.after(1_000, () => {
-    tree.snapshot = null
-    if (tree.cached) void $.state.set(TREE, tree.cached)
-  })
-  $.ui.invalidate('ui.render')
-  return Promise.resolve()
-}
-
-function patch($: EngineInterface, fn: (t: FileTree) => Partial<FileTree>) {
-  return put($, t => ({ ...t, ...fn(t) }))
-}
-
-async function activities($: EngineInterface): Promise<Activity[]> {
-  return (await $.state.get(ACTIVITY)).value ?? []
-}
-
-async function setActivities($: EngineInterface, fn: (list: Activity[]) => Activity[]): Promise<void> {
-  await update($, ACTIVITY, cur => fn(cur ?? []).slice(-6))
-}
 
 async function list($: EngineInterface, dir: string): Promise<FileNode[] | null> {
   try {
