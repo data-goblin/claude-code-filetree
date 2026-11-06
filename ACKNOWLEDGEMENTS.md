@@ -49,3 +49,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Desktop tree rows flooded the page with messages: [@DavidHo7](https://github.com/DavidHo7) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
 - Desktop pane mixed light and dark rows in light mode: [@InTheory7](https://github.com/InTheory7) ([#53](https://github.com/data-goblin/claude-code-filetree/issues/53))
 - Desktop lit-row shimmer flooded the page with messages: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
+- Stray letters left in the terminal transcript beside the sidebar in WezTerm and Alacritty on WSL2: [@Vimerum](https://github.com/Vimerum) ([#67](https://github.com/data-goblin/claude-code-filetree/issues/67))

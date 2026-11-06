@@ -4935,6 +4935,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(surface === 'terminal' ? 'a reply drops the VS16 selector after a text-style emoji on the terminal, so the engine and a terminal that ignores it both draw it one cell wide' : 'a reply keeps its emoji as written on the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [] } }, [])
+    on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const text = '\u2753 Q1\n\u27A1\uFE0F Yes: v7, pinned \u26A0\uFE0F \u2764\uFE0F\u200D\uD83D\uDD25 \u2B50\uFE0F 1\uFE0F\u20E3'
+    const reply = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+    await clock.settle()
+    const drawn = JSON.stringify(await reply.drawn())
+    expect(drawn).toContain(JSON.stringify(surface === 'terminal' ? '\u2753 Q1\n\u27A1 Yes: v7, pinned \u26A0 \u2764\uFE0F\u200D\uD83D\uDD25 \u2B50\uFE0F 1\uFE0F\u20E3' : text).slice(1, -1))
+    await reply.unmount()
+  })
+}
+
 test('a reply reference pressed on the terminal while a full diff is open replaces it with the split preview at that line', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/home/k/proj'
   const clock = world(on, {
