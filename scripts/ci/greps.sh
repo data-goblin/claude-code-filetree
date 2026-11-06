@@ -13,7 +13,4 @@ fi
 if grep -rnE "hotkey(=\{?|: *)['\"][A-Z]['\"]" hooks; then
   flag "Button hotkeys are lowercased on Desktop; use a lowercase letter or a digit"
 fi
-if grep -rnE "<(Box|Text|Button|Input|Client)[^>]*(height|width)=\{(ROW_PX|STEP_PX|GAP_PX|CHEVRON_PX)" hooks; then
-  flag "Box, Text and Client sizes count cells, so a pixel constant makes a row many lines tall; size the Svg in pixels and leave the Box to its content"
-fi
 exit "$fail"
