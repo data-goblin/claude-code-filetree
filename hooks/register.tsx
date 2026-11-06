@@ -3856,7 +3856,7 @@ export const register: Register = (on, options) => {
     const toolRoom = e.props.bodyColumns - header.length - 4
     const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + (desk ? DESK_ICON_COLS : [...b.label].length), 0) + gap * Math.max(0, list.length - 1) + 1
     let toolButtons = buttons
-    for (const drop of ['shimmer', 'autocollapse', 'size', 'collapse', 'refresh']) {
+    for (const drop of ['autocollapse', 'size', 'collapse', 'shimmer', 'refresh']) {
       if (toolWidth(toolButtons, 1) <= toolRoom) break
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }

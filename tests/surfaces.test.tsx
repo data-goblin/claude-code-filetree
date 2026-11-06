@@ -3349,7 +3349,7 @@ test('desktop: a diff draws native rows with old and new line numbers, +/- marke
   await ui.unmount()
 })
 
-test('desktop: a narrow pane drops toolbar buttons in the same order as the terminal', { timeoutMs: 20_000 }, async ($, on) => {
+test('desktop: a narrow pane drops toolbar buttons in the same order as the terminal, and the Clawd shimmer button outlasts auto-collapse, size and fold', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/Users/k/proj'
   const clock = world(on, ICON_WORLD(root), [])
   await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
@@ -3360,6 +3360,12 @@ test('desktop: a narrow pane drops toolbar buttons in the same order as the term
   expect(shown).not.toContain('"key":"button-autocollapse"')
   expect(shown).toContain('"key":"button-up"')
   await ui.unmount()
+  const mid = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(37) })
+  await clock.settle()
+  const kept = JSON.stringify(await mid.drawn())
+  expect(kept).not.toContain('"key":"button-autocollapse"')
+  expect(kept).toContain('"key":"button-shimmer"')
+  await mid.unmount()
 })
 
 test('regex search on (a+)+$ finishes at once with no match, and an over-long pattern turns .* red', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
