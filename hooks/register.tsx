@@ -4045,17 +4045,20 @@ export const register: Register = (on, options) => {
         </Button>
       )
     }
-    const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
-    const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
+    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
+    const jumpDate = zjump.on ? zjump.rows.reduce((m, dir) => Math.max(m, [...jumpWhen(dir)].length), 0) : 0
+    const gitSpan = zjump.on ? 0 : GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
+    const metricSpan = zjump.on ? (jumpDate ? jumpDate + 1 : 0) : widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
     const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const headCell = (col: 'name' | 'git' | 'metric', label: string) => (!zjump.on ? sortCell(col, label) : desk ? <Text key={`head-${col}`} color={mutedInk}>{label}</Text> : <Text key={`head-${col}`} dimColor>{label}</Text>)
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
-        {sortCell('name', 'Name')}
+        {headCell('name', 'Name')}
         <Box flexGrow={1} />
-        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', gitLabel)}</Box> : null}
-        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('metric', metricLabel)}</Box> : null}
+        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('git', gitLabel)}</Box> : null}
+        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('metric', metricLabel)}</Box> : null}
         <Box width={2} flexShrink={0} />
       </Box>
     )
@@ -4103,7 +4106,6 @@ export const register: Register = (on, options) => {
     }
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
-    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
     const jumpSpecs: RowSpec[] = zjump.rows.length
       ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: palette.jump ?? JUMP_COLOR }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]

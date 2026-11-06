@@ -5707,3 +5707,31 @@ test('an older jump listing still forgetting a missing folder never overwrites t
   expect(JSON.stringify(saved)).not.toContain('moved-away')
   await ui.unmount()
 })
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: jump mode in an empty root dates each remembered folder under a plain Last accessed header that sorts nothing`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const root = '/home/k/empty'
+    const at = 1_799_990_000_000
+    on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [], '/home/k/kept': [['c.ts', 'file']] },
+      find: '',
+      exits: { zoxide: [127, 'zoxide: not found'] },
+    }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+    await clock.settle()
+    await ui.post({ key: 'z' }, { in: surface === 'desktop' ? 'hit:root' : 'rows' })
+    await clock.advance(100)
+    await clock.settle()
+    const drawn = JSON.stringify(await ui.drawn())
+    expect(drawn).toContain('/home/k/kept')
+    expect(drawn).toContain('Last accessed')
+    expect(drawn).toContain(stamp(at))
+    expect(drawn).not.toMatch(/ [▾▴]/)
+    expect(drawn).not.toMatch(/"key":"(button-)?sort-(name|git|metric)"/)
+    await ui.unmount()
+  })
+}
