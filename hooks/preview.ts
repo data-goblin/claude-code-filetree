@@ -7,9 +7,9 @@ import { pictureKind } from './peek'
 import { formatSize, dirname } from './tree'
 import { git } from './gitstate'
 import { get, patch } from './store'
-import { editorHost, openInHerdr, openFile } from './register'
 import { tmuxCommand, words, LINUX_LAUNCH } from './open'
 import type { FileTree } from '../types'
+import { editorHost, openInHerdr, openFile } from './editor'
 
 export type Preview = { path: string; text: string; note: string; diff?: DiffLine[]; page?: number; first?: number }
 const PREVIEW_CHARS = 90_000
