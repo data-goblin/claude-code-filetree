@@ -4,12 +4,12 @@ export type HitProps = { id: string; keys?: false }
 export type HitsProps = { gen: number; rows: number }
 type Props = HitProps | HitsProps
 type Act = Record<string, string | number | boolean>
-type Local = { ref: { self: string; props: Props; hover: number; hoverGen: number; seq: number; last?: Act; unpoint?: () => void; unkey?: () => void; untick?: () => void } }
+type Local = { ref: { self: string; props: Props; hover: number; hoverGen: number; last?: Act; unpoint?: () => void; unkey?: () => void; untick?: () => void } }
 
 let active: string | null = null
 let last = { key: '', at: 0 }
 let seq = 0
-const boot = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+const lists = `\u0000hits:${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
 const alive = new Map<string, number>()
 
 const isHits = (p: Props): p is HitsProps => 'gen' in p
@@ -18,7 +18,7 @@ const Hit: ClientModule<Props, Local> = (props, surface) => {
   const { Box } = surface.elements
   let state = surface.state
   if (state === undefined) {
-    const fresh = { ref: { self: isHits(props) ? `\u0000hits:${boot}:${++seq}` : props.id, props, hover: -1, hoverGen: 0, seq: 0 } }
+    const fresh = { ref: { self: isHits(props) ? lists : props.id, props, hover: -1, hoverGen: 0 } }
     state = fresh
     surface.setState(state)
   }
@@ -34,7 +34,7 @@ const Hit: ClientModule<Props, Local> = (props, surface) => {
   const act = (data: Act, at: number, gen: number) => {
     ref.hover = at
     ref.hoverGen = gen
-    ref.last = { ...data, at, gen, seq: ++ref.seq, self: ref.self }
+    ref.last = { ...data, at, gen, seq: ++seq, self: ref.self }
     surface.post({ ...ref.last, hover: at, hgen: gen })
   }
   ref.unpoint ??= surface.onPointer(e => {
@@ -80,7 +80,7 @@ const Hit: ClientModule<Props, Local> = (props, surface) => {
     alive.set(ref.self, now)
     const data = { key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }
     if (!isHits(ref.props)) return surface.post(data)
-    ref.last = { ...data, seq: ++ref.seq, self: ref.self }
+    ref.last = { ...data, seq: ++seq, self: ref.self }
     surface.post({ ...ref.last, hover: ref.hover, hgen: ref.hoverGen })
   })
   return <Box width="100%" height="100%" />
