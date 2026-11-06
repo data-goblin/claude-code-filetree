@@ -3811,7 +3811,7 @@ export const register: Register = (on, options) => {
     const lit = followClaude && t.flashOn ? rows.findIndex(r => isLit(r.node.id)) : -1
     const cap = Math.max(1, Math.floor(room / 3))
     let from = Math.max(0, Math.min(lit >= 0 && at - lit < room - 2 ? Math.max(0, lit - 1) : at - Math.floor(room / 2), rows.length - room))
-    let pinned = !nativeScroll && followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
+    let pinned = !nativeScroll && shimmerOn && followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
     if (pinned.length) {
       const rest = Math.max(3, room - pinned.length)
       from = Math.max(0, Math.min(at - Math.floor(rest / 2), rows.length - rest))
@@ -4300,7 +4300,7 @@ export const register: Register = (on, options) => {
         const cols = Math.max(8, e.props.bodyColumns - 1)
         const tiles = layout(scan.items, cols, peekRows)
         const total = scan.done ? scan.total : scan.items.reduce((a, u) => a + u.bytes, 0)
-        const lit = t.flashOn ? t.flash : []
+        const lit = shimmerOn && t.flashOn ? t.flash : []
         const pick = tiles.find(x => x.path === mapPick)
         const ground = theme.bg
         const shade = ground.startsWith('#') && theme.accent.startsWith('#')
