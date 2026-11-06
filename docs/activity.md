@@ -2,13 +2,17 @@
 
 ```mermaid
 flowchart TB
-  A[Claude reads or writes a file] --> B[The file shimmers]
+  A[Claude reads or writes a file] --> S{Clawd button on}
+  S -->|yes| B[The file shimmers]
+  S -->|no| P[The file draws as a plain row]
   B --> C[Collapsed folders open to show it]
+  P --> C
   C -->|auto-collapse on| D[Folders close 10 seconds after the last touch]
   E[File reference in a reply] --> F[Link that opens the preview]
 ```
 
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
+- The Clawd button in the header turns the shimmer off and on, in the terminal and the Desktop app. It is blue while the shimmer is on and grey while it is off, and new sessions keep the choice. With the shimmer off, the files Claude touches draw as plain rows, but folders still open to show them and Follow Claude still scrolls to them
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Auto-collapse (`a`, the toolbar button or the setting) closes folders opened for Claude 10 seconds after its last touch; turning it on also closes the ones it opened while off
 
