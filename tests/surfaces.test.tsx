@@ -5404,7 +5404,7 @@ test('desktop (#53): every background is translucent or a theme key and no text 
   await ui.unmount()
 })
 
-const LONG_ROOT = '/private/tmp/claude-501/-Users-klonk-Git-claude-code-filetree/01e33f56-c371-46c0-800b-8edda21cf448/scratchpad/flood'
+const LONG_ROOT = '/Users/k/work/clients/a-long-client-organisation-name/projects/data-platform-migration-2026/repositories/flood'
 
 function withinPage(tree: unknown) {
   const text = JSON.stringify(tree)
@@ -5468,6 +5468,97 @@ test('desktop (#63): a deep open tree under a long root stays under the page cap
   await $.tool.call({ tool: 'Read', file_path: `${dir}/leaf.ts` })
   await clock.settle()
   withinPage(await ui.drawn())
+  await ui.unmount()
+})
+
+const sqlFiles = (n: number) => Array.from({ length: n }, (_, i): [string, 'file'] => [`m${String(i + 1).padStart(3, '0')}.sql`, 'file'])
+
+async function openMigrations(ui: Awaited<ReturnType<typeof deskPane>>['ui'], clock: Awaited<ReturnType<typeof deskPane>>['clock'], root: string, folder = 'migrations') {
+  await ui.post({ press: `${root}/${folder}` }, { in: `hit:${root}/${folder}` })
+  await clock.settle()
+  await ui.post({ key: 'l' }, { in: `hit:${root}/${folder}` })
+  await clock.settle()
+}
+
+const drawnHits = (tree: unknown) => every(tree, n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('hit:')).map(n => keyOf(n).slice(4))
+
+test('desktop (#63): 300 modified files with line counts under a long root stay under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = sqlFiles(300)
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] }, {
+    top: root,
+    status: `## main\0${sql.map(([n]) => ` M migrations/${n}\0`).join('')}`,
+    numstat: sql.map(([n]) => `12\t3\tmigrations/${n}\0`).join(''),
+  })
+  await openMigrations(ui, clock, root)
+  const text = withinPage(await ui.drawn())
+  expect(text).toContain('m001.sql')
+  expect(text).toContain('more rows, collapse folders or use search')
+  await ui.unmount()
+})
+
+test('desktop (#63): an open ignored folder of 300 entries stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/app'
+  const mods = Array.from({ length: 300 }, (_, i): [string, 'dir'] => [`package-number-${String(i).padStart(3, '0')}`, 'dir'])
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['node_modules', 'dir'], ['src', 'dir']], [`${root}/node_modules`]: mods, [`${root}/src`]: [['a.ts', 'file']] }, { top: root, status: '## main\0!! node_modules/\0' })
+  await openMigrations(ui, clock, root, 'node_modules')
+  const tree = await ui.drawn()
+  const text = withinPage(tree)
+  expect(text).toContain('package-number-000')
+  expect(svgs(tree).filter(s => s.alt === 'ignored by git').length).toBeGreaterThan(10)
+  await ui.unmount()
+})
+
+for (const depth of [4, 12]) {
+  test(`desktop (#63): ${depth} levels of open folders with 30 files each stay under the page caps`, { timeoutMs: 30_000 }, async ($, on) => {
+    const root = '/Users/k/service'
+    const dirs: World['dirs'] = {}
+    let dir = root
+    for (let d = 0; d < depth; d++) {
+      const next = `${dir}/package-level-${d}`
+      dirs[dir] = [[next.split('/').pop() ?? '', 'dir'], ...Array.from({ length: 30 }, (_, i): [string, 'file'] => [`ServiceComponent${i}Factory.java`, 'file'])]
+      dir = next
+    }
+    dirs[dir] = Array.from({ length: 30 }, (_, i): [string, 'file'] => [`Leaf${i}.java`, 'file'])
+    const { clock, ui } = await deskPane($, on, root, dirs)
+    await $.tool.call({ tool: 'Read', file_path: `${dir}/Leaf0.java` })
+    await clock.settle()
+    const tree = await ui.drawn()
+    withinPage(tree)
+    expect(drawnHits(tree)).toContain(`${dir}/Leaf0.java`)
+    await ui.unmount()
+  })
+}
+
+test('desktop (#63): End, Home and a click deep in a long cut list keep the cursor row drawn', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = sqlFiles(300)
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] }, {
+    top: root,
+    status: `## main\0${sql.map(([n]) => ` M migrations/${n}\0`).join('')}`,
+    numstat: sql.map(([n]) => `12\t3\tmigrations/${n}\0`).join(''),
+  })
+  await openMigrations(ui, clock, root)
+  await ui.post({ key: 'end' }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  let tree = await ui.drawn()
+  withinPage(tree)
+  expect(drawnHits(tree)).toContain(`${root}/src`)
+  expect(drawnHits(tree)).toContain(`${root}/migrations/m300.sql`)
+  const deep = `${root}/migrations/m280.sql`
+  expect(drawnHits(tree)).toContain(deep)
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${deep}` })
+  await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${deep}` })
+  await clock.advance(1000)
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(drawnHits(tree)).toContain(deep)
+  expect(await selected($)).toContain(deep)
+  await ui.post({ key: 'home' }, { in: `hit:${deep}` })
+  await clock.settle()
+  tree = await ui.drawn()
+  withinPage(tree)
+  expect(drawnHits(tree)).toContain(`${root}/.git`)
   await ui.unmount()
 })
 

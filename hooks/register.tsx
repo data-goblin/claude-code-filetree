@@ -87,6 +87,8 @@ const ROWS_BUDGET = 80_000
 const DESK_ROWS = 150
 const DESK_PAGE_CHARS = 200_000
 const DESK_ROW_PAGE = 1_000
+const DESK_TREE_CHARS = 180_000
+const DESK_TREE_NODES = 1_400
 const DESK_SHIMMER_MAX = 4
 const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
@@ -327,6 +329,11 @@ async function readThemeSetting($: EngineInterface): Promise<void> {
   if (light === lightTerminal) return
   lightTerminal = light
   void $.ui.invalidate('ui.render')
+}
+
+function weigh(el: unknown): [number, number] {
+  const text = JSON.stringify(el) ?? ''
+  return [text.length, text.split('"type":').length - 1]
 }
 
 function get(_$: EngineInterface): Promise<FileTree> {
@@ -3809,8 +3816,8 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
-    const deskFrom = nativeScroll && shown.length > DESK_ROWS ? Math.max(0, Math.min(at - Math.floor(DESK_ROWS / 2), shown.length - DESK_ROWS)) : 0
-    const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS) : shown
+    const deskFrom = nativeScroll && shown.length > DESK_ROWS + 2 ? Math.max(0, Math.min(at - from - Math.floor(DESK_ROWS / 2) - 1, shown.length - DESK_ROWS - 2)) : 0
+    const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS + 2) : shown
     if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'files') wantCounts($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !fileCounts.has(r.node.id)).map(r => r.node.id))
@@ -4028,7 +4035,7 @@ export const register: Register = (on, options) => {
       )
     })
 
-    const deskRow = (p: ReturnType<typeof rowParts>) => {
+    const deskRow = (p: ReturnType<typeof rowParts>, deskShimmer: boolean) => {
       const r = p.r
       const n = p.n
       const icon = p.isGuard ? 'x' : nodeIcon(n, p.isRepo)
@@ -4075,7 +4082,7 @@ export const register: Register = (on, options) => {
         : { id: grepId(h), left: clean([{ t: `${unicode ? '∙' : fileIcon(grepNode(h.path), false, false)} `, c: theme.muted }, { t: grepName(h.path), c: theme.fg || undefined, b: true }]), right: [{ t: ` ${h.text} `, c: theme.muted }] }),
       ...(grepNote ? [note(grepNote)] : []),
     ]
-    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : [
+    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : desk ? [] : [
       ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
@@ -4087,15 +4094,37 @@ export const register: Register = (on, options) => {
       if (cut >= 0) specs.splice(cut, specs.length - cut, note(`  … ${specs.length - cut} more rows, collapse folders or use search`))
     }
     const deskParts: ReturnType<typeof rowParts>[] = []
-    if (desk) {
-      let size = 0
-      let page = 0
-      for (const r of drawn) {
-        size += r.node.name.length + 7 * r.node.id.length + 3 * DESK_ROW_CHARS
-        page += DESK_ROW_PAGE + 5 * r.node.id.length
-        if (size > ROWS_BUDGET || page > DESK_PAGE_CHARS) break
-        deskParts.push(rowParts(r))
+    let deskStart = deskFrom
+    if (desk && !grepping && !zjump.on && drawn.length) {
+      const parts = new Map<number, ReturnType<typeof rowParts>>()
+      const part = (k: number) => {
+        const known = parts.get(k)
+        if (known) return known
+        const made = rowParts(drawn[k] as (typeof drawn)[number])
+        parts.set(k, made)
+        return made
       }
+      let chars = 0
+      let nodes = 0
+      const fits = (k: number) => {
+        const [c, n] = weigh(deskRow(part(k), true))
+        if (chars + c > DESK_TREE_CHARS || nodes + n > DESK_TREE_NODES) return false
+        chars += c
+        nodes += n
+        return true
+      }
+      const focusAt = Math.min(drawn.length - 1, Math.max(0, at - from - deskFrom))
+      let lo = focusAt
+      let hi = focusAt - 1
+      let down = true
+      let up = true
+      while (hi - lo + 1 < DESK_ROWS && (down || up)) {
+        if (down) down = hi + 1 < drawn.length && fits(hi + 1) ? (hi++, true) : false
+        if (up && hi - lo + 1 < DESK_ROWS && hi >= lo) up = lo - 1 >= 0 && fits(lo - 1) ? (lo--, true) : false
+        if (hi < lo) break
+      }
+      for (let k = lo; k <= hi; k++) deskParts.push(part(k))
+      deskStart = deskFrom + lo
     }
     const deskShimmer = deskParts.filter(x => x.lit).length <= DESK_SHIMMER_MAX
     const deskGrep: GrepHit[] = []
@@ -4163,9 +4192,9 @@ export const register: Register = (on, options) => {
         </Box>
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
-      for (const p of deskParts) out.push(deskRow(p))
-      if (deskFrom > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskFrom} rows above, collapse folders or use search`}</Text>)
-      const below = shown.length - deskFrom - deskParts.length
+      for (const p of deskParts) out.push(deskRow(p, deskShimmer))
+      if (deskStart > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskStart} rows above, collapse folders or use search`}</Text>)
+      const below = shown.length - deskStart - deskParts.length
       if (below > 0) out.push(<Text key="more" {...mutedText}>{`  … ${below} more rows, collapse folders or use search`}</Text>)
       return <Box key="tree" flexDirection="column">{out}</Box>
     }
