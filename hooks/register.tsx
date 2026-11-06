@@ -3747,6 +3747,7 @@ export const register: Register = (on, options) => {
     const deskHover = palette.hover ?? DESK.hover
     const deskCur = e.props.isFocused ? deskSel : deskHover
     const deskCursor = palette.theme.accent ? `${accentInk}1f` : DESK.cursor
+    const jumpSel = palette.jump ? `${palette.jump}1f` : DESK.jumpSel
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
         <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
@@ -4300,7 +4301,7 @@ export const register: Register = (on, options) => {
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
-            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
+            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? jumpSel : undefined} hover={{ backgroundColor: k === zjump.sel ? jumpSel : deskHover }}>
               {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', palette.jump ?? DESK.jump)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
               <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.split('/').filter(Boolean).pop() ?? dir}</Text></Box>
               <Box flexGrow={1} flexShrink={3} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>

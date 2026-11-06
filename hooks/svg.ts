@@ -159,6 +159,7 @@ export const DESK = {
   accent: '#3b82f6',
   jump: '#9a64f7',
   jumpOn: '#9a64f70f',
+  jumpSel: '#9a64f71f',
   muted: '#85858c',
   guide: '#808080',
   urgent: '#e5484d',

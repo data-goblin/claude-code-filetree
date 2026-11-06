@@ -149,5 +149,12 @@ for (const [name, base] of Object.entries({ ...DARK_BACKGROUNDS, ...LIGHT_BACKGR
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} ${DESK.jump} ${ratio.toFixed(2)}:1 (needs ${TEXT}:1)`)
 }
+console.log('\njump folder icon on the selected jump row')
+for (const [name, base] of Object.entries({ ...DARK_BACKGROUNDS, ...LIGHT_BACKGROUNDS })) {
+  const ratio = contrast(DESK.jump, over(DESK.jumpSel, base))
+  const ok = ratio >= TEXT
+  if (!ok) failed++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(16)} ${DESK.jump} ${ratio.toFixed(2)}:1 (needs ${TEXT}:1)`)
+}
 console.log(failed ? `\n${failed} color${failed === 1 ? '' : 's'} below the contrast gate` : '\nevery color passes')
 process.exit(failed ? 1 : 0)
