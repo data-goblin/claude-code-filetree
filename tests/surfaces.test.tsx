@@ -4506,6 +4506,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`past 100 marks the toast points to the "100 marked" footer count without the plugin name or the V key, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const names = Array.from({ length: 101 }, (_, i) => `f${String(i).padStart(3, '0')}.txt`)
+    const ran: Ran = []
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: names.map(n => [n, 'file'] as const) } }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone } = await rangeMount($, surface)
+    await clock.settle()
+    await ui.post({ key: 'home' }, zone(`${root}/f000.txt`))
+    for (const name of names.slice(0, 99)) await ui.post({ key: 'j', shift: true }, zone(`${root}/${name}`))
+    await clock.settle()
+    expect(JSON.stringify(await ui.drawn())).toContain('100 marked')
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([])
+    await ui.post({ press: `${root}/f100.txt`, ctrl: true }, zone(`${root}/f100.txt`))
+    await ui.post({ key: 'j', shift: true }, zone(`${root}/f099.txt`))
+    await clock.settle()
+    const full = ['toast', 'at most 100 marks; press "100 marked" in the footer to clear them']
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([full, full])
+    expect(JSON.stringify(await ui.drawn())).toContain('100 marked')
+    await ui.unmount()
+  })
+
   test(`shift+click on a deleted file's ghost row ends a range instead of opening its diff, on the ${surface}`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, { ...RANGE_WORLD(root), status: '## main\0 D gone.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n' }, [])

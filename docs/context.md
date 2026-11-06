@@ -9,6 +9,7 @@ flowchart TB
 
 - With nothing marked, the selected row goes to Claude as context
 - With rows marked, up to 100 marked files and folders go to Claude as context instead of the selected row
+- The tree refuses a mark past 100, and a notice says to press the "100 marked" count in the footer to clear the marks
 - `@path` in a prompt reveals that file and moves the cursor to it; with nothing marked, the selection moves with it
 - The shaded rows are the rows that go to Claude: `y` / `Y` copy their paths, `u` their names, and the "N marked" count in the footer counts them
 

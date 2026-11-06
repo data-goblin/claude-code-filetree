@@ -77,6 +77,7 @@ const DOUBLE_MS = 450
 const FIND_LIMIT = 200
 const GREP_LIMIT = 200
 const MARK_LIMIT = 100
+const MARKS_FULL = `at most ${MARK_LIMIT} marks; press "${MARK_LIMIT} marked" in the footer to clear them`
 const GREP_MS = 15_000
 const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
@@ -1311,7 +1312,7 @@ function flip($: EngineInterface, t: FileTree, id: string, pin: boolean): boolea
   const { ids, marked } = picks(t)
   const on = ids.includes(id)
   if (!on && ids.length >= MARK_LIMIT) {
-    $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+    $.ui.toast(MARKS_FULL)
     return false
   }
   marks = on && pin && !marked ? [id] : on ? ids.filter(m => m !== id) : [...ids, id]
@@ -1326,7 +1327,7 @@ async function markRow($: EngineInterface, id: string): Promise<void> {
 function addMarks($: EngineInterface, ids: string[]): void {
   const fresh = ids.filter(id => id && !marks.includes(id))
   const room = Math.max(0, MARK_LIMIT - marks.length)
-  if (fresh.length > room) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  if (fresh.length > room) $.ui.toast(MARKS_FULL)
   marks = [...marks, ...fresh.slice(0, room)]
   void $.ui.invalidate('ui.render')
 }
