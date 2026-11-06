@@ -1,7 +1,7 @@
 import type { DiffGroups } from './diff'
 import type { Target } from './open'
 import { parsePalette, type Palette } from './palette'
-import type { Column, Scan } from './register'
+import type { Column } from './register'
 import type { Change, Clock, DateFormat } from './tree'
 import type { TermColors } from './term'
 import type { FileTree } from '../types'
@@ -14,6 +14,7 @@ import type { LinkState } from './links'
 import type { Indexed } from './search'
 import type { GrepHit } from './grep'
 import type { Preview } from './preview'
+import type { Scan } from './scans'
 
 type Settings = {
   glyphSetting: string
