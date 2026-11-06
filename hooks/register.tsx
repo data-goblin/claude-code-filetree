@@ -1,4 +1,4 @@
-import type { EngineInterface, Register, RenderElement, RenderSurface, Timer } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, Timer } from 'claude-code'
 import { terminalTarget } from './open'
 import type { ButtonProps } from './button'
 import { bindKeys } from './keybind'
@@ -40,7 +40,7 @@ import {
   clockSetting,
   underAny,
 } from './tree'
-import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
+import { shortcutGroups, shortcutRows, scrollShortcuts, toggleShortcuts } from './keys'
 import { settings, machine, tree, vcs, flashing, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
 import { PANE, BRANCH_ROW, OUTSIDE, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, cwdOf, has, focusPane, strings, faint, toHex, clean, weigh } from './util'
@@ -87,7 +87,6 @@ const GUARDS = 'guards'
 let gitPoll: Timer | null = null
 let ageTick: Timer | null = null
 const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
-let deskKeysAt = 0
 export type Column = FileTree['column']
 
 function headerMessage(data: unknown): { over: unknown; press: unknown } {
@@ -101,42 +100,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-function toggleShortcuts($: EngineInterface, open = !ui.shortcutsShown): void {
-  ui.shortcutsShown = open
-  ui.shortcutsTop = 0
-  deskKeysAt = 0
-  void $.ui.invalidate('ui.render')
-}
-
-function scrollShortcuts($: EngineInterface, by: number): void {
-  const top = Math.max(0, Math.min(ui.shortcutsMax, ui.shortcutsTop + by))
-  if (top === ui.shortcutsTop) return
-  ui.shortcutsTop = top
-  void $.ui.invalidate('ui.render')
-}
-
-export function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): boolean {
-  if (key === '?') {
-    toggleShortcuts($)
-    return true
-  }
-  if (!ui.shortcutsShown) return false
-  if (SCROLL_KEYS.has(key)) {
-    const page = Math.max(1, ui.shortcutsPage - 1)
-    const by: Record<string, number> = { up: -1, k: -1, down: 1, j: 1, pageup: -page, b: -page, pagedown: page, f: page, home: -Infinity, end: Infinity }
-    if (surface !== 'desktop') scrollShortcuts($, by[key] ?? 0)
-    else {
-      const titles = shortcutGroups(true).map(g => g.title)
-      const step = by[key] ?? 0
-      deskKeysAt = Math.max(0, Math.min(titles.length - 1, deskKeysAt + (Number.isFinite(step) ? Math.sign(step) * (Math.abs(step) > 1 ? 3 : 1) : step)))
-      void $.ui.scroll({ to: { key: `keys-${titles[deskKeysAt]}` }, in: PANE, block: 'start' }).catch(() => undefined)
-    }
-    return true
-  }
-  toggleShortcuts($, false)
-  return false
 }
 
 function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, win: { text: string; top: number } | { segments: { title: string; source: string }[]; top: number }, path: string, markdown: boolean, accent: string) {

@@ -9,7 +9,7 @@ import { diffFile, peekTarget, toggleSplit, turnPage, scrollSplit } from './prev
 import { reset } from './root'
 import { openFile, openTerminal, quickLook } from './editor'
 import { jumpKey, jumpOpen } from './jump'
-import { shortcutKey, showOutside, toggleGuard } from './register'
+import { showOutside, toggleGuard } from './register'
 import { grepOn, grepNav, grepAct } from './grep'
 import { claimMarks, autoCollapseOn, armCollapse } from './activity'
 import { picks, anchorAt, addMarks, clearMarks, markRow, copyPaths } from './select'
@@ -18,6 +18,7 @@ import { focusPane, osName, cwdOf } from './util'
 import { dirname, dropBelow } from './tree'
 import { staleSizes } from './sizes'
 import { detectRepo, refreshGit } from './gitstate'
+import { shortcutKey } from './keys'
 
 const EXPAND_MAX = 150
 
