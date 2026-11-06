@@ -24,7 +24,7 @@
 <summary><b>Claude Code in Desktop App</b></summary>
 
 <p align="center">
-  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
+  <img src="media/0.8.2/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the header buttons including the Clawd shimmer button, the branch row, search row and folders" width="600">
 </p>
 
 </details>
