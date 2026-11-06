@@ -78,7 +78,10 @@ const Hit: ClientModule<Props, Local> = (props, surface) => {
     last = { key, at: now }
     active = ref.self
     alive.set(ref.self, now)
-    surface.post({ key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })
+    const data = { key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }
+    if (!isHits(ref.props)) return surface.post(data)
+    ref.last = { ...data, seq: ++ref.seq, self: ref.self }
+    surface.post({ ...ref.last, hover: ref.hover, hgen: ref.hoverGen })
   })
   return <Box width="100%" height="100%" />
 }

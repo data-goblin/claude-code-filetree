@@ -1,7 +1,8 @@
 import { type Engine, expect, mock, test } from 'claude-code/testing'
-import type { CommandRunInput, On, RenderPropsOf, ToolCallInput, ToolCallResult, UiScrollInput } from 'claude-code'
+import type { ClientKeyEvent, ClientPointerEvent, CommandRunInput, On, RenderPropsOf, ToolCallInput, ToolCallResult, UiScrollInput } from 'claude-code'
 import type { RowSpec, RowsProps, Seg } from '../hooks/rows'
 import type { ZoneProps } from '../hooks/zone'
+import Hit from '../hooks/hit'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
@@ -5411,7 +5412,41 @@ test('desktop (#63): 400 drawn rows with 50 lit mount a handful of Clients, and 
   await clock.advance(200)
   await clock.settle()
   expect(await lit()).toEqual([order[210]])
+  await ui.key({ key: 'j', in: 'hit:tree' })
+  await ui.pointer({ type: 'move', x: 4, y: 215, in: 'hit:tree' })
+  await clock.settle()
+  expect(await lit()).toEqual([order[211], order[215]])
+  await ui.pointer({ type: 'leave', x: 4, y: 215, in: 'hit:tree' })
+  await clock.settle()
+  expect(await lit()).toEqual([order[211]])
   await ui.unmount()
+})
+
+test('desktop (#63): the last post of a frame still carries the newest click or key, so a hover in the same frame cannot drop it', () => {
+  const posts: unknown[] = []
+  let point: (e: ClientPointerEvent) => void = () => undefined
+  let press: (e: ClientKeyEvent) => void = () => undefined
+  let local: unknown
+  const surface = {
+    elements: { Box: () => null },
+    get state() { return local },
+    setState: (next: unknown) => { local = next },
+    columns: 40,
+    rows: 10,
+    every: () => () => undefined,
+    onPointer: (fn: typeof point) => { point = fn; return () => undefined },
+    onKey: (fn: typeof press) => { press = fn; return () => undefined },
+    post: (data: unknown) => { posts.push(data) },
+  } as unknown as Parameters<typeof Hit>[1]
+  Hit({ gen: 7, rows: 10 }, surface)
+  const frame = (steps: (() => void)[]) => {
+    posts.length = 0
+    for (const step of steps) step()
+    return posts.at(-1)
+  }
+  expect(frame([() => point({ type: 'down', x: 1, y: 2, button: 'left' }), () => point({ type: 'up', x: 1, y: 2, button: 'left' }), () => point({ type: 'move', x: 1, y: 5 })])).toMatchObject({ press: true, at: 2, gen: 7, seq: 1, hover: 5, hgen: 7 })
+  expect(frame([() => press({ key: 'j' }), () => point({ type: 'leave', x: 1, y: 5 })])).toMatchObject({ key: 'j', seq: 2, hover: -1 })
+  expect(frame([() => point({ type: 'down', x: 1, y: 3, button: 'right' }), () => point({ type: 'move', x: 1, y: 4 })])).toMatchObject({ copy: true, at: 3, seq: 3, hover: 4 })
 })
 
 test('desktop: a click on the root header leaves the keys with the tree rows', { timeoutMs: 30_000 }, async ($, on) => {
