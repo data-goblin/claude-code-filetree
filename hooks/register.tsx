@@ -8,7 +8,7 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { diffGroups, diffWindow, GROUP, diffCounts } from './diff'
-import { jumpKey, jumpOpen, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
+import { jumpKey, jumpClose, jumpTo, jumpBlurCancel, jumpInput } from './jump'
 import { shellPaths, shellWrites, noteWork, considerWork } from './work'
 import { counted, formatLoc } from './loc'
 import { draw, layout, layoutPixels, REST, type Tile } from './treemap'
@@ -34,7 +34,6 @@ import {
   highlight,
   posix,
   relative,
-  dropBelow,
   useDrives,
   stamp,
   dateFormat,
@@ -42,23 +41,23 @@ import {
   underAny,
 } from './tree'
 import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
-import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
-import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
+import { settings, machine, tree, vcs, flashing, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
+import { PANE, BRANCH_ROW, OUTSIDE, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, cwdOf, has, focusPane, strings, faint, toHex, clean, weigh } from './util'
-import { get, patch, setActivities, saveShimmer, activities, readConfig, SHIMMER_KEY } from './store'
-import { isIgnored, loadDirs, realOf, watchTree, sinceNow } from './listing'
-import { type Job, detectRepo, refreshGit, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground, ACTIVITY_TTL_MS } from './gitstate'
-import { staleSizes, wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
-import { claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal } from './activity'
+import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
+import { isIgnored, realOf, watchTree, sinceNow } from './listing'
+import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground, ACTIVITY_TTL_MS } from './gitstate'
+import { wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
+import { claimMarks, autoCollapseOn, scheduleScan, touched, reveal } from './activity'
 import { reset, followCwd, settleRoot } from './root'
-import { picks, copyPaths, markRow, anchorAt, addMarks, clearMarks, copyPath, pickOnly, markRange, pickRow } from './select'
+import { picks, clearMarks, copyPath, pickOnly, markRange, pickRow } from './select'
 import { classifyLink, linkNote } from './links'
 import { scopeSearch, searchFlag, search, jump } from './search'
-import { openHit, grepOn, grepNav, grepAct, grepId, grepKey, grepRun, GREP_LIMIT, type GrepHit } from './grep'
-import { isGhost, rowsOf, sortBy, ghostsOf } from './order'
+import { openHit, grepOn, grepId, grepKey, grepRun, GREP_LIMIT, type GrepHit } from './grep'
+import { rowsOf, sortBy, ghostsOf } from './order'
 import { diffFile, peekTarget, toggleSplit, turnPage, scrollSplit, loadPreview, parkPreview, closePreview, editPreview, jumpDiff, scrollPreview, previewLines, readPreview } from './preview'
 import { pickTile, mapKey, stopScans, usageOf, mapUp } from './scans'
-import { openFile, openTerminal, quickLook } from './editor'
+import { pressHeader, selectRoot, press, navigate } from './nav'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const JUMP_BLUR_MS = 400
@@ -81,7 +80,6 @@ const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
 const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 const DESK_ROW_CHARS = 40
-const EXPAND_MAX = 150
 const GIT_POLL_MS = 2000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
@@ -119,7 +117,7 @@ function scrollShortcuts($: EngineInterface, by: number): void {
   void $.ui.invalidate('ui.render')
 }
 
-function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): boolean {
+export function shortcutKey($: EngineInterface, key: string, surface?: RenderSurface): boolean {
   if (key === '?') {
     toggleShortcuts($)
     return true
@@ -156,206 +154,6 @@ function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, w
     )
   }
   return markdown ? <Markdown text={win.text} /> : <Code source={win.text} path={path} startLine={win.top + 1} wrap="truncate-end" />
-}
-
-async function toggle($: EngineInterface, n: FileNode): Promise<void> {
-  flashing.autoOpened.delete(n.id)
-  if (n.kind === 'dir' && !(await get($)).expanded.includes(n.id)) await loadDirs($, [n.id])
-  await patch($, t => {
-    const open = new Set(t.expanded)
-    if (n.kind === 'dir' && !open.delete(n.id)) open.add(n.id)
-    return { expanded: [...open], cursor: n.id, selected: n.id }
-  })
-  void watchTree($)
-}
-
-async function expandAll($: EngineInterface): Promise<void> {
-  const open: string[] = []
-  const t = await get($)
-  let level = t.nodes.filter(x => x.kind === 'dir' && x.parent === t.root && x.name !== '.git').map(x => x.id)
-  for (let depth = 0; depth < 3 && level.length && open.length < EXPAND_MAX; depth++) {
-    const take = level.slice(0, EXPAND_MAX - open.length)
-    const listed = await loadDirs($, take)
-    open.push(...take)
-    level = [...listed.values()].flat().filter(x => x.kind === 'dir' && x.name !== '.git').map(x => x.id)
-  }
-  for (const d of open) flashing.autoOpened.delete(d)
-  await patch($, t => ({ expanded: [...new Set([...t.expanded, ...open])] }))
-  void watchTree($)
-}
-
-async function press($: EngineInterface, n: FileNode): Promise<void> {
-  const now = await $.clock.now()
-  const isDouble = ui.lastPress.key === n.id && now - ui.lastPress.at < DOUBLE_MS
-  ui.lastPress = { key: isDouble ? '' : n.id, at: now }
-  if (!isDouble) {
-    await toggle($, n)
-    return
-  }
-  await openNode($, n)
-}
-
-async function openNode($: EngineInterface, n: FileNode): Promise<void> {
-  if (isGhost(await get($), n.id)) await diffFile($, n.id)
-  else if (n.kind === 'dir') {
-    tree.follow = false
-    await reset($, n.id)
-  } else await openFile($, n.id)
-}
-
-async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
-  if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
-  if (shortcutKey($, key, surface)) return
-  if (key === 'z') return jumpOpen($)
-  if (grepOn(await get($)) && ((await grepNav($, key, surface)) || (await grepAct($, key, shift, surface)))) return
-  await steer($, key, shift, surface)
-  if (flashing.autoOpened.size) claimMarks((await get($)).cursor)
-}
-
-async function steer($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
-  const t = await get($)
-  const rows = rowsOf(t)
-  const at = rows.findIndex(r => r.node.id === t.cursor)
-  const cur = rows[at]?.node
-  const picked = picks(t).ids
-  const onRoot = Boolean(t.root) && t.cursor === t.root
-  const move = (d: number) => {
-    const top = surface === 'desktop' && rows.length ? 0 : -1
-    const to = onRoot ? (d < 0 ? top : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? top : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
-    const id = to < 0 ? t.root : rows[to]?.node.id
-    if (!id) return Promise.resolve()
-    anchorAt(id)
-    return patch($, () => ({ cursor: id, selected: id, scroll: null }))
-  }
-  const page = Math.max(1, previewing.peekRows - 1)
-  const peek: Record<string, number> = { f: page, b: -page, pageup: -page, pagedown: page }
-  if (key === 'p' && surface !== 'desktop' && t.split && mapping.mapLock?.cursor === t.cursor && mapping.mapLock.pick === t.cursor && peekTarget(t)) {
-    mapping.mapLock = null
-    void $.ui.invalidate('ui.render')
-  } else if (key === 'p' && surface !== 'desktop') await toggleSplit($)
-  else if (t.split && previewing.splitShown && surface !== 'desktop' && (key === '[' || key === ']') && turnPage($, key === ']' ? 1 : -1)) return
-  else if (t.split && previewing.splitShown && surface !== 'desktop' && key in peek) scrollSplit($, previewing.peekTop + (peek[key] ?? 0))
-  else if ((shift && ['up', 'k', 'down', 'j'].includes(key)) || key === 'J' || key === 'K') {
-    if (cur) addMarks($, [cur.id])
-    await move(key === 'up' || key === 'k' || key === 'K' ? -1 : 1)
-    const next = (await get($)).cursor
-    if (next && next !== t.root) addMarks($, [next])
-    if (next) anchorAt(next)
-  } else if (key === 'up' || key === 'k') await move(-1)
-  else if (key === 'down' || key === 'j') await move(1)
-  else if (key === 'pageup') await move(-10)
-  else if (key === 'pagedown') await move(10)
-  else if (key === 'home') await move(-rows.length)
-  else if (key === 'end') await move(rows.length)
-  else if (key === 'i') {
-    const dir = cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root
-    await scopeSearch($, dir === t.root ? '' : dir)
-    $.clock.after(50, () => focusPane($, t.root, 'q'))
-  } else if (key === 's') $.clock.after(50, () => focusPane($, t.root, 'q'))
-  else if (key === 'backspace' && t.searchScope && !t.query) await scopeSearch($, '')
-  else if (key === 'a') await pressHeader($, 'autocollapse')
-  else if (key === 'n') await sortBy($, 'name')
-  else if (key === 'g') await sortBy($, 'git')
-  else if (key === 'm') await sortBy($, 'metric')
-  else if (key === 'c') await searchFlag($, 'searchCase')
-  else if (key === 'r') await searchFlag($, 'searchRegex')
-  else if (key === 'q') await searchFlag($, 'searchContent')
-  else if (key === 'w') await showOutside($)
-  else if (cur && key === 'x') await toggleGuard($, cur.id)
-  else if (cur && key === 'd') await diffFile($, cur.id)
-  else if (key === 'V' || (key === 'v' && shift)) clearMarks($)
-  else if (cur && key === 'v') await markRow($, cur.id)
-  else if (key === 't') await openTerminal($, cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root)
-  else if (picked.length && (key === 'y' || key === 'Y')) await copyPaths($, picked, key === 'Y' || shift ? 'absolute' : 'relative', surface)
-  else if (picked.length && key === 'u') await copyPaths($, picked, 'name', surface)
-  else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
-  else if (cur && (key === 'left' || key === 'h')) {
-    if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
-    else if (cur.parent !== t.root) {
-      anchorAt(cur.parent)
-      await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
-    }
-  } else if (cur && (key === 'return' || key === 'o')) await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
-  else if (cur && (key === ' ' || key === 'space') && isGhost(t, cur.id)) await diffFile($, cur.id)
-  else if (cur && (key === ' ' || key === 'space')) await (cur.kind !== 'dir' && (await osName($)) === 'darwin' ? quickLook($, cur.id) : toggle($, cur))
-}
-
-async function pressHeader($: EngineInterface, id: string): Promise<void> {
-  const t = await get($)
-  if (id === 'up') {
-    tree.follow = false
-    await reset($, dirname(t.root))
-  } else if (id === 'cwd') {
-    tree.follow = true
-    await reset($, await cwdOf($))
-  } else if (id === 'refresh') {
-    const spin = ++ui.reloading
-    const began = await $.clock.now()
-    void $.ui.invalidate('ui.render')
-    try {
-      tree.searchIndex = null
-      for (const scan of mapping.scans.values()) scan.stale = true
-      await staleSizes($)
-      await loadDirs($, [t.root, ...t.expanded])
-      await detectRepo($)
-      await refreshGit($)
-      if (t.query.trim()) await search($, t.query)
-    } finally {
-      const took = (await $.clock.now()) - began
-      const left = Math.max(1, Math.ceil(took / SPIN_MS)) * SPIN_MS - took
-      const settle = () => {
-        if (spin !== ui.reloading) return
-        ui.reloading = 0
-        ui.reloadSpin += 1
-        void $.ui.invalidate('ui.render')
-      }
-      if (left > 0) $.clock.after(left, settle)
-      else settle()
-    }
-  } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
-  else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
-  else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
-  else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
-  else if (id === 'unselect') {
-    marking.marks = []
-    marking.markBase = []
-    marking.markAnchor = ''
-    await patch($, () => ({ selected: '', cursor: '' }))
-  }
-  else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
-  else if (id === 'split') await toggleSplit($)
-  else if (id === 'shimmer') {
-    const lit = !settings.shimmerOn
-    settings.shimmerOn = lit
-    void $.ui.invalidate('ui.render')
-    const deny = await saveShimmer($, lit)
-    if (deny) {
-      settings.shimmerOn = !lit
-      void $.ui.invalidate('ui.render')
-      $.ui.toast(`Activity shimmer stays ${settings.shimmerOn ? 'on' : 'off'}: ${deny}`)
-    }
-  }
-  else if (id === 'outside') await showOutside($)
-  else if (id === 'autocollapse') {
-    await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
-    if (autoCollapseOn(await get($))) {
-      const open = new Set((await get($)).expanded)
-      for (const d of [...flashing.autoOpened.keys()]) if (!open.has(d)) flashing.autoOpened.delete(d)
-      armCollapse($)
-    } else {
-      flashing.collapseTimer?.cancel()
-      flashing.collapseTimer = null
-      flashing.collapseAt = 0
-    }
-  }
-  else if (previewing.previewActs.has(id) && id !== 'external') previewing.previewActs.get(id)?.()
-  else if (id === 'scope') await scopeSearch($, '')
-  else if (id === 'sort-name') await sortBy($, 'name')
-  else if (id === 'sort-git') await sortBy($, 'git')
-  else if (id === 'sort-metric') await sortBy($, 'metric')
-  else if (id === 'case') await searchFlag($, 'searchCase')
-  else if (id === 'regex') await searchFlag($, 'searchRegex')
-  else if (id === 'content') await searchFlag($, 'searchContent')
 }
 
 function loadGuards($: EngineInterface): Promise<void> {
@@ -403,16 +201,11 @@ async function noteOutside($: EngineInterface, file: string): Promise<void> {
   void $.ui.invalidate('ui.render')
 }
 
-async function showOutside($: EngineInterface): Promise<void> {
+export async function showOutside($: EngineInterface): Promise<void> {
   if (!guarding.outside.length) return
   await loadPreview($, OUTSIDE)
   await patch($, () => ({ preview: OUTSIDE, previewTop: 0 }))
   $.clock.after(100, () => parkPreview($))
-}
-
-async function selectRoot($: EngineInterface): Promise<void> {
-  mapping.mapLock = null
-  await patch($, cur => ({ cursor: cur.root, selected: cur.root, scroll: null }))
 }
 
 export const register: Register = (on, options) => {
