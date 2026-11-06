@@ -6,8 +6,8 @@ import { indexPaths } from './search'
 import { focusPane, shortPath, cwdOf } from './util'
 import { reset } from './root'
 
-export type Visit = { n: number; at: number }
-export type Candidate = { path: string; score: number }
+type Visit = { n: number; at: number }
+type Candidate = { path: string; score: number }
 
 const HOUR = 3_600_000
 
@@ -19,7 +19,7 @@ const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 
-export function parseZoxide(stdout: string): Candidate[] {
+function parseZoxide(stdout: string): Candidate[] {
   const out: Candidate[] = []
   for (const line of stdout.split('\n')) {
     const m = /^\s*([\d.]+)\s+(.+?)\s*$/.exec(line)
@@ -28,7 +28,7 @@ export function parseZoxide(stdout: string): Candidate[] {
   return out
 }
 
-export function frecency(v: Visit, now: number): number {
+function frecency(v: Visit, now: number): number {
   const age = now - v.at
   const weight = age < HOUR ? 4 : age < 24 * HOUR ? 2 : age < 7 * 24 * HOUR ? 0.5 : 0.25
   return v.n * weight
@@ -70,7 +70,7 @@ export function rankJump(candidates: Candidate[], query: string, limit = 50): st
     .map(r => r.path)
 }
 
-export function recentJump(visits: Record<string, Visit>): string[] {
+function recentJump(visits: Record<string, Visit>): string[] {
   return Object.entries(visits)
     .sort((a, b) => b[1].at - a[1].at)
     .map(([path]) => path)

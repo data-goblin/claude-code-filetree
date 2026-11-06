@@ -14,7 +14,7 @@ export const GUARD_TOOLS = ['Edit', 'Write', 'NotebookEdit'] as const
 
 const GUARDS = 'guards'
 
-export function parseGuards(v: unknown): Guards {
+function parseGuards(v: unknown): Guards {
   if (!v || typeof v !== 'object' || Array.isArray(v)) return {}
   const out: Guards = {}
   for (const [root, list] of Object.entries(v)) {
@@ -28,11 +28,11 @@ export function allGuards(guards: Guards): string[] {
   return [...new Set(Object.values(guards).flat())]
 }
 
-export function guardOver(guards: string[], path: string): string | undefined {
+function guardOver(guards: string[], path: string): string | undefined {
   return guards.find(g => inside(g, path))
 }
 
-export function toggled(own: string[], path: string): string[] {
+function toggled(own: string[], path: string): string[] {
   return own.includes(path) ? own.filter(g => g !== path) : [...own.filter(g => !inside(path, g)), path]
 }
 
@@ -60,7 +60,7 @@ export function guardIn(command: string, guards: string[], cwd: string, home: st
   return guards.find(g => spellings(g, cwd, home).some(s => mentions(text, s)))
 }
 
-export function outsideOf(base: string, path: string): boolean {
+function outsideOf(base: string, path: string): boolean {
   return Boolean(base) && !inside(base, path)
 }
 

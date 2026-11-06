@@ -1,23 +1,13 @@
-import { renderPane } from './pane'
-import { readOptions } from './options'
-import { onMessage } from './messages'
 import type { Register, Timer } from 'claude-code'
 import { bindKeys } from './keybind'
 import { CLEAN } from './peek'
-
 import { gitActions, readOnly, readTargets, resolve } from './git'
 import { jumpKey, jumpClose } from './jump'
 import { shellPaths, shellWrites, noteWork, considerWork } from './work'
 import { narrowEmoji, finePointerOk, cellPixels, ghosttyColors, fontState, NERD_PROBE } from './term'
 import { fileRefs, refHref, refsIn, openRef } from './refs'
 import { allGuards, GUARD_TOOLS, guardIn, loadGuards, noteOutside, guardFor } from './guard'
-import {
-  emptyTree,
-  inside,
-  posix,
-  relative,
-  useDrives,
-} from './tree'
+import { emptyTree, inside, posix, relative, useDrives } from './tree'
 import { scrollShortcuts } from './keys'
 import { settings, machine, tree, vcs, ui, previewing, pics, working, guarding, grep, zjump } from './state'
 import { PANE } from './consts'
@@ -30,6 +20,9 @@ import { reset, followCwd, settleRoot } from './root'
 import { picks } from './select'
 import { grepOn } from './grep'
 import { scrollSplit, scrollPreview } from './preview'
+import { readOptions } from './options'
+import { onMessage } from './messages'
+import { renderPane } from './pane'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const GIT_POLL_MS = 2000

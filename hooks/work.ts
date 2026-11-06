@@ -56,7 +56,7 @@ export function scores(touches: Touch[], now: number): Map<string, { score: numb
   return out
 }
 
-export function pickRepo(touches: Touch[], current: string, now: number, lastSwitch: number): string | null {
+function pickRepo(touches: Touch[], current: string, now: number, lastSwitch: number): string | null {
   if (now - lastSwitch < WORK_COOLDOWN_MS) return null
   const all = [...scores(touches, now)].sort((a, b) => b[1].score - a[1].score)
   const top = all[0]

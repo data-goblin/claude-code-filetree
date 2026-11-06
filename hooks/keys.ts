@@ -65,7 +65,7 @@ const GROUPS: readonly ShortcutGroup[] = [
   },
 ]
 
-export const SCROLL_KEYS: ReadonlySet<string> = new Set(['up', 'down', 'j', 'k', 'pageup', 'pagedown', 'f', 'b', 'home', 'end'])
+const SCROLL_KEYS: ReadonlySet<string> = new Set(['up', 'down', 'j', 'k', 'pageup', 'pagedown', 'f', 'b', 'home', 'end'])
 
 let deskKeysAt = 0
 

@@ -130,4 +130,3 @@ export function gridOf($: EngineInterface, c: Look & Layout & Toolbar) {
 }
 
 export type Grid = ReturnType<typeof gridOf>
-export type RowParts = ReturnType<Grid['rowParts']>

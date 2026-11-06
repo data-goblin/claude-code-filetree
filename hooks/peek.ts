@@ -6,12 +6,12 @@ import { isAbsolute, dirname } from './tree'
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'avif', 'heic', 'heif', 'ico', 'jxl', 'qoi', 'tga'])
 const VIDEO = new Set(['mp4', 'm4v', 'mkv', 'webm', 'mov', 'avi', 'wmv', 'flv', 'mpg', 'mpeg', '3gp', 'ogv'])
 
-export const PNG_DIRECT_PIXELS = 4096
-export const PNG_DIRECT_BYTES = 8_000_000
-export const CACHE_KEEP = 64
-export const EXIT_MISSING = 3
-export const EXIT_FAILED = 4
-export const EXIT_LOCKED = 5
+const PNG_DIRECT_PIXELS = 4096
+const PNG_DIRECT_BYTES = 8_000_000
+const CACHE_KEEP = 64
+const EXIT_MISSING = 3
+const EXIT_FAILED = 4
+const EXIT_LOCKED = 5
 
 const CODERS: Record<string, string> = { png: 'png', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif', webp: 'webp', bmp: 'bmp', tif: 'tiff', tiff: 'tiff', avif: 'avif', heic: 'heic', heif: 'heic', ico: 'ico', jxl: 'jxl', qoi: 'qoi', tga: 'tga' }
 const DOCS: Record<string, string> = { pdf: 'pdf', docx: 'office', doc: 'office', odt: 'office', rtf: 'office' }
@@ -97,7 +97,7 @@ export const POSTER = [
 
 export const CLEAN = 'd=$1; [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ] && rm -rf -- "$d"; exit 0'
 
-export function coderFor(path: string): string {
+function coderFor(path: string): string {
   const ext = extension(path)
   return CODERS[ext] ?? DEMUXERS[ext] ?? DOCS[ext] ?? ''
 }
@@ -117,7 +117,7 @@ export function pictureKind(path: string): 'png' | 'image' | 'video' | 'pdf' | '
   return VIDEO.has(ext) ? 'video' : ''
 }
 
-export function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
+function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
   if (bytes.length < 24 || sig.some((b, i) => bytes[i] !== b)) return null
   const at = (i: number) => ((bytes[i] ?? 0) << 24) | ((bytes[i + 1] ?? 0) << 16) | ((bytes[i + 2] ?? 0) << 8) | (bytes[i + 3] ?? 0)
@@ -142,7 +142,7 @@ function fnv(text: string, seed: number): string {
   return h.toString(16).padStart(8, '0')
 }
 
-export function cacheName(path: string, mtime: number, size: number, page = 0, px = 0, ext = 'png'): string {
+function cacheName(path: string, mtime: number, size: number, page = 0, px = 0, ext = 'png'): string {
   const text = page ? `${path}\0${mtime}\0${size}\0${page}\0${px}` : `${path}\0${mtime}\0${size}`
   return `${fnv(text, 0x811c9dc5)}${fnv(text, 0x050c5d1f)}${fnv([...text].reverse().join(''), 0x2166136f)}${fnv(text, 0x9e3779b9)}.${ext}`
 }

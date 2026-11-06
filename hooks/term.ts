@@ -8,11 +8,11 @@ const XTERM: Rgb[] = [
   [127, 127, 127], [255, 0, 0], [0, 255, 0], [255, 255, 0], [92, 92, 255], [255, 0, 255], [0, 255, 255], [255, 255, 255],
 ]
 
-export const CELL_PROBE = 'import fcntl,os,struct,termios\nfd=os.open("/dev/tty",os.O_RDONLY)\nr,c,x,y=struct.unpack("HHHH",fcntl.ioctl(fd,termios.TIOCGWINSZ,b"\\0"*8))\nprint(x//c if c and x else 0,y//r if r and y else 0)'
+const CELL_PROBE = 'import fcntl,os,struct,termios\nfd=os.open("/dev/tty",os.O_RDONLY)\nr,c,x,y=struct.unpack("HHHH",fcntl.ioctl(fd,termios.TIOCGWINSZ,b"\\0"*8))\nprint(x//c if c and x else 0,y//r if r and y else 0)'
 
-export const GHOSTTY_ARGS = 'p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do case "$(cat /proc/$p/comm 2>/dev/null)" in ghostty*) tr "\\0" "\\n" < /proc/$p/cmdline; exit 0;; esac; p=$(cut -d" " -f4 /proc/$p/stat 2>/dev/null) || exit 0; done'
+const GHOSTTY_ARGS = 'p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do case "$(cat /proc/$p/comm 2>/dev/null)" in ghostty*) tr "\\0" "\\n" < /proc/$p/cmdline; exit 0;; esac; p=$(cut -d" " -f4 /proc/$p/stat 2>/dev/null) || exit 0; done'
 
-export function parseGhostty(text: string): TermColors {
+function parseGhostty(text: string): TermColors {
   const out: TermColors = { palette: {} }
   for (const line of text.split('\n')) {
     const m = /^\s*(?:--)?([a-z-]+)\s*=\s*(.+?)\s*$/.exec(line)

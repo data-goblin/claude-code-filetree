@@ -101,7 +101,7 @@ export function deskRowsOf(c: Look & Layout & Grid & Columns & Specs) {
   return { deskRow, deskParts, deskStart, deskShimmer, deskGrep, deskGrepNote }
 }
 
-export type DeskRows = ReturnType<typeof deskRowsOf>
+type DeskRows = ReturnType<typeof deskRowsOf>
 
 export function deskTree(c: Look & Layout & Columns & Specs & DeskRows) {
   const { Box, Text, Client, Svg, mutedText, mutedInk, deskSel, deskHover, jumpSel, rows, shown, grepping, metricSpan, metricLabel, jumpWhen, grepDigits, grepNode, grepName, deskGrep, deskGrepNote, deskRow, deskParts, deskStart, deskShimmer } = c

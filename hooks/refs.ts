@@ -6,7 +6,7 @@ import { get } from './store'
 import { PANE } from './consts'
 import { openHit } from './grep'
 
-export type FileRef = { path: string; line: number; end: number }
+type FileRef = { path: string; line: number; end: number }
 
 const REF = /(?<![\w.@~+/\\:\])-])((?:[A-Za-z]:[\\/])?(?:[\w.@~+/\\-]|\[[\w.@~+-]+\]|\([\w.@~+-]+\))+)(?::(\d+)(?:-(\d+))?|#L(\d+)(?:-L?(\d+))?)(?![\w])/g
 const LIMIT = 20
@@ -35,7 +35,7 @@ export function refHref(ref: FileRef): string {
   return `file://${encodeURI(/^[A-Za-z]:/.test(ref.path) ? `/${ref.path}` : ref.path)}#L${ref.line}${ref.end > ref.line ? `-L${ref.end}` : ''}`
 }
 
-export function parseHref(href: string): FileRef | null {
+function parseHref(href: string): FileRef | null {
   const m = /^file:\/\/(.+)#L(\d+)(?:-L(\d+))?$/.exec(href)
   if (!m) return null
   const raw = decodeURI(m[1] ?? '')
