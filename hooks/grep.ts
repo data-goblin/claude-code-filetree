@@ -6,10 +6,11 @@ import { join, relative, badPattern, posix, isAbsolute, ancestorsOf, dirname } f
 import { toEre, compileRegex } from './regex'
 import { stopStream, messageOf, focusPane } from './util'
 import { patch, get } from './store'
-import { loadPreview, parkPreview, toggleGuard, diffFile, openTerminal } from './register'
+import { toggleGuard, openTerminal } from './register'
 import { PANE } from './consts'
 import { picks, copyPaths, markRow } from './select'
 import { scopeSearch } from './search'
+import { loadPreview, parkPreview, diffFile } from './preview'
 
 export const GREP_LIMIT = 200
 const GREP_MS = 15_000
