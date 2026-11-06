@@ -80,6 +80,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
   - double-click or Enter opens a file
   - the clear selection button clears every marked and selected row
   - marked rows show the selection background; `y`, `Y` and `u` copy the shaded rows
+  - with rows marked, the row under the cursor shows an accent tint in the Desktop app and the accent cursor mark in the terminal
 - Split preview of code, Markdown, images, video frames, PDF and Word pages ([preview and treemap](docs/preview-treemap.md))
 - Treemap of a folder by bytes or lines, with Claude's activity lit ([preview and treemap](docs/preview-treemap.md))
 - Diff of a file or every changed file in a folder, in the pane or your diff tool ([diff](docs/diff.md))

@@ -3664,6 +3664,7 @@ export const register: Register = (on, options) => {
     const deskSel = palette.theme.selection ?? DESK.selection
     const deskHover = palette.hover ?? DESK.hover
     const deskCur = e.props.isFocused ? deskSel : deskHover
+    const deskCursor = palette.theme.accent ? `${accentInk}1f` : DESK.cursor
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
         <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
@@ -4089,7 +4090,7 @@ export const register: Register = (on, options) => {
         ? <Text color={tone?.solid ?? accentText} bold={p.isBright || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
-        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={p.isPicked ? deskCur : undefined} hover={{ backgroundColor: p.isPicked ? deskCur : deskHover }}>
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor && !p.isPicked ? deskCursor : p.isPicked ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor && !p.isPicked ? deskCursor : p.isPicked ? deskCur : deskHover }}>
           {n.id === t.cursor && (e.props.isFocused || !p.isPicked) && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>

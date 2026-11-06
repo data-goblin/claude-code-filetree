@@ -27,7 +27,7 @@ function over(top: string, base: string): string {
   return `#${[1, 3, 5].map(i => ch(i).toString(16).padStart(2, '0')).join('')}`
 }
 
-const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field }
+const DESK_TINTS = { selection: DESK.selection, hover: DESK.hover, field: DESK.field, cursor: DESK.cursor }
 const deskBackgrounds = (bases: Record<string, string>): Record<string, string> =>
   Object.fromEntries(Object.entries(bases).flatMap(([n, base]) => [[n, base], ...Object.entries(DESK_TINTS).map(([t, tint]) => [`${t} on ${n}`, over(tint, base)])]))
 
