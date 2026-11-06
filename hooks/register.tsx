@@ -33,7 +33,6 @@ import {
   inside,
   isAbsolute,
   join,
-  matcher,
   matchSpans,
   highlight,
   posix,
@@ -54,13 +53,14 @@ import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, 
 import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, stopStream, cwdOf, has, messageOf, focusPane, unlessAborted, strings, faint, toHex, clean, weigh } from './util'
 import { get, patch, setActivities, saveShimmer, activities, readConfig, SHIMMER_KEY } from './store'
-import { isIgnored, loadDirs, pruneArgs, PRUNE, realOf, revealPaths, listAll, broad, HOME_PRUNE, globLiteral, watchTree, sinceNow } from './listing'
+import { isIgnored, loadDirs, pruneArgs, PRUNE, realOf, revealPaths, broad, HOME_PRUNE, globLiteral, watchTree, sinceNow } from './listing'
 import { type Job, detectRepo, refreshGit, git, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground, ACTIVITY_TTL_MS } from './gitstate'
 import { staleSizes, takeLoc, walkSize, wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
 import { claimMarks, autoCollapseOn, armCollapse, scheduleScan, touched, reveal } from './activity'
 import { reset, followCwd, settleRoot } from './root'
 import { picks, copyPaths, markRow, anchorAt, addMarks, clearMarks, copyPath, pickOnly, markRange, pickRow } from './select'
 import { classifyLink, linkNote } from './links'
+import { scopeSearch, indexPaths, searchFlag, search, jump } from './search'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
@@ -93,7 +93,6 @@ const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
 const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 const DESK_ROW_CHARS = 40
-export const SEARCH_REVEAL_LIMIT = 60
 const EXPAND_MAX = 150
 const GIT_POLL_MS = 2000
 const AGE_TICK_MS = 60_000
@@ -105,7 +104,6 @@ const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', h
 let workDeciding = false
 const workRepos = new Map<string, Promise<string | null>>()
 export type GrepHit = { path: string; line: number; text: string }
-type SearchFlag = 'searchCase' | 'searchRegex' | 'searchContent'
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -139,49 +137,6 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
 function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
   return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
-}
-
-export type Indexed = { paths: string[]; rel: string[] }
-
-function indexPaths($: EngineInterface, t: FileTree): Promise<Indexed> {
-  if (tree.searchIndex?.root !== t.root) {
-    const index: { root: string; paths: Promise<Indexed> } = {
-      root: t.root,
-      paths: listAll($, t).then(paths => {
-        if (paths === null && tree.searchIndex === index) tree.searchIndex = null
-        return { paths: paths ?? [], rel: (paths ?? []).map(p => relative(t.root, p)) }
-      }),
-    }
-    tree.searchIndex = index
-  }
-  return tree.searchIndex.paths
-}
-
-async function search($: EngineInterface, query: string): Promise<string[]> {
-  if (!(await get($)).query.trim()) tree.searchIndex = null
-  await patch($, () => ({ query }))
-  const t = await get($)
-  if (t.searchContent) {
-    if (!query.trim()) grepClear()
-    grep.key = ''
-    return []
-  }
-  if (grep.key) grepClear()
-  if (!query.trim()) return []
-  const index = await indexPaths($, t)
-  const match = matcher(query, Boolean(t.searchCase), Boolean(t.searchRegex))
-  if (!match) return []
-  const hits: string[] = []
-  const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
-  for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
-  if ((await get($)).query !== query) return []
-  if (match.partial) void $.ui.toast(`regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
-  await revealPaths($, hits)
-  const shown = await get($)
-  const ids = new Set(shown.nodes.map(n => n.id))
-  const stale = [...new Set(hits.filter(p => !ids.has(p)).map(dirname))].filter(d => inside(shown.root, d))
-  if (stale.length) await loadDirs($, stale)
-  return hits
 }
 
 function grepOn(t: FileTree): boolean {
@@ -336,7 +291,7 @@ async function grepSpawn($: EngineInterface, t: FileTree, q: string, mine: numbe
   }
 }
 
-async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface): Promise<void> {
+export async function openHit($: EngineInterface, h: GrepHit, surface?: RenderSurface): Promise<void> {
   mapping.mapLock = null
   const line = h.line || (grep.rows.find(r => r.path === h.path && r.line)?.line ?? 1)
   const top = Math.max(0, line - 3)
@@ -503,12 +458,6 @@ export function rowsOf(base: FileTree): Row[] {
 
 async function sortBy($: EngineInterface, col: 'name' | 'git' | 'metric'): Promise<void> {
   await patch($, cur => (cur.sortCol !== col ? { sortCol: col, sortDir: 'desc' } : cur.sortDir === 'desc' ? { sortDir: 'asc' } : { sortCol: '', sortDir: 'desc' }))
-}
-
-async function scopeSearch($: EngineInterface, scope: string): Promise<void> {
-  await patch($, () => ({ searchScope: scope }))
-  const t = await get($)
-  if (t.query.trim()) await search($, t.query)
 }
 
 async function zoxideRows($: EngineInterface): Promise<Candidate[]> {
@@ -709,28 +658,6 @@ async function jumpKey($: EngineInterface, key: string): Promise<void> {
     zjump.sel = 0
     await jumpRefresh($)
   }
-}
-
-async function searchFlag($: EngineInterface, flag: SearchFlag): Promise<void> {
-  await patch($, cur => (flag === 'searchCase' ? { searchCase: !cur.searchCase } : flag === 'searchRegex' ? { searchRegex: !cur.searchRegex } : { searchContent: !cur.searchContent }))
-  const t = await get($)
-  if (t.query.trim()) await search($, t.query)
-}
-
-async function jump($: EngineInterface, query: string, surface?: RenderSurface): Promise<void> {
-  if ((await get($)).searchContent) {
-    const hit = grep.rows[grep.sel]
-    if (hit) await openHit($, hit, surface)
-    return
-  }
-  const hits = (await search($, query)).slice(0, 10)
-  const to = hits[0]
-  if (to) anchorAt(to)
-  await patch($, cur => {
-    const open = new Set(cur.expanded)
-    for (const p of hits) for (const a of ancestorsOf(p, cur.root)) open.add(a)
-    return { query: '', expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
-  })
 }
 
 const PREVIEW_CHARS = 90_000
