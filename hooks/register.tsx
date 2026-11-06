@@ -2053,13 +2053,14 @@ async function considerWork($: EngineInterface): Promise<void> {
   if (!followWork || workDeciding) return
   workDeciding = true
   try {
-    const base = jumpMovesClaude ? await cwdOf($) : (await get($)).root
+    const moves = jumpMovesClaude && (await canCd($))
+    const base = moves ? await cwdOf($) : (await get($)).root
     const current = (await repoOf($, base)) ?? base
     const now = await $.clock.now()
     const repo = pickRepo(workTouches, current, now, workLast)
     if (!repo || inside(repo, base)) return
     workLast = now
-    if (!jumpMovesClaude || !(await canCd($))) {
+    if (!moves) {
       follow = false
       await reset($, repo)
       return

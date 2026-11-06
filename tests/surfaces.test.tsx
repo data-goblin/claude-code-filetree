@@ -5609,3 +5609,27 @@ test('desktop: no row in the tree, the jump list or its empty note is drawn tall
   expect(tallBoxes(await ui.drawn())).toEqual([])
   await ui.unmount()
 })
+
+test('Follow work without /cd keeps the tree on the repo it moved to while the work stays there, and moves it back once the work returns to the first repo', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w: World = { ...WORK_WORLD(a, b), noCd: true }
+  w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
+  const ran: Ran = []
+  const { ui, root, reads, clock } = await workSession($, on, w, ran)
+  await reads(b)
+  expect(await root()).toBe(`${b}/b.ts`)
+  await ui.post({ press: `${b}/c.ts` }, { in: 'rows' })
+  await clock.advance(1000)
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await clock.settle()
+  const marked = async () => treeRows(await ui.drawn()).rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
+  expect(await marked()).toEqual([`${b}/c.ts`])
+  await clock.advance(200_000)
+  await reads(b)
+  expect(await marked()).toEqual([`${b}/c.ts`])
+  await clock.advance(200_000)
+  await reads(a)
+  expect(await root()).toBe(`${a}/b.ts`)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  await ui.unmount()
+})
