@@ -1,7 +1,7 @@
 import { type Job, detectRepo, refreshGit, gitPaths } from './gitstate'
 import type { FileTree } from '../types'
 import { settings, ui, flashing, vcs, tree, previewing } from './state'
-import { rowsOf, staleGrep, markStale } from './register'
+import { rowsOf, markStale } from './register'
 import type { EngineInterface } from 'claude-code'
 import { get, patch } from './store'
 import { BRANCH_ROW } from './consts'
@@ -12,6 +12,7 @@ import { changedInRepo, changedSince, isIgnored, revealPaths, openDirs, loadDirs
 import { followCwd } from './root'
 import { anchorAt } from './select'
 import { SEARCH_REVEAL_LIMIT } from './search'
+import { staleGrep } from './grep'
 
 const FLASH_MS = 2700
 const NO_REPO_DEPTH = 4

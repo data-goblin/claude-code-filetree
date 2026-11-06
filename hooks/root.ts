@@ -1,13 +1,14 @@
 import type { EngineInterface } from 'claude-code'
 import { get, put } from './store'
 import { flashing, metrics, ui, marking, linking, tree, settings } from './state'
-import { recordVisit, grepClear } from './register'
+import { recordVisit } from './register'
 import { clearAutoCollapse } from './activity'
 import { emptyTree } from './tree'
 import { loadDirs } from './listing'
 import { detectRepo, refreshGit } from './gitstate'
 import { PANE } from './consts'
 import { cwdOf } from './util'
+import { grepClear } from './grep'
 
 let lastRoot = ''
 

@@ -4,10 +4,11 @@ import { join, toNodes, replaceChildren, dirname, posix, ancestorsOf, relative, 
 import { linking, settings, tree, machine, vcs } from './state'
 import { exists, shortPath, osName, stopStream } from './util'
 import { get, patch } from './store'
-import { staleGrep, markStale } from './register'
+import { markStale } from './register'
 import { refreshGit, git } from './gitstate'
 import { staleSizes } from './sizes'
 import { dropPreviews } from './activity'
+import { staleGrep } from './grep'
 
 export const PRUNE = ['.git', 'node_modules', 'target', '.venv', '__pycache__', 'dist', '.next']
 export const HOME_PRUNE = ['Library', 'AppData', '.Trash']

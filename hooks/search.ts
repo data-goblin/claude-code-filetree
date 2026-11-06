@@ -4,8 +4,8 @@ import { tree, grep } from './state'
 import { listAll, revealPaths, loadDirs } from './listing'
 import { relative, matcher, dirname, inside, ancestorsOf } from './tree'
 import { get, patch } from './store'
-import { grepClear, openHit } from './register'
 import { anchorAt } from './select'
+import { grepClear, openHit } from './grep'
 
 export const SEARCH_REVEAL_LIMIT = 60
 type SearchFlag = 'searchCase' | 'searchRegex' | 'searchContent'
