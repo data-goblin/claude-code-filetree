@@ -31,7 +31,7 @@ const GROUPS: readonly ShortcutGroup[] = [
       { key: 'ctrl+click', label: 'add or drop a row; alt+click on macOS' },
       { key: 'shift+click', label: 'select the range from the anchor' },
       { key: 'shift+j / k', label: 'extend the selection down / up' },
-      { key: 'v / V', label: 'add or drop the row / clear the selection' },
+      { key: 'v / V', label: 'add or drop the row / clear the marks' },
       { key: 'y / Y', label: 'copy relative / absolute path' },
       { key: 'u', label: 'copy the name' },
       { key: 't', label: 'shell in a tmux or herdr pane' },

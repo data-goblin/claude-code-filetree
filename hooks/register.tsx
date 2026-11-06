@@ -156,7 +156,6 @@ let peeked: Preview | null = null
 let marks: string[] = []
 let markAnchor = ''
 let markBase: string[] = []
-let unpicked = ''
 type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
@@ -406,7 +405,7 @@ async function loadDirs($: EngineInterface, dirs: string[]): Promise<Map<string,
     const nodes = replaceChildren(t.nodes, listed)
     const up = dirname(t.cursor)
     const lost = t.cursor && listed.has(up) && !nodes.some(n => n.id === t.cursor)
-    return lost ? { nodes, cursor: up === root ? '' : up } : { nodes }
+    return lost ? { nodes, cursor: up === root ? '' : up, ...(t.selected === t.cursor ? { selected: '' } : {}) } : { nodes }
   })
   void watchTree($)
   return listed
@@ -554,7 +553,6 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   marks = []
   markAnchor = ''
   markBase = []
-  unpicked = ''
   linkStates.clear()
   searchIndex = null
   grepClear()
@@ -1300,8 +1298,8 @@ function linkNote(state: LinkState | null | undefined): string {
   return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
 }
 
-function picked(t: FileTree, id: string): boolean {
-  return marks.includes(id) || (id === t.cursor && (Boolean(t.selected) || id !== unpicked))
+function picks(t: FileTree): { ids: string[]; marked: boolean } {
+  return marks.length ? { ids: marks, marked: true } : { ids: t.selected ? [t.selected] : [], marked: false }
 }
 
 function anchorAt(id: string): void {
@@ -1309,12 +1307,20 @@ function anchorAt(id: string): void {
   markBase = marks.filter(m => m !== id)
 }
 
-function toggleMark($: EngineInterface, id: string): void {
-  if (marks.includes(id)) marks = marks.filter(m => m !== id)
-  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
-  else marks = [...marks, id]
+function flip($: EngineInterface, t: FileTree, id: string, pin: boolean): boolean {
+  const { ids, marked } = picks(t)
+  const on = ids.includes(id)
+  if (!on && ids.length >= MARK_LIMIT) {
+    $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+    return false
+  }
+  marks = on && pin && !marked ? [id] : on ? ids.filter(m => m !== id) : [...ids, id]
   anchorAt(id)
-  void $.ui.invalidate('ui.render')
+  return true
+}
+
+async function markRow($: EngineInterface, id: string): Promise<void> {
+  if (flip($, await get($), id, true)) await patch($, cur => ({ selected: marks.length ? cur.selected : '' }))
 }
 
 function addMarks($: EngineInterface, ids: string[]): void {
@@ -1333,35 +1339,23 @@ async function markRange($: EngineInterface, id: string): Promise<void> {
   const from = ids.indexOf(markAnchor)
   marks = markBase
   addMarks($, to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
-  unpicked = ''
   await patch($, () => ({ cursor: id, selected: id }))
 }
 
 async function pickRow($: EngineInterface, id: string): Promise<void> {
-  const t = await get($)
-  const on = picked(t, id)
-  const held = t.cursor !== id && picked(t, t.cursor) && rowsOf(t).some(r => r.node.id === t.cursor) ? [t.cursor] : []
-  const base = [...marks, ...held.filter(h => !marks.includes(h))]
-  if (!on && base.length >= MARK_LIMIT) {
-    $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
-    return
-  }
-  marks = on ? base.filter(m => m !== id) : [...base, id]
-  unpicked = on ? id : ''
-  anchorAt(id)
-  await patch($, () => ({ cursor: id, selected: on ? '' : id }))
+  if (flip($, await get($), id, false)) await patch($, () => ({ cursor: id, selected: marks.length ? id : '' }))
 }
 
 function pickOnly(id: string): void {
   marks = []
-  unpicked = ''
   anchorAt(id)
 }
 
 function clearMarks($: EngineInterface): void {
+  if (!marks.length) return
   marks = []
   markBase = []
-  void $.ui.invalidate('ui.render')
+  void patch($, cur => ({ selected: cur.cursor }))
 }
 
 async function exists($: EngineInterface, path: string): Promise<boolean> {
@@ -1500,7 +1494,8 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
       open.add(a)
       opened.push(a)
     }
-    return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
+    const to = paths[paths.length - 1]
+    return { expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
   })
   await markOpened($, opened, paths)
 }
@@ -1862,8 +1857,9 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
 async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
   if (!['x', 'd', 'v', 't', 'y', 'Y', 'u', 'i'].includes(key) || (key === 'v' && shift)) return false
   const path = grep.rows[grep.sel]?.path
+  const { ids, marked } = picks(await get($))
   if (!path) {
-    if ((key === 'y' || key === 'Y' || key === 'u') && marks.length) await copyPaths($, marks, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+    if ((key === 'y' || key === 'Y' || key === 'u') && marked) await copyPaths($, ids, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
     return true
   }
   if (key === 'i') {
@@ -1873,9 +1869,9 @@ async function grepAct($: EngineInterface, key: string, shift: boolean, surface?
     $.clock.after(50, () => focusPane($, t.root, 'q'))
   } else if (key === 'x') await toggleGuard($, path)
   else if (key === 'd') await diffFile($, path)
-  else if (key === 'v') toggleMark($, path)
+  else if (key === 'v') await markRow($, path)
   else if (key === 't') await openTerminal($, dirname(path))
-  else await copyPaths($, marks.length ? marks : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else await copyPaths($, ids.length ? ids : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
   return true
 }
 
@@ -2147,7 +2143,7 @@ async function jump($: EngineInterface, query: string, surface?: RenderSurface):
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of hits) for (const a of ancestorsOf(p, cur.root)) open.add(a)
-    return { query: '', expanded: [...open], cursor: hits[0] ?? cur.cursor, scroll: null }
+    return { query: '', expanded: [...open], ...(hits[0] ? { cursor: hits[0], selected: hits[0] } : {}), scroll: null }
   })
 }
 
@@ -2921,6 +2917,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   const rows = rowsOf(t)
   const at = rows.findIndex(r => r.node.id === t.cursor)
   const cur = rows[at]?.node
+  const picked = picks(t).ids
   const onRoot = Boolean(t.root) && t.cursor === t.root
   const move = (d: number) => {
     const to = onRoot ? (d < 0 ? -1 : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
@@ -2964,10 +2961,10 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (key === 'V' || (key === 'v' && shift)) clearMarks($)
-  else if (cur && key === 'v') toggleMark($, cur.id)
+  else if (cur && key === 'v') await markRow($, cur.id)
   else if (key === 't') await openTerminal($, cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root)
-  else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
-  else if ((cur || marks.length) && key === 'u') await copyPaths($, marks.length ? marks : [cur?.id ?? ''], 'name', surface)
+  else if (picked.length && (key === 'y' || key === 'Y')) await copyPaths($, picked, key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else if (picked.length && key === 'u') await copyPaths($, picked, 'name', surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
@@ -3014,9 +3011,9 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') {
-    clearMarks($)
+    marks = []
+    markBase = []
     markAnchor = ''
-    unpicked = ''
     await patch($, () => ({ selected: '', cursor: '' }))
   }
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
@@ -3511,9 +3508,10 @@ export const register: Register = (on, options) => {
     if (!(await followCwd($))) void sync($)
     const t = await get($)
     const context = [...(e.context ?? [])]
-    const marked = (await Promise.all(marks.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
-    if (marked.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${marked.join('\n')}`)
-    if (t.selected && (await exists($, t.selected))) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${t.selected}`)
+    const picked = picks(t)
+    const live = (await Promise.all(picked.ids.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
+    if (picked.marked && live.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${live.join('\n')}`)
+    else if (!picked.marked && live[0]) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${live[0]}`)
     const mentions = [...e.text.matchAll(/@([^\s"'`]+)/g)]
       .map(m => (m[1] ?? '').replace(/[.,;:!?)]+$/, ''))
       .filter(Boolean)
@@ -3819,6 +3817,8 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = rowsOf(t)
+    const picked = picks(t)
+    const inSet = new Set(picked.ids)
     const grepping = !zjump.on && grepOn(t)
     if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
@@ -3871,7 +3871,7 @@ export const register: Register = (on, options) => {
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
       ...(outside.length ? [{ id: 'outside', label: `${unicode ? '⚠' : '\u{ea6c}'} ${outside.length}`, dim: false, hint: `${outside.length} file${outside.length === 1 ? '' : 's'} written outside the repo`, icon: 'warning' as const }] : []),
-      ...(t.selected || marks.length ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
+      ...(picked.ids.length ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
       { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
@@ -3978,7 +3978,7 @@ export const register: Register = (on, options) => {
       const rel = relative(t.root, n.id)
       const spans = searching ? matchSpans(t.query, Boolean(t.searchCase), Boolean(t.searchRegex), rel) : []
       const hl = (text: string) => (spans.length ? highlight(text, spans, rel.length - n.name.length) : [{ t: text, hit: false }])
-      const isPicked = picked(t, n.id)
+      const isPicked = inSet.has(n.id)
       const isLink = links.has(n.id)
       const link = isLink ? linkStates.get(n.id) : undefined
       if (isLink && !linkStates.has(n.id)) void classifyLink($, n.id)
@@ -4081,7 +4081,7 @@ export const register: Register = (on, options) => {
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
         <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={p.isPicked ? deskCur : undefined} hover={{ backgroundColor: p.isPicked ? deskCur : deskHover }}>
-          {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
+          {n.id === t.cursor && (e.props.isFocused || !p.isPicked) && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
           {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
@@ -4644,7 +4644,7 @@ export const register: Register = (on, options) => {
           <Client
             key="rows"
             module="./rows.tsx"
-            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : picked(t, t.cursor) ? t.cursor : '', ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : inSet.has(t.cursor) ? t.cursor : '', ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
@@ -4675,7 +4675,7 @@ export const register: Register = (on, options) => {
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
-            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${marks.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Button></Box> : null}
+            {picked.marked && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${picked.ids.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${picked.ids.length} marked`}</Text></Button></Box> : null}
             {footerName && (desk || !tipText) ? (
               <Box flexShrink={1} marginLeft={2}>
                 <Text {...mutedText} wrap="truncate-start">{footer && links.has(footer) ? footerName + linkNote(footerLink) : footerName}</Text>
