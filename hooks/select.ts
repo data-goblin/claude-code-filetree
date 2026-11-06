@@ -3,7 +3,7 @@ import { get, patch } from './store'
 import { inside } from './tree'
 import type { FileTree } from '../types'
 import { marking } from './state'
-import { rowsOf } from './register'
+import { rowsOf } from './order'
 
 const MARK_LIMIT = 100
 const MARKS_FULL = `at most ${MARK_LIMIT} marks; press "${MARK_LIMIT} marked" in the footer to clear them`
