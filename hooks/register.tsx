@@ -197,6 +197,7 @@ let deskHovered = ''
 let hitSeq = 0
 const hitTables = new Map<number, string[]>()
 const hitLast = new Map<string, number>()
+const hitDone = new Map<string, number>()
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
@@ -1085,9 +1086,9 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
   return { key: has(data, 'key') ? data.key : undefined, over: has(data, 'over') ? data.over : undefined, scrollTo: has(data, 'scrollTo') ? data.scrollTo : undefined }
 }
 
-function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown; at: unknown; gen: unknown; hover: unknown } {
+function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown; at: unknown; gen: unknown; hover: unknown; hgen: unknown; seq: unknown; self: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
-  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy'), at: at('at'), gen: at('gen'), hover: at('hover') }
+  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy'), at: at('at'), gen: at('gen'), hover: at('hover'), hgen: at('hgen'), seq: at('seq'), self: at('self') }
 }
 
 function hitTable(list: string, ids: string[]): number {
@@ -3352,13 +3353,16 @@ export const register: Register = (on, options) => {
     if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap' && !e.element.startsWith('hit:')) || !e.data || typeof e.data !== 'object') return next(e)
     const raw = rowsMessage(e.data)
     if (typeof raw.hover === 'number') {
-      const id = hitId(raw.gen, raw.hover)
+      const id = hitId(raw.hgen, raw.hover)
       if (id !== deskHovered) {
         deskHovered = id
         void $.ui.invalidate('ui.render')
       }
-      return {}
     }
+    if (typeof raw.seq === 'number' && typeof raw.self === 'string') {
+      if (raw.seq <= (hitDone.get(raw.self) ?? 0)) return {}
+      hitDone.set(raw.self, raw.seq)
+    } else if (typeof raw.hover === 'number') return {}
     const target = typeof raw.at === 'number' ? hitId(raw.gen, raw.at) : null
     if (target === '') return {}
     const data = target === null ? raw : { ...raw, press: raw.press === true ? target : undefined, copy: raw.copy === true ? target : undefined }
