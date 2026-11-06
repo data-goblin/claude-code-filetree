@@ -40,6 +40,15 @@ export function colorOf(color: string, term: TermColors, light: boolean): Rgb {
 
 const TEXT_EMOJI_VS16 = /(?=\P{Emoji_Presentation})(\p{Extended_Pictographic})\uFE0F(?!\u200D)/gu
 
+const LITERAL = /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n[\s\S]*?\n {0,3}\1[`~]*[ \t]*(?=\n|$)|[\s\S]*$)|(`+)(?!`)[\s\S]*?(?<!`)\2(?!`)|\]\([^)]*\)|<[a-z][a-z0-9+.-]*:[^\s<>]*>|\b[a-z][a-z0-9+.-]*:\/\/[^\s<>]*/gim
+
 export function narrowEmoji(text: string): string {
-  return text.includes('\uFE0F') ? text.replace(TEXT_EMOJI_VS16, '$1') : text
+  if (!text.includes('\uFE0F')) return text
+  let out = ''
+  let at = 0
+  for (const m of text.matchAll(LITERAL)) {
+    out += text.slice(at, m.index).replace(TEXT_EMOJI_VS16, '$1') + m[0]
+    at = m.index + m[0].length
+  }
+  return out + text.slice(at).replace(TEXT_EMOJI_VS16, '$1')
 }
