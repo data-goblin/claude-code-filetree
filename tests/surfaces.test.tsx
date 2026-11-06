@@ -55,6 +55,7 @@ type World = {
   fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
+  noCd?: boolean
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -70,6 +71,7 @@ function world(on: On, w: World, ran: Ran) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: 'test-session' }))
+  on('command.list', () => ({ value: w.noCd ? [] : [{ name: 'cd', description: 'cd', source: 'builtin' as const }] }))
   on('command.register', (_$, e) => {
     registered.push(e)
     return { value: { command: e.name } }
@@ -3750,6 +3752,197 @@ test('jump mode closes when the pane loses the keyboard and never pulls focus ba
   await clock.advance(200)
   await clock.settle()
   expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"jump"')
+  expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
+  await blurred.unmount()
+})
+
+const GOTO_WORLD = (root: string): World => ({
+  os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+  dirs: {
+    '/home/k': [['proj', 'dir'], ['other', 'dir'], ['.cache', 'dir'], ['notes.md', 'file'], ['linked', 'other'], ['notes-link', 'other']],
+    '/home/k/linked': [['l.ts', 'file']],
+    [root]: [['hooks', 'dir'], ['tests', 'dir'], ['README.md', 'file']],
+    [`${root}/hooks`]: [['a.ts', 'file']],
+    [`${root}/tests`]: [['hooks-e2e', 'dir'], ['t.ts', 'file']],
+    [`${root}/tests/hooks-e2e`]: [['x.ts', 'file']],
+    '/home/k/other': [['deep', 'dir'], ['b.ts', 'file']],
+    '/home/k/other/deep': [['c.ts', 'file']],
+  },
+  links: ['/home/k/linked', '/home/k/notes-link'],
+  exits: { zoxide: [127, 'zoxide: not found'] },
+})
+
+async function gotoSession($: Engine, on: On, surface: 'terminal' | 'desktop', w: World, ran: Ran) {
+  const clock = world(on, w, ran)
+  on('command.run', async (_$, e, next) => {
+    if (e.command !== 'cd') return next(e)
+    ran.push(['cd', e.args])
+    return {}
+  })
+  await $.session.start({ cwd: w.cwd, surface, isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const field = async () => (await ui.findAll({ type: 'Input' })).find(f => /^goto(-\d+)?$/.test(f.key ?? ''))
+  const value = async () => (await field())?.props.value
+  const type = async (text: string, kind: 'change' | 'submit') => ui.input({ key: (await field())?.key ?? 'goto', text, kind })
+  return { clock, ui, field, value, type }
+}
+
+test("goto: the folder button left of the search field opens a path field on the tree root, lists the typed parent's subfolders, Tab completes, up/down pick, and Enter re-roots, records the visit and moves Claude with /cd", { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  let saved: unknown = null
+  on('state.set', (_$, e, next) => {
+    if (e.key === 'visits') saved = e.value
+    return next(e)
+  })
+  const { clock, ui, value, type } = await gotoSession($, on, 'terminal', GOTO_WORLD(root), ran)
+  const ids = async () => treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(JSON.stringify(await ui.drawn())).toMatch(/"key":"goto-open"[\s\S]*"⌕ "/)
+  await ui.press({ key: 'goto-open' })
+  await clock.settle()
+  const shown = JSON.stringify(await ui.drawn())
+  expect(shown).toMatch(/"type":"Input","props":\{[^}]*"key":"goto"[^}]*"autoFocus":true|"type":"Input","props":\{[^}]*"autoFocus":true[^}]*"key":"goto"/)
+  expect(shown).not.toContain('"key":"q"')
+  expect(shown).not.toContain('"hotkey"')
+  expect(await value()).toBe('~/proj/')
+  expect(await ids()).toEqual([`${root}/hooks`, `${root}/tests`])
+  const fieldBox = async () => /"key":"(goto-field-\d+)"/.exec(JSON.stringify(await ui.drawn()))?.[1]
+  const opened = await fieldBox()
+  await type('~/proj/te', 'change')
+  await clock.settle()
+  expect(await ids()).toEqual([`${root}/tests`])
+  expect(await fieldBox()).toBe(opened)
+  await ui.press({ key: 'goto-down' })
+  await clock.settle()
+  expect(await value()).toBe('~/proj/tests/')
+  expect(await fieldBox()).not.toBe(opened)
+  expect(await ids()).toEqual([`${root}/tests/hooks-e2e`])
+  await type('~/o', 'change')
+  await clock.settle()
+  expect(await ids()).toEqual(['/home/k/other'])
+  await ui.post({ key: 'tab' }, { in: 'rows' })
+  await clock.settle()
+  expect(await value()).toBe('~/other/')
+  expect(await ids()).toEqual(['/home/k/other/deep'])
+  await type('../', 'change')
+  await clock.settle()
+  expect(await ids()).toEqual(['/home/k/linked', '/home/k/other', root])
+  for (const key of ['down', 'down', 'down', 'up']) await ui.post({ key }, { in: 'rows' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).active).toBe('/home/k/other')
+  expect(await value()).toBe('../other/')
+  await type('../other/', 'submit')
+  await clock.advance(100)
+  await clock.settle()
+  expect(await value()).toBeUndefined()
+  expect(await ids()).toEqual(['/home/k/other/deep', '/home/k/other/b.ts'])
+  expect(ran).toContainEqual(['cd', '/home/k/other'])
+  expect(JSON.stringify(saved)).toContain('"/home/k/other"')
+  await ui.unmount()
+})
+
+test('goto: e opens the path field, a missing path or a file shows a short note under it and keeps it open, and Esc cancels back to search', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const { clock, ui, field, value, type } = await gotoSession($, on, 'terminal', GOTO_WORLD(root), ran)
+  const rows = async () => treeRows(await ui.drawn()).rows
+  expect(JSON.stringify(await ui.drawn())).toContain('"hotkey":"e"')
+  await ui.post({ key: 'e' }, { in: 'rows' })
+  await clock.settle()
+  expect(await value()).toBe('~/proj/')
+  const before = opens.length
+  await type('nope', 'submit')
+  await clock.settle()
+  expect((await rows())[0]?.left.map(s => s.t).join('')).toBe('no such folder')
+  expect(await value()).toBe('nope')
+  expect((await field())?.key).toBe('goto-1')
+  expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(true)
+  await type('README.md', 'submit')
+  await clock.settle()
+  expect((await rows())[0]?.left.map(s => s.t).join('')).toBe('not a folder')
+  expect(await value()).toBe('README.md')
+  await type('hoo', 'change')
+  await clock.settle()
+  expect((await rows()).map(r => r.id)).toEqual([`${root}/hooks`])
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(await value()).toBeUndefined()
+  expect(JSON.stringify(await ui.drawn())).toContain('"key":"q"')
+  expect((await rows()).map(r => r.id)).toContain(`${root}/README.md`)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  await ui.unmount()
+})
+
+test('desktop goto: the folder icon opens the path field over native rows with hit zones, Tab from a row completes, at most 50 folders are drawn, and Enter re-roots without /cd where the app has none', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const ran: Ran = []
+  const w = GOTO_WORLD(root)
+  w.noCd = true
+  w.dirs['/home/k'] = [...(w.dirs['/home/k'] ?? []), ['many', 'dir']]
+  w.dirs['/home/k/many'] = Array.from({ length: 80 }, (_, k): [string, 'dir'] => [`d${k}`, 'dir'])
+  const { clock, ui, value, type } = await gotoSession($, on, 'desktop', w, ran)
+  const listed = async () => every(await ui.drawn(), n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('goto:')).map(n => keyOf(n).slice(5))
+  expect(svgs(await ui.drawn()).some(s => s.alt === 'go to a folder path')).toBe(true)
+  await tap(ui, 'goto')
+  await clock.settle()
+  expect(await value()).toBe('~/proj/')
+  expect(JSON.stringify(await ui.drawn())).not.toContain('"hotkey"')
+  expect(svgs(await ui.drawn()).some(s => s.alt === 'search')).toBe(false)
+  expect(await listed()).toEqual([`${root}/hooks`, `${root}/tests`])
+  expect(JSON.stringify(await ui.drawn())).toContain(`"key":"hit:${root}/tests"`)
+  await type('~/proj/t', 'change')
+  await clock.settle()
+  await ui.post({ key: 'tab' }, { in: `hit:${root}/tests` })
+  await clock.settle()
+  expect(await value()).toBe('~/proj/tests/')
+  expect(await listed()).toEqual([`${root}/tests/hooks-e2e`])
+  await type('~/many/', 'change')
+  await clock.settle()
+  const tree = await ui.drawn()
+  expect((await listed()).length).toBe(50)
+  expect(JSON.stringify(tree)).toContain('30 more, keep typing')
+  expect(JSON.stringify(tree).length).toBeLessThan(262_144)
+  expect(every(tree, n => has(n, 'type')).length).toBeLessThan(2_000)
+  await type('~/proj/tests', 'change')
+  await clock.settle()
+  await ui.post({ key: 'return' }, { in: `hit:${root}/tests` })
+  await clock.advance(100)
+  await clock.settle()
+  expect(await value()).toBeUndefined()
+  expect(deskRows(await ui.drawn())).toEqual([`${root}/tests/hooks-e2e`, `${root}/tests/t.ts`])
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(ran.some(r => r[0] === 'toast')).toBe(false)
+  await ui.unmount()
+})
+
+test('goto stays open through a short focus blip, as the Desktop app reports while focus moves into the field, and closes once the pane stays unfocused without pulling focus back', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, GOTO_WORLD(root), [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const mount = (isFocused: boolean) => $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused } })
+  const first = await mount(true)
+  await clock.settle()
+  await first.post({ key: 'e' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await first.unmount()
+  const blip = await mount(false)
+  await clock.advance(100)
+  await clock.settle()
+  await blip.unmount()
+  const back = await mount(true)
+  await clock.advance(1000)
+  await clock.settle()
+  expect(JSON.stringify(await back.drawn())).toContain('"key":"goto"')
+  await back.unmount()
+  const before = opens.length
+  const blurred = await mount(false)
+  await clock.advance(600)
+  await clock.settle()
+  expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"goto"')
   expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
   await blurred.unmount()
 })

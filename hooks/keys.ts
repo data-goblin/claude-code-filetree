@@ -11,6 +11,7 @@ const GROUPS: readonly ShortcutGroup[] = [
       { key: 'h / l', label: 'collapse or parent / expand' },
       { key: 'o, Enter', label: 'open a file or toggle a folder' },
       { key: 'z', label: 'jump to a folder' },
+      { key: 'e', label: 'go to a folder by path' },
       { key: 'Space', label: 'Quick Look on macOS', terminal: true },
     ],
   },

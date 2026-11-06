@@ -9,6 +9,7 @@ import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
 import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { completion, folderMatches, GOTO_LIMIT, pathParts } from './goto'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
@@ -66,6 +67,8 @@ const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
+const JUMP_BLUR_MS = 400
+const GOTO_LINK_STATS = 100
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
@@ -228,6 +231,7 @@ let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
+const gotoMode = { on: false, typed: '', sel: -1, dir: '', names: [] as string[], listed: false, note: '', seq: 0, held: false, focused: false, field: 0, miss: 0 }
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 let autoCollapseDefault = false
@@ -2059,12 +2063,16 @@ async function considerWork($: EngineInterface): Promise<void> {
   }
 }
 
+async function canCd($: EngineInterface): Promise<boolean> {
+  return (await $.command.list().catch(() => [])).some(c => c.name === 'cd')
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
   jumpClose($, true)
   workLast = await $.clock.now()
   follow = false
   await reset($, dir)
-  if (!jumpMovesClaude || (await cwdOf($)) === dir) return
+  if (!jumpMovesClaude || (await cwdOf($)) === dir || !(await canCd($))) return
   $.clock.after(0, async () => {
     try {
       await $.command.run({ command: 'cd', args: dir })
@@ -2091,6 +2099,105 @@ async function jumpKey($: EngineInterface, key: string): Promise<void> {
     zjump.sel = 0
     await jumpRefresh($)
   }
+}
+
+function gotoRows(): string[] {
+  return gotoMode.names.slice(0, GOTO_LIMIT).map(name => join(gotoMode.dir, name))
+}
+
+function gotoField(): string {
+  return gotoMode.miss ? `goto-${gotoMode.miss}` : 'goto'
+}
+
+function gotoValue(): string {
+  const name = gotoMode.names[gotoMode.sel]
+  return name === undefined ? gotoMode.typed : `${pathParts(posix(gotoMode.typed)).head}${name}/`
+}
+
+async function gotoRefresh($: EngineInterface): Promise<void> {
+  const mine = ++gotoMode.seq
+  const { head, frag } = pathParts(posix(gotoMode.typed))
+  const dir = resolve((await get($)).root, head || '.', home)
+  let names: string[] = []
+  try {
+    const entries = new Map((await $.fs.list(dir)).map(e => [e.name, e]))
+    const named = folderMatches([...entries.keys()], frag)
+    const links = named.filter(name => entries.get(name)?.isLink).slice(0, GOTO_LINK_STATS)
+    const linked = new Set((await Promise.all(links.map(name => $.fs.stat(join(dir, name)).then(s => (s.kind === 'dir' ? name : ''), () => '')))).filter(Boolean))
+    names = named.filter(name => entries.get(name)?.kind === 'dir' || linked.has(name))
+  } catch {
+    names = []
+  }
+  if (mine !== gotoMode.seq || !gotoMode.on) return
+  gotoMode.dir = dir
+  gotoMode.names = names
+  gotoMode.listed = true
+  gotoMode.sel = Math.min(gotoMode.sel, Math.min(names.length, GOTO_LIMIT) - 1)
+  void $.ui.invalidate('ui.render')
+}
+
+async function gotoOpen($: EngineInterface): Promise<void> {
+  if (zjump.on) jumpClose($)
+  const shown = shortPath((await get($)).root)
+  Object.assign(gotoMode, { on: true, typed: shown.endsWith('/') ? shown : `${shown}/`, sel: -1, dir: '', names: [], listed: false, note: '', held: false, focused: false, miss: 0 })
+  void $.ui.invalidate('ui.render')
+  void gotoRefresh($)
+  $.clock.after(50, async () => focusPane($, (await get($)).root, gotoField()))
+}
+
+function gotoClose($: EngineInterface, refocus = false): void {
+  Object.assign(gotoMode, { on: false, typed: '', sel: -1, names: [], note: '' })
+  gotoMode.seq += 1
+  void $.ui.invalidate('ui.render')
+  if (refocus) $.clock.after(50, async () => focusPane($, (await get($)).root, 'hk-tree'))
+}
+
+async function gotoInput($: EngineInterface, value: string): Promise<void> {
+  if (!gotoMode.on || value === gotoValue()) return
+  Object.assign(gotoMode, { typed: value, sel: -1, note: '' })
+  void $.ui.invalidate('ui.render')
+  await gotoRefresh($)
+}
+
+async function gotoNext($: EngineInterface, complete: boolean): Promise<void> {
+  gotoMode.field += 1
+  if (complete && gotoMode.sel < 0) {
+    const { head, frag } = pathParts(posix(gotoMode.typed))
+    const done = completion(head, frag, gotoMode.names)
+    if (done) return gotoInput($, head + done)
+  }
+  gotoMode.sel = Math.min(gotoRows().length - 1, gotoMode.sel + 1)
+  void $.ui.invalidate('ui.render')
+}
+
+async function gotoSubmit($: EngineInterface, text?: string): Promise<void> {
+  if (text !== undefined) await gotoInput($, text)
+  const dir = resolve((await get($)).root, gotoValue(), home)
+  const kind = await $.fs.stat(dir).then(s => s.kind, () => '')
+  if (!gotoMode.on) return
+  if (kind === 'dir') return gotoTo($, dir)
+  gotoMode.note = kind ? 'not a folder' : 'no such folder'
+  gotoMode.miss += 1
+  void $.ui.invalidate('ui.render')
+  focusPane($, (await get($)).root, gotoField())
+}
+
+async function gotoTo($: EngineInterface, dir: string): Promise<void> {
+  gotoClose($)
+  await jumpTo($, dir)
+}
+
+async function gotoKey($: EngineInterface, key: string, shift = false): Promise<void> {
+  gotoMode.field += 1
+  if (key === 'escape') gotoClose($, true)
+  else if (key === 'return' || key === 'enter') await gotoSubmit($)
+  else if (key === 'tab' && !shift) await gotoNext($, true)
+  else if (key === 'down') await gotoNext($, false)
+  else if (key === 'up' || key === 'tab') {
+    gotoMode.sel = Math.max(-1, gotoMode.sel - 1)
+    void $.ui.invalidate('ui.render')
+  } else if (key === 'backspace' || key === 'delete') await gotoInput($, gotoValue().slice(0, -1))
+  else if (key === 'space' || key === ' ' || [...key].length === 1) await gotoInput($, gotoValue() + (key === 'space' ? ' ' : key))
 }
 
 async function searchFlag($: EngineInterface, flag: SearchFlag): Promise<void> {
@@ -2871,8 +2978,10 @@ async function ghosttyColors($: EngineInterface): Promise<TermColors> {
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
   if (zjump.on) return jumpKey($, shift && [...key].length === 1 ? key.toUpperCase() : key)
+  if (gotoMode.on) return gotoKey($, shift && [...key].length === 1 ? key.toUpperCase() : key, shift)
   if (shortcutKey($, key, surface)) return
   if (key === 'z') return jumpOpen($)
+  if (key === 'e') return gotoOpen($)
   if (grepOn(await get($)) && ((await grepNav($, key, surface)) || (await grepAct($, key, shift, surface)))) return
   await steer($, key, shift, surface)
   if (autoOpened.size) claimMarks((await get($)).cursor)
@@ -2999,6 +3108,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'case') await searchFlag($, 'searchCase')
   else if (id === 'regex') await searchFlag($, 'searchRegex')
   else if (id === 'content') await searchFlag($, 'searchContent')
+  else if (id === 'goto') await (gotoMode.on ? gotoClose($, true) : gotoOpen($))
 }
 
 function loadGuards($: EngineInterface): Promise<void> {
@@ -3170,6 +3280,7 @@ export const register: Register = (on, options) => {
     if (mine?.isShown) {
       noDock = true
       if (zjump.on) jumpClose($)
+      if (gotoMode.on) gotoClose($)
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: 'File tree closed.' }
     }
@@ -3343,6 +3454,10 @@ export const register: Register = (on, options) => {
       if (zjump.rows.includes(data.press)) await jumpTo($, data.press)
       return {}
     }
+    if (typeof data.press === 'string' && gotoMode.on) {
+      if (gotoRows().includes(data.press)) await gotoTo($, data.press)
+      return {}
+    }
     if (typeof data.press === 'string' && data.press.startsWith('grep:')) {
       const at = grep.rows.findIndex(h => grepId(h) === data.press)
       const hit = grep.rows[at]
@@ -3420,6 +3535,7 @@ export const register: Register = (on, options) => {
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE && zjump.on) jumpClose($)
+    if (e.id === PANE && gotoMode.on) gotoClose($)
     if (e.id === PANE) {
       shortcutsShown = shortcutsSetting === 'always'
       shortcutsTop = 0
@@ -3430,6 +3546,10 @@ export const register: Register = (on, options) => {
   on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (zjump.on && e.origin.kind === 'person' && (e.element === 'jump-up' || e.element === 'jump-down')) {
       await jumpKey($, e.element === 'jump-up' ? 'up' : 'down')
+      return {}
+    }
+    if (gotoMode.on && e.origin.kind === 'person' && (e.element === 'goto-up' || e.element === 'goto-down')) {
+      await gotoKey($, e.element === 'goto-up' ? 'up' : 'tab')
       return {}
     }
     const result = await next(e)
@@ -3448,7 +3568,7 @@ export const register: Register = (on, options) => {
       scrollSplit($, peekTop + Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
       return {}
     }
-    if (shortcutsShown && !zjump.on) {
+    if (shortcutsShown && !zjump.on && !gotoMode.on) {
       scrollShortcuts($, Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
       return {}
     }
@@ -3524,6 +3644,11 @@ export const register: Register = (on, options) => {
     if (zjump.on) {
       if (e.props.isFocused) zjump.held = true
       else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($) : undefined))
+    }
+    if (gotoMode.on) {
+      gotoMode.focused = Boolean(e.props.isFocused)
+      if (e.props.isFocused) gotoMode.held = true
+      else if (gotoMode.held) $.clock.after(JUMP_BLUR_MS, () => (gotoMode.on && gotoMode.held && !gotoMode.focused ? gotoClose($) : undefined))
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
@@ -3777,7 +3902,7 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = rowsOf(t)
-    const grepping = !zjump.on && grepOn(t)
+    const grepping = !zjump.on && !gotoMode.on && grepOn(t)
     if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
     const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
@@ -4061,6 +4186,13 @@ export const register: Register = (on, options) => {
     const jumpSpecs: RowSpec[] = zjump.rows.length
       ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
       : [note('no matching folder')]
+    const gotoShown = gotoRows()
+    const gotoMore = gotoMode.names.length - gotoShown.length
+    const gotoSpecs: RowSpec[] = [
+      ...(gotoMode.note ? [{ id: '', left: clean([{ t: gotoMode.note, c: theme.urgent || undefined }]), right: [] }] : []),
+      ...(gotoShown.length ? gotoShown.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.slice(dir.lastIndexOf('/') + 1), c: theme.fg || undefined }]), right: [] })) : [note(gotoMode.listed ? 'no matching folder' : ' ')]),
+      ...(gotoMore > 0 ? [note(`  … ${gotoMore} more, keep typing`)] : []),
+    ]
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
     const grepNode = (path: string): FileNode => ({ id: path, parent: dirname(path), name: path.slice(path.lastIndexOf('/') + 1), kind: 'file', hidden: false, mtime: 0, size: 0, loaded: true })
@@ -4073,7 +4205,7 @@ export const register: Register = (on, options) => {
         : { id: grepId(h), left: clean([{ t: `${unicode ? '∙' : fileIcon(grepNode(h.path), false, false)} `, c: theme.muted }, { t: grepName(h.path), c: theme.fg || undefined, b: true }]), right: [{ t: ` ${h.text} `, c: theme.muted }] }),
       ...(grepNote ? [note(grepNote)] : []),
     ]
-    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : [
+    const specs: RowSpec[] = zjump.on ? jumpSpecs : gotoMode.on ? gotoSpecs : grepping ? grepSpecs : [
       ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
@@ -4154,6 +4286,36 @@ export const register: Register = (on, options) => {
               </Box>
             </Box>
           )}
+        </Box>
+      )
+      if (gotoMode.on) return (
+        <Box key="goto-list" flexDirection="column">
+          {gotoMode.note ? (
+            <Box key="goto-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+              {Svg ? <Svg key="goto-note-icon" source={rowSvg(0, null, 'warning', ink(theme.urgent, DESK.urgent))} alt={gotoMode.note} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+              <Text {...tint(theme.urgent)}>{gotoMode.note}</Text>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:goto-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ) : null}
+          {gotoShown.map((dir, k) => (
+            <Box key={`goto:${dir}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === gotoMode.sel ? deskSel : undefined} hover={{ backgroundColor: k === gotoMode.sel ? deskSel : deskHover }}>
+              {Svg ? <Svg key={`goto-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+              <Box flexGrow={1} flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.slice(dir.lastIndexOf('/') + 1)}</Text></Box>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ))}
+          {gotoShown.length === 0 || gotoMore > 0 ? (
+            <Box key="goto-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+              <Text {...mutedText}>{gotoShown.length ? `${gotoMore} more, keep typing` : gotoMode.listed ? 'no matching folder' : ' '}</Text>
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="hit:goto-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+          ) : null}
         </Box>
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
@@ -4455,6 +4617,7 @@ export const register: Register = (on, options) => {
       { key: 'i', label: 'in folder', act: () => void navigate($, 'i', false, e.surface) },
       { key: 'a', label: 'auto-collapse', act: () => void navigate($, 'a', false, e.surface).then(park) },
       { key: 'z', label: 'jump', act: () => void navigate($, 'z', false, e.surface) },
+      { key: 'e', label: 'go to a path', act: () => void navigate($, 'e', false, e.surface) },
       { key: 'n', label: 'sort name', act: () => void navigate($, 'n', false, e.surface).then(park) },
       { key: 'g', label: 'sort git', act: () => void navigate($, 'g', false, e.surface).then(park) },
       { key: 'm', label: 'sort value', act: () => void navigate($, 'm', false, e.surface).then(park) },
@@ -4470,7 +4633,15 @@ export const register: Register = (on, options) => {
       { key: 'q', label: 'contents', act: () => void navigate($, 'q', false, e.surface).then(park) },
       ...(paging ? [{ key: '[ ]', label: 'page', act: () => void (turnPage($, 1), park()) }] : []),
     ]
-    const overlay = shortcutsShown && !zjump.on
+    const overlay = shortcutsShown && !zjump.on && !gotoMode.on
+    const gotoGlyph = glyphSetting === 'text' ? 'goto' : unicode ? '■' : '\u{e5ff}'
+    const pathField = (submitLabel?: string) => <>
+      <Box key="goto-up-box" height={0} overflow="hidden"><Button key="goto-up" plain label="up" onPress={() => void gotoKey($, 'up')} /></Box>
+      <Box key={`goto-field-${gotoMode.field}`} flexGrow={1}>
+        <Input key={gotoField()} autoFocus placeholder="folder path…" {...(submitLabel ? { submitLabel } : {})} value={gotoValue()} onInput={(v: string) => void gotoInput($, v)} onSubmit={(v: string) => void gotoSubmit($, v)} />
+      </Box>
+      <Box key="goto-down-box" height={0} overflow="hidden"><Button key="goto-down" plain label="down" onPress={() => void gotoKey($, 'tab')} /></Box>
+    </>
     const keyRows = overlay && !desk ? shortcutRows(theme.accent, theme.muted) : []
     shortcutsPage = room
     shortcutsMax = Math.max(0, keyRows.length - room)
@@ -4500,7 +4671,7 @@ export const register: Register = (on, options) => {
         </Box>
       )
     }
-    const hidden: [string, () => void][] = zjump.on ? [] : [
+    const hidden: [string, () => void][] = zjump.on || gotoMode.on ? [] : [
       ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, shortcutsShown || grepping ? e.surface : undefined).then(park)]),
       ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
       ...(splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
@@ -4548,16 +4719,22 @@ export const register: Register = (on, options) => {
         {searchGap ? <Text key="gap-above"> </Text> : null}
         {desk && Svg ? (
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
-            <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
+            <Box key="tool-goto" position="relative" flexShrink={0} flexDirection="row" alignItems="center">
+              <Svg key={`goto-icon-${gotoMode.on ? 'on' : 'off'}`} source={iconSvg('folder-line', glow(gotoMode.on ? accentInk : mutedInk, 'goto'), 16)} alt={gotoMode.on ? 'close the folder path' : 'go to a folder path'} width={16} height={16} />
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client key="button-goto" module="./button.tsx" props={{ id: 'goto', label: '', dim: !gotoMode.on } satisfies ButtonProps} width="100%" height="100%" />
+              </Box>
+            </Box>
+            {gotoMode.on ? null : <Box key="search-icon-box" flexShrink={0} marginLeft={1} flexDirection="row" alignItems="center"><Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} /></Box>}
             {zjump.on ? (
               <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentText}>jump</Text></Box>
-            ) : scopeChip()}
-            <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
+            ) : gotoMode.on ? null : scopeChip()}
+            <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (gotoMode.on ? 6 : t.query ? 21 : 19))}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
                 <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
-              </> : <Input
+              </> : gotoMode.on ? pathField() : <Input
                 key="q"
                 placeholder={t.searchContent ? 'Search file contents...' : 'Search files...'}
                 value={t.query}
@@ -4565,23 +4742,27 @@ export const register: Register = (on, options) => {
                 onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
-            {t.query ? <Button key="clear" plain dimColor label="×" onPress={() => void search($, '')} /> : null}
-            <Box flexShrink={0} flexDirection="row" gap={2} marginLeft={1} marginRight={1}>
-              {toggle('case', 'Aa', Boolean(t.searchCase), false)}
-              {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
-              {toggle('content', 'contents', Boolean(t.searchContent), false)}
-            </Box>
+            {t.query && !gotoMode.on ? <Button key="clear" plain dimColor label="×" onPress={() => void search($, '')} /> : null}
+            {gotoMode.on ? null : (
+              <Box flexShrink={0} flexDirection="row" gap={2} marginLeft={1} marginRight={1}>
+                {toggle('case', 'Aa', Boolean(t.searchCase), false)}
+                {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+                {toggle('content', 'contents', Boolean(t.searchContent), false)}
+              </Box>
+            )}
           </Box>
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
-            {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : scopeChip()}
+            <Button key="goto-open" plain label={gotoGlyph} onPress={() => void pressHeader($, 'goto')}><Text {...(gotoMode.on ? { color: theme.accent, bold: true } : mutedText)}>{gotoGlyph}</Text></Button>
+            <Text> </Text>
+            {glyphSetting === 'text' || gotoMode.on ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
+            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : gotoMode.on ? null : scopeChip()}
             <Box flexGrow={1}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
                 <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />
                 <Box key="jump-down-box" height={0} overflow="hidden"><Button key="jump-down" plain label="down" onPress={() => void jumpKey($, 'down')} /></Box>
-              </> : <Input
+              </> : gotoMode.on ? pathField('go') : <Input
                 key="q"
                 placeholder={t.searchContent ? 'search contents' : 'search'}
                 submitLabel="go"
@@ -4590,13 +4771,15 @@ export const register: Register = (on, options) => {
                 onSubmit={(v: string) => void jump($, v, e.surface).then(() => $.clock.after(100, park))}
               />}
             </Box>
-            {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
-            <Box flexShrink={0} flexDirection="row" gap={1} marginLeft={1}>
-              {toggle('case', 'Aa', Boolean(t.searchCase), false)}
-              {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
-              {toggle('content', glyphSetting === 'text' ? 'in' : unicode ? '≡' : '\u{f09aa}', Boolean(t.searchContent), false)}
-              <Text> </Text>
-            </Box>
+            {t.query && !gotoMode.on ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{ea76}'} onPress={() => void search($, '')} /> : null}
+            {gotoMode.on ? null : (
+              <Box flexShrink={0} flexDirection="row" gap={1} marginLeft={1}>
+                {toggle('case', 'Aa', Boolean(t.searchCase), false)}
+                {toggle('regex', '.*', Boolean(t.searchRegex), badPattern(t.query, Boolean(t.searchRegex)))}
+                {toggle('content', glyphSetting === 'text' ? 'in' : unicode ? '≡' : '\u{f09aa}', Boolean(t.searchContent), false)}
+                <Text> </Text>
+              </Box>
+            )}
           </Box>
         )}
         {sortHeader ? headerRow() : null}{sortHeader ? headerRule() : searchGap ? <Text key="gap-below"> </Text> : null}
@@ -4604,7 +4787,7 @@ export const register: Register = (on, options) => {
           <Client
             key="rows"
             module="./rows.tsx"
-            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : gotoMode.on ? (gotoShown[gotoMode.sel] ?? '') : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
