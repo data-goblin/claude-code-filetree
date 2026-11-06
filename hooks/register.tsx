@@ -59,6 +59,7 @@ import {
 import { compileRegex, toEre } from './regex'
 import { SCROLL_KEYS, shortcutGroups, shortcutRows } from './keys'
 import { settings, machine, tree, vcs, flashing, marking, ui, previewing, pics, working, linking, guarding, mapping, metrics, grep, zjump } from './state'
+import { PANE, BRANCH_ROW, OUTSIDE, DOUBLE_MS, SPIN_MS, ROOT_PRESS } from './consts'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
@@ -67,14 +68,11 @@ const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
 const JUMP_BLUR_MS = 400
 const JUMP_RECENT = 10
-const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
-const BRANCH_ROW = '#branch'
 const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
 const NO_REPO_DEPTH = 4
-const DOUBLE_MS = 450
 const FIND_LIMIT = 200
 const GREP_LIMIT = 200
 const MARK_LIMIT = 100
@@ -99,7 +97,6 @@ type Col = (typeof COLS)[number]
 const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
 const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
-const SPIN_MS = 400
 const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
@@ -124,7 +121,6 @@ const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
 const SHIMMER_KEY = /^filetree(@[^.]+)?\.shimmer$/
-const OUTSIDE = 'writes outside the repo'
 
 let gitPoll: Timer | null = null
 let gitDirOf = { root: '', dir: '' }
@@ -151,7 +147,6 @@ let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
 let markId = 0
 let listSeq = 0
 let lastRoot = ''
-const ROOT_PRESS = '\u0000root'
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
