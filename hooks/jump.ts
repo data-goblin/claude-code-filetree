@@ -53,3 +53,9 @@ export function rankJump(candidates: Candidate[], query: string, limit = 50): st
     .slice(0, limit)
     .map(r => r.path)
 }
+
+export function recentJump(visits: Record<string, Visit>): string[] {
+  return Object.entries(visits)
+    .sort((a, b) => b[1].at - a[1].at)
+    .map(([path]) => path)
+}

@@ -8,7 +8,7 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
-import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { type Candidate, type Visit, frecency, parseZoxide, rankJump, recentJump } from './jump'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
@@ -67,6 +67,7 @@ const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
 const JUMP_BLUR_MS = 400
+const JUMP_RECENT = 10
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
@@ -1973,14 +1974,16 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
     for (let d = dirname(p); d.length > t.root.length && !dirs.has(d); d = dirname(d)) dirs.add(d)
   }
   for (const d of dirs) cands.push({ path: d, score: 0 })
-  const ranked = rankJump(cands, zjump.query).filter(p => p !== t.root || zjump.query.trim() !== '')
+  const typed = zjump.query.trim() !== ''
+  const recent = typed ? [] : recentJump(seen).map(posix).filter(p => p !== t.root).slice(0, JUMP_RECENT * 2)
+  const ranked = typed ? rankJump(cands, zjump.query) : [...new Set([...recent, ...rankJump(cands, '').filter(p => p !== t.root)])]
   const known = new Set([t.root, ...dirs])
   const remembered = new Set(Object.keys(seen).map(posix))
   const there = await Promise.all(ranked.map(async p => known.has(p) || !remembered.has(p) || (jumpExists.get(p) ?? jumpExists.set(p, await $.fs.exists(p).catch(() => false)).get(p) ?? false)))
   if (mine !== zjump.seq || !zjump.on) return
   const gone = ranked.filter((_, k) => !there[k])
   if (gone.some(p => p in seen)) await forgetVisits($, gone)
-  zjump.rows = ranked.filter((_, k) => there[k])
+  zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
   zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
   void $.ui.invalidate('ui.render')
