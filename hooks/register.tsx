@@ -13,7 +13,7 @@ import { pickRepo, shellPaths, shellWrites, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
-import { CELL_PROBE, colorOf, GHOSTTY_ARGS, narrowEmoji, parseGhostty, type TermColors } from './term'
+import { colorOf, narrowEmoji, finePointerOk, cellPixels, ghosttyColors, fontState, NERD_PROBE } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
@@ -105,15 +105,6 @@ const ACTIVITY_TTL_MS = 45_000
 const COLLAPSE_MS = 10_000
 const EXPAND_MAX = 150
 const GIT_POLL_MS = 2000
-const FONT_SCRIPT =
-  'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | grep -vi lastresort | head -n1 | cut -d: -f1); fi; ' +
-  '[ -n "$f" ] || for g in "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd*; do [ -f "$g" ] && LC_ALL=C grep -aqE "Nerd Fonts (3\\.([2-9]|[1-9][0-9])|[4-9]|[1-9][0-9]+)\\." "$g" && { f=$g; break; }; done; ' +
-  '[ -n "$f" ] || { echo missing; exit 0; }; m=$(stat -c %Z "$f" 2>/dev/null || stat -f %c "$f"); p=$PPID; ' +
-  'while [ -n "$p" ] && [ "$p" -gt 1 ]; do c=$(ps -o comm= -p "$p" 2>/dev/null); c=$(basename "$c" 2>/dev/null | tr -d " "); case "$c" in ' +
-  'ghostty|kitty|alacritty|Alacritty|foot|footclient|wezterm-gui|konsole|gnome-terminal-|xterm|urxvt|st|Terminal|iTerm2) ' +
-  'e=$(ps -o etime= -p "$p" 2>/dev/null | awk -F\'[-:]\' \'{n=NF; s=$n+60*$(n-1); if (n>2) s+=3600*$(n-2); if (n>3) s+=86400*$(n-3); print s}\'); [ -n "$e" ] && [ $(( $(date +%s) - e )) -lt "$m" ] && echo stale || echo ok; exit 0;; esac; ' +
-  'p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d " "); done; echo ok'
-const NERD_PROBE = 'f04eb ebff ebf6 ec01'
 const PRUNE = ['.git', 'node_modules', 'target', '.venv', '__pycache__', 'dist', '.next']
 const HOME_PRUNE = ['Library', 'AppData', '.Trash']
 const SIZE_TIMEOUT_MS = 15_000
@@ -1989,26 +1980,6 @@ async function jump($: EngineInterface, query: string, surface?: RenderSurface):
   })
 }
 
-async function fontState($: EngineInterface, charset: string): Promise<'ok' | 'stale' | 'missing'> {
-  try {
-    const out = (await $.process.run(['sh', '-c', FONT_SCRIPT, 'sh', charset], { timeoutMs: 5_000 })).stdout.trim()
-    return out === 'stale' || out === 'missing' ? out : 'ok'
-  } catch {
-    return 'missing'
-  }
-}
-
-async function finePointerOk($: EngineInterface): Promise<boolean> {
-  if (!(await $.env.get('HERDR_ENV'))) return true
-  try {
-    const out = (await $.process.run([(await $.env.get('HERDR_BIN_PATH')) || 'herdr', '--version'], { timeoutMs: 3_000 })).stdout
-    const [major = 0, minor = 0, fix = 0] = (/(\d+)\.(\d+)\.(\d+)/.exec(out) ?? []).slice(1).map(Number)
-    return major * 1e6 + minor * 1e3 + fix >= 9_001
-  } catch {
-    return false
-  }
-}
-
 const PREVIEW_CHARS = 90_000
 const PREVIEW_LINE = 2_000
 
@@ -2699,23 +2670,6 @@ function turnPage($: EngineInterface, by: number): boolean {
     void $.ui.invalidate('ui.render')
   }
   return true
-}
-
-async function cellPixels($: EngineInterface): Promise<{ cw: number; ch: number } | null> {
-  try {
-    const [cw = 0, ch = 0] = (await $.process.run(['python3', '-I', '-c', CELL_PROBE], { timeoutMs: 3_000 })).stdout.trim().split(/\s+/).map(Number)
-    return cw > 2 && ch > 4 ? { cw, ch } : null
-  } catch {
-    return null
-  }
-}
-
-async function ghosttyColors($: EngineInterface): Promise<TermColors> {
-  const args = (await $.process.run(['sh', '-c', GHOSTTY_ARGS], { timeoutMs: 3_000 }).catch(() => ({ stdout: '' }))).stdout.split('\n')
-  const files = args.filter(a => a.startsWith('--config-file=')).map(a => a.slice('--config-file='.length).replace(/^\?/, ''))
-  const own = args.includes('--config-default-files=false') ? '' : (await $.process.run(['ghostty', '+show-config'], { timeoutMs: 3_000 }).catch(() => ({ stdout: '' }))).stdout
-  const read = await Promise.all(files.map(f => $.fs.read(f).then(String, () => '')))
-  return parseGhostty([own, ...read, ...args.filter(a => a.startsWith('--'))].join('\n'))
 }
 
 async function navigate($: EngineInterface, key: string, shift = false, surface?: RenderSurface): Promise<void> {
