@@ -55,6 +55,7 @@ type World = {
   fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
+  store?: Readonly<Record<string, unknown>>
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -66,7 +67,7 @@ const spawns: { argv: string[]; env: Record<string, string> }[] = []
 function world(on: On, w: World, ran: Ran) {
   mock.env(on, w.env)
   const clock = mock.clock(on, { now: 1_800_000_000_000 })
-  mock.store(on)
+  mock.store(on, w.store)
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: 'test-session' }))
@@ -707,6 +708,102 @@ test('desktop: past a few lit rows the names stop running their own shimmer cloc
   expect(await texts(ui)).toContain('"children":["f09.txt"]')
   await ui.unmount()
 })
+
+const shimmering = (tree: unknown): Seg[] => every(tree, n => has(n, 'type') && n.type === 'Client').map(n => propsOf(propsOf(n))).filter(isRowsProps).flatMap(p => p.rows.flatMap(r => [...r.left, ...r.right])).filter(s => s.sh)
+const fillOf = (source: string): string => /fill="(#[0-9a-f]{6})"/.exec(source)?.[1] ?? ''
+const strokeOf = (source: string): string => / stroke="(#[0-9a-f]{6})"/.exec(source)?.[1] ?? ''
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: the Clawd header button stops the activity shimmer, a second press brings it back, and a new session keeps the choice`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/Users/k/lit'
+    const names = Array.from({ length: 12 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
+    const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '', store: { shimmer: false } }, [])
+    on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+    const start = async () => {
+      await $.session.start({ cwd: root, surface, isInteractive: true })
+      await clock.settle()
+      const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+      await clock.settle()
+      return ui
+    }
+    type Ui = Awaited<ReturnType<typeof start>>
+    const restart = async (ui: Ui) => {
+      await ui.unmount()
+      await $.session.end({ reason: 'other', sessionId: 'test-session', resume: { id: 'test-session' } })
+      return start()
+    }
+    const press = async (ui: Ui) => {
+      if (surface === 'desktop') {
+        await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+        await tap(ui, 'shimmer')
+        await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+      } else await ui.press({ key: 'shimmer' })
+      await clock.settle()
+    }
+    const read = async (count: number) => {
+      await clock.advance(3_000)
+      for (const [name] of names.slice(0, count)) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+      await clock.settle()
+    }
+    const hint = async (ui: Ui) => {
+      await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+      await clock.settle()
+      const shown = await texts(ui)
+      await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+      await clock.settle()
+      return /"((?:en|dis)able agent activity shimmer effect) ?"/.exec(shown)?.[1]
+    }
+    const look = async (ui: Ui) => {
+      const tree = await ui.drawn()
+      if (surface === 'terminal') return clientProps(tree, 'button-shimmer')
+      const icon = (alt: string) => svgs(tree).find(s => s.alt === alt)?.source ?? ''
+      const clawd = icon('shimmer button')
+      expect(clawd).toContain(ICONS.clawd)
+      return fillOf(clawd) === strokeOf(icon('dots button')) ? 'blue like the shown dots' : fillOf(clawd) === strokeOf(icon('up button')) ? 'grey like up' : clawd
+    }
+    const lit = async (ui: Ui) => {
+      const tree = await ui.drawn()
+      return { segs: shimmering(tree).length, clients: every(tree, n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:')).length }
+    }
+    const ticks = async (ui: Ui) => {
+      const key = surface === 'desktop' ? `lit:${root}/f00.txt` : 'rows'
+      const before = JSON.stringify(await ui.drawn({ in: key }))
+      await ui.advance(450)
+      return JSON.stringify(await ui.drawn({ in: key })) !== before
+    }
+    const ON = surface === 'desktop' ? 'blue like the shown dots' : { id: 'shimmer', label: '✻', dim: false, color: 'ansi256(4)' }
+    const OFF = surface === 'desktop' ? 'grey like up' : { id: 'shimmer', label: '✻', dim: true, color: 'ansi256(4)' }
+    const LIT = { segs: surface === 'desktop' ? 3 : 6, clients: surface === 'desktop' ? 3 : 0 }
+    const DARK = { segs: 0, clients: 0 }
+    let ui = await start()
+    expect(await look(ui)).toEqual(OFF)
+    expect(await hint(ui)).toBe('enable agent activity shimmer effect')
+    await read(10)
+    expect(await lit(ui)).toEqual(DARK)
+    if (surface === 'terminal') expect(await ticks(ui)).toBe(false)
+    expect(await texts(ui)).toContain('f09.txt')
+    await press(ui)
+    expect(await look(ui)).toEqual(ON)
+    expect(await hint(ui)).toBe('disable agent activity shimmer effect')
+    await read(3)
+    expect(await lit(ui)).toEqual(LIT)
+    expect(await ticks(ui)).toBe(true)
+    await press(ui)
+    expect(await look(ui)).toEqual(OFF)
+    expect(await lit(ui)).toEqual(DARK)
+    await press(ui)
+    ui = await restart(ui)
+    expect(await look(ui)).toEqual(ON)
+    await read(3)
+    expect(await lit(ui)).toEqual(LIT)
+    await press(ui)
+    ui = await restart(ui)
+    expect(await look(ui)).toEqual(OFF)
+    await read(3)
+    expect(await lit(ui)).toEqual(DARK)
+    await ui.unmount()
+  })
+}
 
 test('desktop: a very large open tree is cut with a note so the drawn tree stays within the engine bounds', { timeoutMs: 30_000 }, async ($, on) => {
   const root = '/Users/k/huge'
@@ -3102,10 +3199,10 @@ test('terminal: git counts sit in their own columns left of the value column', {
 })
 
 const GLYPH_SETS: [string, Record<string, string>, string, string[], string, string, string][] = [
-  ['nerd', { glyphs: 'nerd' }, 'ok', ['\u{f19f3}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}'], '\u{ea6d} ', '\u{e5ff} ', '\u{f0354} '],
-  ['auto without a Nerd Font', {}, 'missing', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
-  ['plain', { glyphs: 'plain' }, 'ok', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡'], '⌕ ', '■ ', '∙ '],
-  ['text', { glyphs: 'text' }, 'ok', ['up', 'cwd', 'sync', 'dots', 'size', 'fold', 'split'], '', '■ ', '∙ '],
+  ['nerd', { glyphs: 'nerd' }, 'ok', ['\u{f19f3}', '\u{eb46}', '\u{eb37}', '\u{ea70}', '\u{ea90}', '\u{eac5}', '\u{eb57}', '\u{ec10}'], '\u{ea6d} ', '\u{e5ff} ', '\u{f0354} '],
+  ['auto without a Nerd Font', {}, 'missing', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡', '✻'], '⌕ ', '■ ', '∙ '],
+  ['plain', { glyphs: 'plain' }, 'ok', ['↑', '⌂', '↻', '⊙', '◫', '⊟', '⊡', '✻'], '⌕ ', '■ ', '∙ '],
+  ['text', { glyphs: 'text' }, 'ok', ['up', 'cwd', 'sync', 'dots', 'size', 'fold', 'split', 'shimmer'], '', '■ ', '∙ '],
 ]
 for (const [name, options, font, labels, lens, dirGlyph, fileGlyph] of GLYPH_SETS) {
   test(`terminal regression: the ${name} glyph set draws single-cell toolbar, search and tree glyphs`, { timeoutMs: 20_000, options }, async ($, on) => {
@@ -3116,7 +3213,7 @@ for (const [name, options, font, labels, lens, dirGlyph, fileGlyph] of GLYPH_SET
     const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(80) })
     await clock.settle()
     const tree = await ui.drawn()
-    const drawn = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'split'].map(id => {
+    const drawn = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'split', 'shimmer'].map(id => {
       const props = clientProps(tree, `button-${id}`)
       return has(props, 'label') ? props.label : undefined
     })
@@ -3671,7 +3768,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.settle()
     const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
     await clock.settle()
-    const ids = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'autocollapse', ...(surface === 'terminal' ? ['split'] : [])]
+    const ids = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'autocollapse', 'shimmer', ...(surface === 'terminal' ? ['split'] : [])]
     for (const id of ids) {
       const before = await texts(ui)
       await ui.pointer({ type: 'enter', x: 0, y: 0, in: `button-${id}` })
