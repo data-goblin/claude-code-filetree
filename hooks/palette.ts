@@ -6,11 +6,13 @@ export type Palette = {
   add?: string
   del?: string
   hover?: string
+  jump?: string
   unknown: string[]
 }
 
 export const ADD_COLOR = 'ansi256(2)'
 export const DEL_COLOR = 'ansi256(1)'
+export const JUMP_COLOR = 'ansi256(5)'
 
 const THEME_KEYS = ['fg', 'bg', 'accent', 'muted', 'urgent', 'selection'] as const
 const isThemeKey = (key: string): key is (typeof THEME_KEYS)[number] => THEME_KEYS.some(k => k === key)
@@ -30,7 +32,7 @@ export function parsePalette(text: unknown): Palette {
     const color = value.trim().toLowerCase().replace(/^#(.)(.)(.)$/, '#$1$1$2$2$3$3')
     if (isThemeKey(key)) out.theme[key] = color
     else if (key in GIT_KEYS) for (const status of GIT_KEYS[key] ?? []) out.git[status] = color
-    else if (key === 'add' || key === 'del' || key === 'hover') out[key] = color
+    else if (key === 'add' || key === 'del' || key === 'hover' || key === 'jump') out[key] = color
     else out.unknown.push(pair)
   }
   return out

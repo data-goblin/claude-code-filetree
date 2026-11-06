@@ -1,6 +1,6 @@
 import { LIGHT_TONES, TONES } from '../hooks/git'
 import { GIT_COLOR } from '../hooks/icons'
-import { ADD_COLOR, DEL_COLOR } from '../hooks/palette'
+import { ADD_COLOR, DEL_COLOR, JUMP_COLOR } from '../hooks/palette'
 import { DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
 import { DESK, DESK_GIT, DESK_GIT_TEXT, selectionOn } from '../hooks/svg'
@@ -43,6 +43,7 @@ const PALETTE = [
   ['selection', DEFAULT_THEME.selection],
   ['add', ADD_COLOR],
   ['del', DEL_COLOR],
+  ['jump', JUMP_COLOR],
   ...Object.entries(GIT_COLOR).map(([k, color]) => [`git ${k}`, color]),
 ]
 
@@ -63,7 +64,7 @@ const suites = [
     name: name as string,
     backgrounds: deskBackgrounds(bases as Record<string, string>),
     checks: [
-      ...(['accent', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
+      ...(['accent', 'jump', 'muted', 'urgent'] as const).map(k => ({ name: `desk icon ${k}`, color: DESK[k], min: TEXT, skip: 'selection' })),
       ...Object.entries(DESK_GIT).map(([k, color]) => ({ name: `desk git icon ${k}`, color, min: TEXT, skip: 'selection' })),
       ...Object.entries(DESK_GIT_TEXT).filter(([, color]) => color.startsWith('#')).map(([k, color]) => ({ name: `desk git text ${k}`, color, min: TEXT, skip: 'selection' })),
     ],
