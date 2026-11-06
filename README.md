@@ -140,6 +140,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 - The Desktop app has no split preview or treemap
 - The Desktop app shimmers at most four rows at once; more lit rows show in their color without the shimmer, while the terminal shimmers them all
+- The Desktop app draws at most 150 rows around the cursor, and fewer under a long path; a note counts the rows it leaves out
 - GIFs and videos show one still frame
 - Windows sizes folders through file listings, and the treemap draws one level
 - Row clicks need herdr 0.9.1 or later; run `herdr update`

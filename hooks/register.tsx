@@ -84,7 +84,9 @@ const GREP_WORK = 50_000_000
 const GREP_LINE = 10_000
 const IMAGE_BYTES = 2_097_152
 const ROWS_BUDGET = 80_000
-const DESK_ROWS = 400
+const DESK_ROWS = 150
+const DESK_PAGE_CHARS = 200_000
+const DESK_ROW_PAGE = 1_000
 const DESK_SHIMMER_MAX = 4
 const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
@@ -4087,9 +4089,11 @@ export const register: Register = (on, options) => {
     const deskParts: ReturnType<typeof rowParts>[] = []
     if (desk) {
       let size = 0
+      let page = 0
       for (const r of drawn) {
-        size += r.node.name.length + DESK_ROW_CHARS
-        if (size > ROWS_BUDGET) break
+        size += r.node.name.length + 7 * r.node.id.length + 3 * DESK_ROW_CHARS
+        page += DESK_ROW_PAGE + 5 * r.node.id.length
+        if (size > ROWS_BUDGET || page > DESK_PAGE_CHARS) break
         deskParts.push(rowParts(r))
       }
     }
@@ -4097,9 +4101,11 @@ export const register: Register = (on, options) => {
     const deskGrep: GrepHit[] = []
     if (desk && grepping) {
       let size = 0
+      let page = 0
       for (const g of grep.rows) {
-        size += DESK_ROW_CHARS + 6 * grepId(g).length + g.text.length
-        if (size > ROWS_BUDGET) break
+        size += DESK_ROW_CHARS + 7 * grepId(g).length + g.text.length
+        page += DESK_ROW_PAGE + 5 * grepId(g).length + g.text.length
+        if (size > ROWS_BUDGET || page > DESK_PAGE_CHARS || deskGrep.length >= DESK_ROWS) break
         deskGrep.push(g)
       }
     }

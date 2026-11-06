@@ -4180,7 +4180,7 @@ test('the contents toggle searches file contents, groups matches per file, opens
   await clock.settle()
   const drawn = JSON.stringify(await desktop.drawn())
   expect(drawn).toContain(`hit:grep:1:${root}/b.md`)
-  expect(drawn).toContain('first 200 matches; keep typing to narrow')
+  expect(drawn).toMatch(/first 150 of \d+ rows; keep typing to narrow/)
   await desktop.post({ press: `grep:3:${root}/b.md` }, { in: `hit:grep:3:${root}/b.md` })
   await clock.settle()
   expect(JSON.stringify(await desktop.drawn())).toContain('pv-head')
@@ -5401,5 +5401,88 @@ test('desktop (#53): every background is translucent or a theme key and no text 
   await clock.settle()
   check(await ui.drawn())
   expect([...new Set(bad)]).toEqual([])
+  await ui.unmount()
+})
+
+const LONG_ROOT = '/private/tmp/claude-501/-Users-klonk-Git-claude-code-filetree/01e33f56-c371-46c0-800b-8edda21cf448/scratchpad/flood'
+
+function withinPage(tree: unknown) {
+  const text = JSON.stringify(tree)
+  expect(every(tree, n => has(n, 'type')).length).toBeLessThan(1800)
+  expect(text.length).toBeLessThan(230_000)
+  expect(every(tree, n => keyOf(n).startsWith('hk-')).length).toBeGreaterThan(0)
+  return text
+}
+
+async function deskPane($: Engine, on: On, root: string, dirs: World['dirs'], extra: Partial<World> = {}) {
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs, status: '', numstat: '', ...extra }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  return { clock, ui }
+}
+
+const selected = async ($: Engine) => JSON.stringify(await $.prompt.submit({ text: 'x', wait: false, origin: { kind: 'composer' } }))
+
+test('desktop (#63): a long root with 300 open files stays under the page caps, so the app accepts every redraw, and a real click selects the row under the pointer', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = Array.from({ length: 300 }, (_, i): [string, 'file'] => [`m${String(i + 1).padStart(3, '0')}.sql`, 'file'])
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] })
+  await ui.post({ press: `${root}/migrations` }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  await ui.post({ key: 'l' }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  const text = withinPage(await ui.drawn())
+  expect(text).toContain('m001.sql')
+  expect(text).toContain('more rows, collapse folders or use search')
+  for (const id of [`${root}/migrations/m002.sql`, `${root}/migrations/m005.sql`]) {
+    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${id}` })
+    await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${id}` })
+    await clock.advance(1000)
+    await clock.settle()
+    expect(await selected($)).toContain(id)
+  }
+  await ui.unmount()
+})
+
+test('desktop (#63): a short root with 5000 files in one folder stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/huge'
+  const names = Array.from({ length: 5000 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+  const { ui } = await deskPane($, on, root, { [root]: names })
+  expect(withinPage(await ui.drawn())).toContain('more rows, collapse folders or use search')
+  await ui.unmount()
+})
+
+test('desktop (#63): a deep open tree under a long root stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const dirs: World['dirs'] = {}
+  let dir = root
+  for (let d = 0; d < 25; d++) {
+    const next = `${dir}/level-${String(d).padStart(2, '0')}-folder`
+    dirs[dir] = [[next.split('/').pop() ?? '', 'dir'], ...Array.from({ length: 20 }, (_, i): [string, 'file'] => [`file-${i}.ts`, 'file'])]
+    dir = next
+  }
+  dirs[dir] = [['leaf.ts', 'file']]
+  const { clock, ui } = await deskPane($, on, root, dirs)
+  await $.tool.call({ tool: 'Read', file_path: `${dir}/leaf.ts` })
+  await clock.settle()
+  withinPage(await ui.drawn())
+  await ui.unmount()
+})
+
+test('desktop (#63): 2000 short content matches stay under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 2000 }, (_, i) => `f${i}.ts\x001\x00x`).join('\n')}\n`, { os: 'darwin' }), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: `hit:${root}/a.ts` })
+  await ui.input({ key: 'q', text: 'x', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(withinPage(await ui.drawn())).toContain('keep typing to narrow')
   await ui.unmount()
 })
