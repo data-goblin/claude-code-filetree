@@ -1,7 +1,7 @@
 import type { DiffGroups } from './diff'
 import type { Target } from './open'
 import { parsePalette, type Palette } from './palette'
-import type { Background, Column, GrepHit, Indexed, LinkState, Preview, Scan } from './register'
+import type { Column, GrepHit, Indexed, LinkState, Preview, Scan } from './register'
 import type { Change, Clock, DateFormat } from './tree'
 import type { TermColors } from './term'
 import type { FileTree } from '../types'
@@ -9,6 +9,7 @@ import type { Timer } from 'claude-code'
 import type { Touch } from './work'
 import type { Guards } from './guard'
 import type { Picture } from './peek'
+import type { Background } from './gitstate'
 
 type Settings = {
   glyphSetting: string
