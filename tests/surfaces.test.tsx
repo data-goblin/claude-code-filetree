@@ -5670,3 +5670,40 @@ test('jump mode stays open through two short focus blips in a row, and a blip be
   expect(await open()).toBe(true)
   await ui.unmount()
 })
+
+test('an older jump listing still forgetting a missing folder never overwrites the rows of the query typed after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const seeded = { '/home/k/moved-away': { n: 9, at: 1_799_999_000_000 }, '/home/k/kept': { n: 9, at: 1_799_998_000_000 }, '/home/k/other': { n: 9, at: 1_799_997_000_000 } }
+  let saved: unknown = null
+  let slow = false
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: saved ?? seeded, version: 1 } } : next(e)))
+  on('state.set', async (_$, e, next) => {
+    if (e.key === 'visits') {
+      saved = e.value
+      if (slow) await clock.sleep(500)
+    }
+    return next(e)
+  })
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], '/home/k/kept': [['b.ts', 'file']], '/home/k/other': [['c.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  slow = true
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await ui.input({ key: 'jump', text: 'kept', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  await clock.advance(1000)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  expect(JSON.stringify(saved)).not.toContain('moved-away')
+  await ui.unmount()
+})

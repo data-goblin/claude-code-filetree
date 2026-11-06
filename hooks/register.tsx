@@ -1984,6 +1984,7 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
   if (mine !== zjump.seq || !zjump.on) return
   const gone = ranked.filter((_, k) => !there[k])
   if (gone.some(p => p in seen)) await forgetVisits($, gone)
+  if (mine !== zjump.seq || !zjump.on) return
   zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
   zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
