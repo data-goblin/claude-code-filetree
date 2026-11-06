@@ -4479,6 +4479,33 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`j / k and the arrows make the row they move to the anchor, so shift+click selects the range from there, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await ui.post({ key: 'j' }, zone(`${root}/a.txt`))
+    await ui.post({ key: 'j' }, zone(`${root}/b.txt`))
+    await clock.settle()
+    await click(`${root}/d.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['c.txt', 'd.txt'])
+    await clock.advance(1000)
+    await click(`${root}/d.txt`)
+    await clock.advance(1000)
+    await ui.post({ key: 'up' }, zone(`${root}/d.txt`))
+    await ui.post({ key: 'up' }, zone(`${root}/c.txt`))
+    await clock.settle()
+    await click(`${root}/a.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt'])
+    await ui.unmount()
+  })
+
   test(`shift+click on a deleted file's ghost row ends a range instead of opening its diff, on the ${surface}`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, { ...RANGE_WORLD(root), status: '## main\0 D gone.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n' }, [])

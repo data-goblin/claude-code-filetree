@@ -15,7 +15,7 @@ flowchart TB
 Select rows the way an IDE file tree does:
 
 - Click selects one row and clears the marks
-- shift+click marks every row from the anchor (the last click, ctrl+click or `v`) to the clicked one, in tree order, and replaces the range of the previous shift+click
+- shift+click marks every row from the anchor to the clicked one, in tree order, and replaces the range of the previous shift+click. The anchor is the row of the last click, ctrl+click, `v` or move with j / k, h, the arrows, Home, End, Page Up or Page Down
 - ctrl+click marks or unmarks one row and makes it the anchor; it does not open the file
 - alt+click does the same as ctrl+click on macOS, because neither the Desktop app nor the terminal reports cmd with a click
 - With nothing marked, j / k and the arrows move the selection with the cursor

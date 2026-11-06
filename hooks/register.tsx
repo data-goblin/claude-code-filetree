@@ -1488,13 +1488,14 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
   if (await followCwd($)) return
   await revealPaths($, paths)
   const opened: string[] = []
+  const to = paths[paths.length - 1]
+  if (to) anchorAt(to)
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of paths) for (const a of ancestorsOf(p, cur.root)) if (!open.has(a)) {
       open.add(a)
       opened.push(a)
     }
-    const to = paths[paths.length - 1]
     return { expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
   })
   await markOpened($, opened, paths)
@@ -2140,10 +2141,12 @@ async function jump($: EngineInterface, query: string, surface?: RenderSurface):
     return
   }
   const hits = (await search($, query)).slice(0, 10)
+  const to = hits[0]
+  if (to) anchorAt(to)
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of hits) for (const a of ancestorsOf(p, cur.root)) open.add(a)
-    return { query: '', expanded: [...open], ...(hits[0] ? { cursor: hits[0], selected: hits[0] } : {}), scroll: null }
+    return { query: '', expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
   })
 }
 
@@ -2922,7 +2925,9 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   const move = (d: number) => {
     const to = onRoot ? (d < 0 ? -1 : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
     const id = to < 0 ? t.root : rows[to]?.node.id
-    return id ? patch($, () => ({ cursor: id, selected: id, scroll: null })) : Promise.resolve()
+    if (!id) return Promise.resolve()
+    anchorAt(id)
+    return patch($, () => ({ cursor: id, selected: id, scroll: null }))
   }
   const page = Math.max(1, peekRows - 1)
   const peek: Record<string, number> = { f: page, b: -page, pageup: -page, pagedown: page }
@@ -2968,7 +2973,10 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
-    else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
+    else if (cur.parent !== t.root) {
+      anchorAt(cur.parent)
+      await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
+    }
   } else if (cur && (key === 'return' || key === 'o')) await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
   else if (cur && (key === ' ' || key === 'space') && isGhost(t, cur.id)) await diffFile($, cur.id)
   else if (cur && (key === ' ' || key === 'space')) await (cur.kind !== 'dir' && (await osName($)) === 'darwin' ? quickLook($, cur.id) : toggle($, cur))

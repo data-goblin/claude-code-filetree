@@ -34,7 +34,7 @@ v / V:        mark or unmark the entry under the cursor / clear all marks and ke
 shift+j / k:  mark the entry under the cursor, move down / up and mark the next one; shift+down / shift+up do the same
 click:        select one entry and clear the marks
 double-click: open a file
-shift+click:  mark every entry from the anchor (the last click, ctrl+click or v) to the clicked one, in tree order; it replaces the range of the previous shift+click
+shift+click:  mark every entry from the anchor (the entry of the last click, ctrl+click, v or move without shift) to the clicked one, in tree order; it replaces the range of the previous shift+click
 ctrl+click:   mark or unmark one entry and make it the anchor, without opening it; alt+click on macOS does the same
 "?":          show or hide every key, grouped, over the tree (the Shortcuts button in the Desktop app); j, k, the arrows, f, b, Page Up/Down, Home and End scroll it, and any other key that acts closes it first (? typed in the search field is just a character)
 Space:        Quick Look on macOS

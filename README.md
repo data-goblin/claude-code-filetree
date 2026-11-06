@@ -75,7 +75,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - IDE-style multi-select; the shaded rows go to Claude as context: the selected row, or up to 100 marked rows ([context](docs/context.md)):
   - click selects one row and clears the marks
   - with rows marked, j / k move only the cursor, and `v` marks or unmarks the row under it
-  - shift+click marks the range from the last click, in tree order
+  - shift+click marks the range from the last click or j / k move, in tree order
   - ctrl+click marks or unmarks one row without opening it; alt+click on macOS
   - double-click or Enter opens a file
   - the clear selection button clears every marked and selected row
