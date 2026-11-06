@@ -5822,6 +5822,39 @@ test('terminal: jump mode heads the date column Last accessed and dates each rem
   await ui.unmount()
 })
 
+for (const [label, options, terminalInk, deskInk] of [['default', {}, 'ansi256(5)', '#9a64f7'], ['palette jump=#ff00aa', { palette: 'jump=#ff00aa' }, '#ff00aa', '#ff00aa']] as const) {
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`${surface}: jump mode draws its folder glyphs in the jump color (${label}), apart from the blue tree folders`, { timeoutMs: 20_000, options: { glyphs: 'plain', ...options } }, async ($, on) => {
+      const root = '/home/k/proj'
+      on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at: 1_799_990_000_000 } }, version: 1 } } : next(e)))
+      const clock = world(on, {
+        os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+        dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/home/k/kept': [['c.ts', 'file']] },
+        find: `${root}/hooks/b.ts\0`,
+        exits: { zoxide: [127, 'zoxide: not found'] },
+      }, [])
+      await $.session.start({ cwd: root, surface, isInteractive: true })
+      await clock.settle()
+      const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+      await clock.settle()
+      const folderInk = async (id: string, name: string) => {
+        const tree = await ui.drawn()
+        if (surface === 'desktop') return /fill="(#[0-9a-f]{6})"/.exec(svgs(tree).find(s => s.alt === `folder ${name}`)?.source ?? '')?.[1]
+        const row = treeRows(tree).rows.find(r => r.id === id)
+        return row?.left.find(s => s.t === '■ ')?.c
+      }
+      const treeInk = await folderInk(`${root}/hooks`, 'hooks')
+      expect(treeInk).toBeDefined()
+      expect(treeInk).not.toBe(surface === 'desktop' ? deskInk : terminalInk)
+      await ui.post({ key: 'z' }, surface === 'desktop' ? { in: `hit:${root}/a.ts` } : { in: 'rows' })
+      await clock.advance(100)
+      await clock.settle()
+      expect(await folderInk('/home/k/kept', '/home/k/kept')).toBe(surface === 'desktop' ? deskInk : terminalInk)
+      await ui.unmount()
+    })
+  }
+}
+
 const tallBoxes = (tree: unknown) => every(tree, n => has(n, 'type') && n.type === 'Box' && has(propsOf(n), 'height') && typeof (propsOf(n) as { height?: unknown }).height === 'number' && ((propsOf(n) as { height: number }).height > 2))
 
 test('desktop: no row in the tree, the jump list or its empty note is drawn taller than two lines', { timeoutMs: 30_000 }, async ($, on) => {

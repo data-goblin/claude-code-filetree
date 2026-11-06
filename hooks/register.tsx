@@ -18,7 +18,7 @@ import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
-import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
+import { ADD_COLOR, DEL_COLOR, JUMP_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
 import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
 import {
@@ -3205,7 +3205,7 @@ export const register: Register = (on, options) => {
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
-    if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
+    if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, jump, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
     inTmux = !windows && Boolean(await $.env.get('TMUX'))
@@ -4150,7 +4150,7 @@ export const register: Register = (on, options) => {
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
     const jumpSpecs: RowSpec[] = zjump.rows.length
-      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
+      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: palette.jump ?? JUMP_COLOR }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
@@ -4234,7 +4234,7 @@ export const register: Register = (on, options) => {
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
             <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
-              {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+              {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', palette.jump ?? DESK.jump)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
               <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.split('/').filter(Boolean).pop() ?? dir}</Text></Box>
               <Box flexGrow={1} flexShrink={3} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
               {metricSpan ? <Box width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text {...mutedText}>{jumpWhen(dir)}</Text></Box> : null}

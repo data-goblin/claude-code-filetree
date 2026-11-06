@@ -157,6 +157,7 @@ export const activityIcon = (plain: string): IconName => GIT_ICONS[plain] ?? 'gi
 
 export const DESK = {
   accent: '#3b82f6',
+  jump: '#9a64f7',
   muted: '#85858c',
   guide: '#808080',
   urgent: '#e5484d',
