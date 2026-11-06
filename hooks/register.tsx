@@ -121,7 +121,7 @@ const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
-const SHIMMER_STORE = 'shimmer'
+const SHIMMER_KEY = /^filetree(@[^.]+)?\.shimmer$/
 const OUTSIDE = 'writes outside the repo'
 
 let blink: Timer | null = null
@@ -136,7 +136,7 @@ let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
-const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', shimmer: 'shimmer', unselect: 'clear' }
+const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
 let openWithSetting = ''
 let binariesInDefaultApp = false
 let editWithSetting = ''
@@ -328,12 +328,21 @@ function faint(hex: string): string {
   return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
 }
 
-async function readThemeSetting($: EngineInterface): Promise<void> {
-  const row = (await $.config.list()).find(r => r.key === 'theme')
-  const light = typeof row?.value === 'string' && row.value.startsWith('light')
-  if (light === lightTerminal) return
+async function readConfig($: EngineInterface): Promise<void> {
+  const rows = await $.config.list()
+  const theme = rows.find(r => r.key === 'theme')
+  const light = typeof theme?.value === 'string' && theme.value.startsWith('light')
+  const shimmer = rows.find(r => SHIMMER_KEY.test(r.key))
+  const lit = shimmer ? shimmer.value !== 'off' : shimmerOn
+  if (light === lightTerminal && lit === shimmerOn) return
   lightTerminal = light
+  shimmerOn = lit
   void $.ui.invalidate('ui.render')
+}
+
+async function saveShimmer($: EngineInterface): Promise<void> {
+  const key = (await $.config.list().catch(() => [])).find(r => SHIMMER_KEY.test(r.key))?.key
+  if (key) await $.config.set({ key, value: shimmerOn ? 'on' : 'off' }).catch(() => undefined)
 }
 
 function get(_$: EngineInterface): Promise<FileTree> {
@@ -3057,7 +3066,7 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'shimmer') {
     shimmerOn = !shimmerOn
     void $.ui.invalidate('ui.render')
-    await $.store.set(SHIMMER_STORE, shimmerOn)
+    await saveShimmer($)
   }
   else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
@@ -3157,6 +3166,7 @@ function shortPath(path: string): string {
 
 export const register: Register = (on, options) => {
   glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
+  shimmerOn = options?.shimmer !== 'off'
   const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
@@ -3206,7 +3216,6 @@ export const register: Register = (on, options) => {
     activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
     void (async () => {
       const ready = (async () => {
-        shimmerOn = (await $.store.get(SHIMMER_STORE).catch(() => undefined)) !== false
         pointer = await finePointerOk($)
         const termProgram = await $.env.get('TERM_PROGRAM')
         kittyTerm = !windows && !inTmux && !inHerdr && (termProgram === 'ghostty' || Boolean(await $.env.get('KITTY_WINDOW_ID')) || /kitty|ghostty/.test((await $.env.get('TERM')) ?? ''))
@@ -3220,7 +3229,7 @@ export const register: Register = (on, options) => {
         } catch {
           noNerd = true
         }
-        await readThemeSetting($).catch(() => undefined)
+        await readConfig($).catch(() => undefined)
       })()
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
@@ -3239,9 +3248,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('config.set', { key: 'theme' }, async ($, e, next) => {
+  on('config.set', async ($, e, next) => {
     const result = await next(e)
-    await readThemeSetting($).catch(() => undefined)
+    if (e.key === 'theme' || SHIMMER_KEY.test(e.key)) await readConfig($).catch(() => undefined)
     return result
   })
 
@@ -3919,7 +3928,7 @@ export const register: Register = (on, options) => {
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: t.expanded.length ? 'collapse all' : 'expand all', icon: t.expanded.length ? 'square-minus' as const : 'square-plus' as const },
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'folder-minus' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
-      { id: 'shimmer', label: unicode ? '✻' : '\u{ec10}', dim: !shimmerOn, hint: shimmerOn ? 'disable agent activity shimmer effect' : 'enable agent activity shimmer effect', icon: 'clawd' as const },
+      ...(desk ? [{ id: 'shimmer', label: '', dim: !shimmerOn, hint: shimmerOn ? 'disable agent activity shimmer effect' : 'enable agent activity shimmer effect', icon: 'clawd' as const }] : []),
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${outside.length}` : (WORDS[b.id] ?? b.label) }))
