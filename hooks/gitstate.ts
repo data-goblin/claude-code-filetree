@@ -5,7 +5,7 @@ import { isIgnored, loadDirs, openDirs, type Since } from './listing'
 import { vcs, machine, tree, settings } from './state'
 import { resolve, type GitAction, chainOf } from './git'
 import { has, cwdOf } from './util'
-import { scheduleScan } from './register'
+import { scheduleScan } from './activity'
 
 export const ACTIVITY_TTL_MS = 45_000
 
