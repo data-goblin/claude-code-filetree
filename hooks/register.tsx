@@ -343,9 +343,11 @@ async function readConfig($: EngineInterface): Promise<void> {
   void $.ui.invalidate('ui.render')
 }
 
-async function saveShimmer($: EngineInterface): Promise<void> {
+async function saveShimmer($: EngineInterface, lit: boolean): Promise<string> {
   const key = (await $.config.list().catch(() => [])).find(r => SHIMMER_KEY.test(r.key))?.key
-  if (key) await $.config.set({ key, value: shimmerOn ? 'on' : 'off' }).catch(() => undefined)
+  if (!key) return ''
+  const result = await $.config.set({ key, value: lit ? 'on' : 'off' }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+  return result.deny ?? ''
 }
 
 function weigh(el: unknown): [number, number] {
@@ -2983,7 +2985,8 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   const picked = picks(t).ids
   const onRoot = Boolean(t.root) && t.cursor === t.root
   const move = (d: number) => {
-    const to = onRoot ? (d < 0 ? -1 : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
+    const top = surface === 'desktop' && rows.length ? 0 : -1
+    const to = onRoot ? (d < 0 ? top : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? top : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
     const id = to < 0 ? t.root : rows[to]?.node.id
     if (!id) return Promise.resolve()
     anchorAt(id)
@@ -3087,9 +3090,15 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
   else if (id === 'shimmer') {
-    shimmerOn = !shimmerOn
+    const lit = !shimmerOn
+    shimmerOn = lit
     void $.ui.invalidate('ui.render')
-    await saveShimmer($)
+    const deny = await saveShimmer($, lit)
+    if (deny) {
+      shimmerOn = !lit
+      void $.ui.invalidate('ui.render')
+      $.ui.toast(`Activity shimmer stays ${shimmerOn ? 'on' : 'off'}: ${deny}`)
+    }
   }
   else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
@@ -3467,6 +3476,7 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (data.press === ROOT_PRESS) {
+      if (e.surface === 'desktop') return {}
       pickOnly(t.root)
       await selectRoot($)
       focusPane($, (await get($)).root, 'hk-tree')
@@ -4663,7 +4673,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
-            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
+            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative">
               <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
               {e.props.isFocused ? <Text bold color={accentText}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>

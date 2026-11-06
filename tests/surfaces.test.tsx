@@ -814,6 +814,60 @@ const shimmerConfig = (on: On, value: string) => {
 }
 const shimmerOnAgain = ($: Engine) => $.config.set({ key: 'filetree.shimmer', value: 'on', previous: 'off', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
 
+test('desktop: k on the first row and a click on the root header never put the cursor on the root folder', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  const cursorOn = async () => every(await ui.drawn(), n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('bar:')).map(n => keyOf(n).slice(4))
+  await ui.post({ press: `${root}/a.ts` }, { in: `hit:${root}/a.ts` })
+  await clock.advance(1000)
+  await ui.post({ key: 'k' }, { in: `hit:${root}/a.ts` })
+  await ui.post({ key: 'k' }, { in: `hit:${root}/a.ts` })
+  await clock.settle()
+  expect(await cursorOn()).toEqual([`${root}/a.ts`])
+  await ui.post({ press: '\u0000root' }, { in: 'hit:root' })
+  await clock.settle()
+  expect(await cursorOn()).toEqual([`${root}/a.ts`])
+  expect(await selected($)).toContain(`${root}/a.ts`)
+  await ui.unmount()
+})
+
+test('desktop: when /config refuses the shimmer write, the Clawd button keeps the shimmer as it was and says why', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 4 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+  const ran: Ran = []
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, ran)
+  on('config.list', () => ({ value: [{ key: 'filetree.shimmer', label: 'Activity shimmer', kind: 'choice' as const, value: 'off', options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: true }] }))
+  on('config.set', () => ({ deny: 'managed settings own this value' }))
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const hint = async () => {
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    const shown = JSON.stringify(await ui.drawn())
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    return /(?:en|dis)able agent activity shimmer effect/.exec(shown)?.[0]
+  }
+  expect(await hint()).toBe('enable agent activity shimmer effect')
+  await tap(ui, 'shimmer')
+  await clock.settle()
+  const tree = await ui.drawn()
+  const icon = (alt: string) => svgs(tree).find(s => s.alt === alt)?.source ?? ''
+  expect(fillOf(icon('shimmer button'))).toBe(strokeOf(icon('up button')))
+  expect(ran.some(r => r[0] === 'toast' && (r[1] ?? '').includes('managed settings own this value'))).toBe(true)
+  await clock.advance(3_000)
+  for (const [name] of names) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+  await clock.settle()
+  expect(every(await ui.drawn(), n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:'))).toHaveLength(0)
+  await ui.unmount()
+})
+
 test('terminal: with the shimmer off, a file Claude read above the view is not pinned there, and turning it on pins it again', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const root = '/Users/k/lit'
   const names = Array.from({ length: 80 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
