@@ -37,3 +37,9 @@ export function colorOf(color: string, term: TermColors, light: boolean): Rgb {
   if (n) return term.palette[Number(n[1])] ?? XTERM[Number(n[1])] ?? [128, 128, 128]
   return term.fg ?? (light ? [32, 32, 32] : [220, 220, 220])
 }
+
+const TEXT_EMOJI_VS16 = /(?=\P{Emoji_Presentation})(\p{Extended_Pictographic})\uFE0F(?!\u200D)/gu
+
+export function narrowEmoji(text: string): string {
+  return text.includes('\uFE0F') ? text.replace(TEXT_EMOJI_VS16, '$1') : text
+}

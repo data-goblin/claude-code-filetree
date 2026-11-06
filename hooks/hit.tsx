@@ -24,7 +24,7 @@ const Hit: ClientModule<HitProps, Local> = (props, surface) => {
       ref.untick ??= surface.every(500, () => alive.set(ref.id, Date.now()))
     }
     if (e.type === 'down' && e.button === 'right') surface.post({ copy: ref.id, shift: Boolean(e.shift) })
-    else if (e.type === 'up' && (e.button ?? 'left') === 'left') surface.post({ press: ref.id, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })
+    else if (e.type === 'up' && (e.button ?? 'left') === 'left') surface.post({ press: ref.id, ctrl: Boolean(e.ctrl), alt: Boolean(e.alt), shift: Boolean(e.shift) })
   })
   if (props.keys !== false) ref.unkey ??= surface.onKey(e => {
     const now = Date.now()
