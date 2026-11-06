@@ -55,6 +55,7 @@ type World = {
   fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
+  noCd?: boolean
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -70,6 +71,7 @@ function world(on: On, w: World, ran: Ran) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: 'test-session' }))
+  on('command.list', () => ({ value: w.noCd ? [] : [{ name: 'cd', description: 'cd', source: 'builtin' as const }] }))
   on('command.register', (_$, e) => {
     registered.push(e)
     return { value: { command: e.name } }
@@ -95,7 +97,7 @@ function world(on: On, w: World, ran: Ran) {
   const dirOf = (p: string) => w.dirs[p] ?? w.dirs[p.replace(/^[A-Za-z]:/, '')]
   on('fs.exists', (_$, e) => {
     const file = norm(e.path).replace(/^[A-Za-z]:/, '')
-    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined }
+    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined || dirOf(norm(e.path)) !== undefined }
   })
   on('fs.write', (_$, e) => {
     ran.push(['write', e.path])
@@ -3747,7 +3749,7 @@ test('jump mode closes when the pane loses the keyboard and never pulls focus ba
   await focused.unmount()
   const before = opens.length
   const blurred = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await clock.advance(200)
+  await clock.advance(600)
   await clock.settle()
   expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"jump"')
   expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
@@ -5401,5 +5403,73 @@ test('desktop (#53): every background is translucent or a theme key and no text 
   await clock.settle()
   check(await ui.drawn())
   expect([...new Set(bad)]).toEqual([])
+  await ui.unmount()
+})
+
+test('jump mode stays open through a short focus blip, as the Desktop app reports while focus moves into the jump field', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const mount = (isFocused: boolean) => $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused } })
+  const first = await mount(true)
+  await clock.settle()
+  await first.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await first.unmount()
+  const blip = await mount(false)
+  await clock.advance(100)
+  await clock.settle()
+  await blip.unmount()
+  const back = await mount(true)
+  await clock.advance(1000)
+  await clock.settle()
+  expect(JSON.stringify(await back.drawn())).toContain('"key":"jump"')
+  await back.unmount()
+})
+
+test('jump mode leaves out remembered folders that no longer exist and forgets them', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  let saved: unknown = null
+  const seeded = { '/home/k/moved-away': { n: 9, at: 1_799_999_000_000 }, '/home/k/kept': { n: 9, at: 1_799_999_000_000 } }
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: saved ?? seeded, version: 1 } } : next(e)))
+  on('state.set', (_$, e, next) => {
+    if (e.key === 'visits') saved = e.value
+    return next(e)
+  })
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], '/home/k/kept': [['b.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(ids).toContain('/home/k/kept')
+  expect(ids).not.toContain('/home/k/moved-away')
+  expect(JSON.stringify(saved)).not.toContain('moved-away')
+  await ui.unmount()
+})
+
+test('Follow work in an app without /cd re-roots the tree and leaves Claude where it is, with no failure toast', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { ui, root, reads } = await workSession($, on, { ...WORK_WORLD(a, b), noCd: true }, ran)
+  await reads(b)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(ran.some(r => r[0] === 'toast')).toBe(false)
+  expect(await root()).toBe(`${b}/b.ts`)
   await ui.unmount()
 })

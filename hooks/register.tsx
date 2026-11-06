@@ -66,6 +66,7 @@ const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
+const JUMP_BLUR_MS = 400
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
@@ -227,7 +228,8 @@ let longFile = 500
 let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
-const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
+const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false }
+const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 let autoCollapseDefault = false
@@ -1299,7 +1301,7 @@ function linkNote(state: LinkState | null | undefined): string {
 function toggleMark($: EngineInterface, id: string): void {
   markAnchor = id
   if (marks.includes(id)) marks = marks.filter(m => m !== id)
-  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  else if (marks.length >= MARK_LIMIT) $.ui.toast(`at most ${MARK_LIMIT} marks; V clears them`)
   else marks = [...marks, id]
   void $.ui.invalidate('ui.render')
 }
@@ -1307,7 +1309,7 @@ function toggleMark($: EngineInterface, id: string): void {
 function addMarks($: EngineInterface, ids: string[]): void {
   const fresh = ids.filter(id => id && !marks.includes(id))
   const room = Math.max(0, MARK_LIMIT - marks.length)
-  if (fresh.length > room) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  if (fresh.length > room) $.ui.toast(`at most ${MARK_LIMIT} marks; V clears them`)
   marks = [...marks, ...fresh.slice(0, room)]
   void $.ui.invalidate('ui.render')
 }
@@ -1593,7 +1595,7 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
   for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
-  if (match.partial) void $.ui.toast(`filetree: regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
+  if (match.partial) void $.ui.toast(`regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
   await revealPaths($, hits)
   const shown = await get($)
   const ids = new Set(shown.nodes.map(n => n.id))
@@ -1971,13 +1973,26 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
     for (let d = dirname(p); d.length > t.root.length && !dirs.has(d); d = dirname(d)) dirs.add(d)
   }
   for (const d of dirs) cands.push({ path: d, score: 0 })
-  zjump.rows = rankJump(cands, zjump.query).filter(p => p !== t.root || zjump.query.trim() !== '')
+  const ranked = rankJump(cands, zjump.query).filter(p => p !== t.root || zjump.query.trim() !== '')
+  const known = new Set([t.root, ...dirs])
+  const remembered = new Set(Object.keys(seen).map(posix))
+  const there = await Promise.all(ranked.map(async p => known.has(p) || !remembered.has(p) || (jumpExists.get(p) ?? jumpExists.set(p, await $.fs.exists(p).catch(() => false)).get(p) ?? false)))
+  if (mine !== zjump.seq || !zjump.on) return
+  const gone = ranked.filter((_, k) => !there[k])
+  if (gone.some(p => p in seen)) await forgetVisits($, gone)
+  zjump.rows = ranked.filter((_, k) => there[k])
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
   void $.ui.invalidate('ui.render')
 }
 
+async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
+  visitsCache = Object.fromEntries(Object.entries(await visits($)).filter(([dir]) => !dirs.includes(posix(dir))))
+  await $.state.set(VISITS, visitsCache)
+}
+
 function jumpOpen($: EngineInterface): void {
   zjump.on = true
+  jumpExists.clear()
   zjump.held = false
   zjump.query = ''
   zjump.sel = 0
@@ -2040,7 +2055,7 @@ async function considerWork($: EngineInterface): Promise<void> {
     const repo = pickRepo(workTouches, current, now, workLast)
     if (!repo || inside(repo, base)) return
     workLast = now
-    if (!jumpMovesClaude) {
+    if (!jumpMovesClaude || !(await canCd($))) {
       follow = false
       await reset($, repo)
       return
@@ -2048,10 +2063,10 @@ async function considerWork($: EngineInterface): Promise<void> {
     $.clock.after(0, async () => {
       try {
         await $.command.run({ command: 'cd', args: repo })
-        void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
+        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
         $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
       } catch (error) {
-        void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+        void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
       }
     })
   } finally {
@@ -2059,17 +2074,27 @@ async function considerWork($: EngineInterface): Promise<void> {
   }
 }
 
+async function canCd($: EngineInterface): Promise<boolean> {
+  return (await $.command.list().catch(() => [])).some(c => c.name === 'cd')
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
+  if (!(await $.fs.exists(dir).catch(() => false))) {
+    await forgetVisits($, [dir])
+    void $.ui.toast(`${shortPath(dir)} no longer exists`)
+    void jumpRefresh($)
+    return
+  }
   jumpClose($, true)
   workLast = await $.clock.now()
   follow = false
   await reset($, dir)
-  if (!jumpMovesClaude || (await cwdOf($)) === dir) return
+  if (!jumpMovesClaude || (await cwdOf($)) === dir || !(await canCd($))) return
   $.clock.after(0, async () => {
     try {
       await $.command.run({ command: 'cd', args: dir })
     } catch (error) {
-      void $.ui.toast(`filetree: could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
+      void $.ui.toast(`could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
     }
   })
 }
@@ -3522,8 +3547,9 @@ export const register: Register = (on, options) => {
       return <Empty />
     }
     if (zjump.on) {
+      zjump.focused = Boolean(e.props.isFocused)
       if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($) : undefined))
+      else if (zjump.held) $.clock.after(JUMP_BLUR_MS, () => (zjump.on && zjump.held && !zjump.focused ? jumpClose($) : undefined))
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
