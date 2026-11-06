@@ -5523,3 +5523,26 @@ test('jump mode opens on the 10 most recently visited folders, newest first, and
   expect(treeRows(await ui.drawn()).rows.map(r => r.id)[0]).toBe('/home/k/often-api')
   await ui.unmount()
 })
+
+test('terminal: jump mode heads the date column Last accessed and dates each remembered folder by its last visit', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const at = 1_799_990_000_000
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/home/k/kept': [['c.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  const drawn = await texts(ui)
+  expect(drawn).toContain('Last accessed')
+  expect(drawn).toContain(stamp(at))
+  await ui.unmount()
+})
