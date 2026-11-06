@@ -804,6 +804,77 @@ test('the shimmer setting turns the activity shimmer off in the terminal and the
   await ui.unmount()
 })
 
+const shimmerConfig = (on: On, value: string) => {
+  const config: Record<string, string> = { 'filetree.shimmer': value }
+  on('config.list', () => ({ value: Object.entries(config).map(([key, v]) => ({ key, label: key, kind: 'choice' as const, value: v, options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: false })) }))
+  on('config.set', (_$, e) => {
+    config[e.key] = String(e.value)
+    return { value: e.value }
+  })
+}
+const shimmerOnAgain = ($: Engine) => $.config.set({ key: 'filetree.shimmer', value: 'on', previous: 'off', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+
+test('terminal: with the shimmer off, a file Claude read above the view is not pinned there, and turning it on pins it again', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 80 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: '', dirs: { [root]: names }, status: '', numstat: '' }, [])
+  shimmerConfig(on, 'off')
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const view = async () => treeRows(await ui.drawn()).rows
+  const readPair = async () => {
+    await clock.advance(3_000)
+    await $.tool.call({ tool: 'Read', file_path: `${root}/f00.txt` })
+    await $.tool.call({ tool: 'Read', file_path: `${root}/f70.txt` })
+    await clock.settle()
+  }
+  await readPair()
+  let rows = await view()
+  expect(rows.map(r => r.id)).toContain(`${root}/f70.txt`)
+  expect(rows.map(r => r.id)).not.toContain(`${root}/f00.txt`)
+  expect(rows.some(r => r.left.some(s => s.t.includes('⋮')))).toBe(false)
+  await shimmerOnAgain($)
+  await clock.settle()
+  await readPair()
+  rows = await view()
+  expect(rows.map(r => r.id)).toContain(`${root}/f00.txt`)
+  expect(rows.some(r => r.left.some(s => s.t.includes('⋮')))).toBe(true)
+  await ui.unmount()
+})
+
+test('treemap: with the shimmer off, an edit inside a box leaves its color alone, and turning it on lights the box again', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['big.bin', 'file'], ['a.ts', 'file']], [`${root}/src`]: [['x.ts', 'file'], ['y.ts', 'file']] },
+    files: { [`${root}/src/x.ts`]: 'export const x = 1\n' },
+    du: { [root]: `5120\t${root}/src/x.ts\n1024\t${root}/src/y.ts\n6144\t${root}/src\n3072\t${root}/big.bin\n4\t${root}/a.ts\n9220\t${root}\n` },
+  }, [])
+  shimmerConfig(on, 'off')
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'split' })
+  await clock.settle()
+  const look = async () => JSON.stringify(mapAt(await ui.drawn()).rows.flatMap(r => r.left).filter(s => s.tab === `${root}/src`).map(s => [s.bg, s.b]))
+  const edit = async () => {
+    await clock.advance(3_000)
+    await $.tool.call({ tool: 'Edit', file_path: `${root}/src/x.ts`, old_string: 'a', new_string: 'b' })
+    await clock.settle()
+  }
+  const calm = await look()
+  await edit()
+  expect(await look()).toBe(calm)
+  await shimmerOnAgain($)
+  await clock.settle()
+  await edit()
+  expect(await look()).not.toBe(calm)
+  await ui.unmount()
+})
+
 test('terminal: the shimmer setting set to off in the plugin options starts with no shimmer and no Clawd button', { timeoutMs: 20_000, options: { shimmer: 'off' } }, async ($, on) => {
   const root = '/Users/k/lit'
   const names = Array.from({ length: 4 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])

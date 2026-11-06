@@ -12,7 +12,7 @@ flowchart TB
 ```
 
 - Claude's reads (purple), writes (orange) and commits (green) shimmer in the tree; collapsed folders open to show the file
-- The Activity shimmer setting (`/config`, under filetree) turns the shimmer off. The Clawd button in the Desktop app header flips the same setting: blue while the shimmer is on, grey while it is off. The terminal has no button and follows the setting, so a choice made in the Desktop app holds in the terminal. With the shimmer off, the files Claude touches draw as plain rows, but folders still open to show them and Follow Claude still scrolls to them
+- The Activity shimmer setting (`/config`, under filetree) turns the shimmer off. The Clawd button in the Desktop app header flips the same setting: blue while the shimmer is on, grey while it is off. The terminal has no button and follows the setting, so a choice made in the Desktop app holds in the terminal. With the shimmer off, the files Claude touches draw as plain rows, no rows are pinned above the view and treemap boxes keep their color, but folders still open to show them and Follow Claude still scrolls to them
 - A file reference with a line in Claude's reply (`path:12`, `path:12-20` or `path#L12-L20`, relative to the cwd or absolute) to a file under the tree root gets a link under the reply; clicking it reveals the file and opens the preview at that line
 - Auto-collapse (`a`, the toolbar button or the setting) closes folders opened for Claude 10 seconds after its last touch; turning it on also closes the ones it opened while off
 
