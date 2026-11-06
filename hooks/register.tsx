@@ -238,6 +238,7 @@ let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
 const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false, when: {} as Record<string, number> }
+let jumpBlur: Timer | null = null
 const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
@@ -2041,6 +2042,7 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
   if (mine !== zjump.seq || !zjump.on) return
   const gone = ranked.filter((_, k) => !there[k])
   if (gone.some(p => p in seen)) await forgetVisits($, gone)
+  if (mine !== zjump.seq || !zjump.on) return
   zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
   zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
@@ -2052,7 +2054,13 @@ async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
   await $.state.set(VISITS, visitsCache)
 }
 
+function jumpBlurCancel(): void {
+  jumpBlur?.cancel()
+  jumpBlur = null
+}
+
 function jumpOpen($: EngineInterface): void {
+  jumpBlurCancel()
   zjump.on = true
   jumpExists.clear()
   zjump.held = false
@@ -2071,6 +2079,7 @@ async function jumpInput($: EngineInterface, value: string): Promise<void> {
 }
 
 function jumpClose($: EngineInterface, refocus = false): void {
+  jumpBlurCancel()
   zjump.on = false
   zjump.query = ''
   zjump.rows = []
@@ -2111,13 +2120,14 @@ async function considerWork($: EngineInterface): Promise<void> {
   if (!followWork || workDeciding) return
   workDeciding = true
   try {
-    const base = jumpMovesClaude ? await cwdOf($) : (await get($)).root
+    const moves = jumpMovesClaude && (await canCd($))
+    const base = moves ? await cwdOf($) : (await get($)).root
     const current = (await repoOf($, base)) ?? base
     const now = await $.clock.now()
     const repo = pickRepo(workTouches, current, now, workLast)
     if (!repo || inside(repo, base)) return
     workLast = now
-    if (!jumpMovesClaude || !(await canCd($))) {
+    if (!moves) {
       follow = false
       await reset($, repo)
       return
@@ -3620,8 +3630,13 @@ export const register: Register = (on, options) => {
     }
     if (zjump.on) {
       zjump.focused = Boolean(e.props.isFocused)
-      if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(JUMP_BLUR_MS, () => (zjump.on && zjump.held && !zjump.focused ? jumpClose($) : undefined))
+      if (e.props.isFocused) {
+        zjump.held = true
+        jumpBlurCancel()
+      } else if (zjump.held && !jumpBlur) jumpBlur = $.clock.after(JUMP_BLUR_MS, () => {
+        jumpBlur = null
+        if (zjump.on && zjump.held && !zjump.focused) jumpClose($)
+      })
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
@@ -4098,17 +4113,20 @@ export const register: Register = (on, options) => {
         </Button>
       )
     }
-    const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
-    const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
+    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
+    const jumpDate = zjump.on ? zjump.rows.reduce((m, dir) => Math.max(m, [...jumpWhen(dir)].length), 0) : 0
+    const gitSpan = zjump.on ? 0 : GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
+    const metricSpan = zjump.on ? (jumpDate ? jumpDate + 1 : 0) : widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
     const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const headCell = (col: 'name' | 'git' | 'metric', label: string) => (!zjump.on ? sortCell(col, label) : desk ? <Text key={`head-${col}`} color={mutedInk}>{label}</Text> : <Text key={`head-${col}`} dimColor>{label}</Text>)
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
-        {sortCell('name', 'Name')}
+        {headCell('name', 'Name')}
         <Box flexGrow={1} />
-        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', gitLabel)}</Box> : null}
-        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('metric', metricLabel)}</Box> : null}
+        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('git', gitLabel)}</Box> : null}
+        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('metric', metricLabel)}</Box> : null}
         <Box width={2} flexShrink={0} />
       </Box>
     )
@@ -4155,7 +4173,6 @@ export const register: Register = (on, options) => {
     }
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
-    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
     const jumpSpecs: RowSpec[] = zjump.rows.length
       ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: palette.jump ?? JUMP_COLOR }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]

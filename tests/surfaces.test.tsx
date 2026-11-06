@@ -6046,3 +6046,129 @@ test('desktop: no row in the tree, the jump list or its empty note is drawn tall
   expect(tallBoxes(await ui.drawn())).toEqual([])
   await ui.unmount()
 })
+
+test('Follow work without /cd keeps the tree on the repo it moved to while the work stays there, and moves it back once the work returns to the first repo', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w: World = { ...WORK_WORLD(a, b), noCd: true }
+  w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
+  const ran: Ran = []
+  const { ui, root, reads, clock } = await workSession($, on, w, ran)
+  await reads(b)
+  expect(await root()).toBe(`${b}/b.ts`)
+  await ui.post({ press: `${b}/c.ts` }, { in: 'rows' })
+  await clock.advance(1000)
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await clock.settle()
+  const marked = async () => treeRows(await ui.drawn()).rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
+  expect(await marked()).toEqual([`${b}/c.ts`])
+  await clock.advance(200_000)
+  await reads(b)
+  expect(await marked()).toEqual([`${b}/c.ts`])
+  await clock.advance(200_000)
+  await reads(a)
+  expect(await root()).toBe(`${a}/b.ts`)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  await ui.unmount()
+})
+
+test('jump mode stays open through two short focus blips in a row, and a blip before Esc never closes the jump opened after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  const focus = async (isFocused: boolean, ms: number) => {
+    await ui.redraw({ ...paneProps(60), isFocused })
+    await clock.advance(ms)
+    await clock.settle()
+  }
+  const open = async () => JSON.stringify(await ui.drawn()).includes('"key":"jump"')
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 100)
+  await focus(false, 300)
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await focus(false, 300)
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(await open()).toBe(false)
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await ui.unmount()
+})
+
+test('an older jump listing still forgetting a missing folder never overwrites the rows of the query typed after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const seeded = { '/home/k/moved-away': { n: 9, at: 1_799_999_000_000 }, '/home/k/kept': { n: 9, at: 1_799_998_000_000 }, '/home/k/other': { n: 9, at: 1_799_997_000_000 } }
+  let saved: unknown = null
+  let slow = false
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: saved ?? seeded, version: 1 } } : next(e)))
+  on('state.set', async (_$, e, next) => {
+    if (e.key === 'visits') {
+      saved = e.value
+      if (slow) await clock.sleep(500)
+    }
+    return next(e)
+  })
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], '/home/k/kept': [['b.ts', 'file']], '/home/k/other': [['c.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  slow = true
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await ui.input({ key: 'jump', text: 'kept', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  await clock.advance(1000)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  expect(JSON.stringify(saved)).not.toContain('moved-away')
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: jump mode in an empty root dates each remembered folder under a plain Last accessed header that sorts nothing`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const root = '/home/k/empty'
+    const at = 1_799_990_000_000
+    on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [], '/home/k/kept': [['c.ts', 'file']] },
+      find: '',
+      exits: { zoxide: [127, 'zoxide: not found'] },
+    }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+    await clock.settle()
+    await ui.post({ key: 'z' }, { in: surface === 'desktop' ? 'hit:root' : 'rows' })
+    await clock.advance(100)
+    await clock.settle()
+    const drawn = JSON.stringify(await ui.drawn())
+    expect(drawn).toContain('/home/k/kept')
+    expect(drawn).toContain('Last accessed')
+    expect(drawn).toContain(stamp(at))
+    expect(drawn).not.toMatch(/ [▾▴]/)
+    expect(drawn).not.toMatch(/"key":"(button-)?sort-(name|git|metric)"/)
+    await ui.unmount()
+  })
+}
