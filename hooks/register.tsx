@@ -96,7 +96,7 @@ const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
 type Col = (typeof COLS)[number]
 const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
-const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse']
+const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 const SPIN_MS = 400
 const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
@@ -121,6 +121,7 @@ const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
+const SHIMMER_STORE = 'shimmer'
 const OUTSIDE = 'writes outside the repo'
 
 let blink: Timer | null = null
@@ -135,7 +136,7 @@ let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
 let glyphSetting = 'auto'
-const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
+const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', shimmer: 'shimmer', unselect: 'clear' }
 let openWithSetting = ''
 let binariesInDefaultApp = false
 let editWithSetting = ''
@@ -194,6 +195,7 @@ let gitNext: Promise<void> | null = null
 let queuedReads: string[] = []
 let showReads = true
 let showWrites = true
+let shimmerOn = true
 let searchIndex: { root: string; paths: Promise<Indexed> } | null = null
 let activityId = 0
 let pointer = true
@@ -3052,6 +3054,11 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   }
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (id === 'shimmer') {
+    shimmerOn = !shimmerOn
+    void $.ui.invalidate('ui.render')
+    await $.store.set(SHIMMER_STORE, shimmerOn)
+  }
   else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
     await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
@@ -3199,6 +3206,7 @@ export const register: Register = (on, options) => {
     activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
     void (async () => {
       const ready = (async () => {
+        shimmerOn = (await $.store.get(SHIMMER_STORE).catch(() => undefined)) !== false
         pointer = await finePointerOk($)
         const termProgram = await $.env.get('TERM_PROGRAM')
         kittyTerm = !windows && !inTmux && !inHerdr && (termProgram === 'ghostty' || Boolean(await $.env.get('KITTY_WINDOW_ID')) || /kitty|ghostty/.test((await $.env.get('TERM')) ?? ''))
@@ -3911,6 +3919,7 @@ export const register: Register = (on, options) => {
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: t.expanded.length ? 'collapse all' : 'expand all', icon: t.expanded.length ? 'square-minus' as const : 'square-plus' as const },
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'folder-minus' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
+      { id: 'shimmer', label: unicode ? '✻' : '\u{ec10}', dim: !shimmerOn, hint: shimmerOn ? 'disable agent activity shimmer effect' : 'enable agent activity shimmer effect', icon: 'clawd' as const },
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${outside.length}` : (WORDS[b.id] ?? b.label) }))
@@ -3921,7 +3930,7 @@ export const register: Register = (on, options) => {
     const toolRoom = e.props.bodyColumns - header.length - 4
     const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + (desk ? DESK_ICON_COLS : [...b.label].length), 0) + gap * Math.max(0, list.length - 1) + 1
     let toolButtons = buttons
-    for (const drop of ['autocollapse', 'size', 'collapse', 'refresh']) {
+    for (const drop of ['autocollapse', 'size', 'collapse', 'shimmer', 'refresh']) {
       if (toolWidth(toolButtons, 1) <= toolRoom) break
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }
@@ -3997,8 +4006,8 @@ export const register: Register = (on, options) => {
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
       const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (gitColors[status] ?? theme.muted) : undefined
-      const isBright = bright.has(n.id)
-      const isDim = !isBright && dimmed.has(n.id)
+      const isBright = shimmerOn && bright.has(n.id)
+      const isDim = shimmerOn && !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
       const isGuard = guarded.has(n.id)
       const iconColor = isGuard ? theme.urgent : isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
@@ -4251,7 +4260,7 @@ export const register: Register = (on, options) => {
     const branchRow = () => {
       if (!t.top || !t.branch) return null
       const b = t.branch
-      const isFlash = bright.has(BRANCH_ROW)
+      const isFlash = shimmerOn && bright.has(BRANCH_ROW)
       const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
       const label = b.head
       return (

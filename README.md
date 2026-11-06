@@ -70,6 +70,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Git status per file and folder, line counts on changed files, and the branch with ahead and behind ([git](docs/git.md))
 - Git and GitHub commands Claude runs show as a status line ([git](docs/git.md))
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
+- The Clawd header button turns the shimmer off and on, and new sessions keep the choice ([activity](docs/activity.md))
 - File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
 - Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
 - IDE-style multi-select; the selected file and up to 100 marked entries go to Claude as context ([context](docs/context.md)):
@@ -145,7 +146,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 ## Considerations
 
 - The Desktop app has no split preview or treemap
-- The Desktop app shimmers at most four rows at once; more lit rows show in their color without the shimmer, while the terminal shimmers them all
+- The Desktop app shimmers at most four rows at once; more lit rows show in their color without the shimmer, while the terminal shimmers them all. If the pane still floods, the Clawd header button turns the shimmer off in the Desktop app and the terminal
 - The Desktop app draws at most 150 rows around the cursor, and fewer under a long path; a note counts the rows it leaves out
 - GIFs and videos show one still frame
 - Windows sizes folders through file listings, and the treemap draws one level
