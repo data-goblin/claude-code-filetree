@@ -5546,3 +5546,31 @@ test('terminal: jump mode heads the date column Last accessed and dates each rem
   expect(drawn).toContain(stamp(at))
   await ui.unmount()
 })
+
+const tallBoxes = (tree: unknown) => every(tree, n => has(n, 'type') && n.type === 'Box' && has(propsOf(n), 'height') && typeof (propsOf(n) as { height?: unknown }).height === 'number' && ((propsOf(n) as { height: number }).height > 2))
+
+test('desktop: no row in the tree, the jump list or its empty note is drawn taller than two lines', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const w: World = {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }
+  const clock = world(on, w, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.post({ key: 'z' }, { in: `hit:${root}/a.ts` })
+  await clock.advance(100)
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('jump:')
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.input({ key: 'jump', text: 'zzzz-nothing', kind: 'change' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('no matching folder')
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.unmount()
+})

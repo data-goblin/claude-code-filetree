@@ -3599,11 +3599,11 @@ export const register: Register = (on, options) => {
       return (
         <Box key={`${key}-diff`} flexDirection="column">
           {rows.map((r, j) => r.kind === '@' ? (
-            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" height={ROW_PX} paddingLeft={1} backgroundColor={DESK.hover}>
+            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" paddingLeft={1} backgroundColor={DESK.hover}>
               <Text dimColor size="footnote" tabular wrap="truncate-end">{r.text}</Text>
             </Box>
           ) : (
-            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" height={ROW_PX} backgroundColor={tintOf(r.kind)}>
+            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" backgroundColor={tintOf(r.kind)}>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
               <Box width={2} flexShrink={0} flexDirection="row" justifyContent="center"><Text color={r.kind === '+' ? add : r.kind === '-' ? del : mutedInk} mono>{r.kind === ' ' ? '' : r.kind}</Text></Box>
@@ -4157,7 +4157,7 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
           {deskGrepNote ? (
-            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="grep-note" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>{deskGrepNote}</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
@@ -4169,7 +4169,7 @@ export const register: Register = (on, options) => {
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
-            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" height={ROW_PX} overflow="hidden" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
+            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
               {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
               <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.split('/').filter(Boolean).pop() ?? dir}</Text></Box>
               <Box flexGrow={1} flexShrink={3} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
@@ -4180,7 +4180,7 @@ export const register: Register = (on, options) => {
               </Box>
             </Box>
           )) : (
-            <Box key="jump-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="jump-none" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>no matching folder</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:jump-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
