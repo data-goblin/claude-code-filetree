@@ -20,7 +20,7 @@ import { fileRefs, markdownSplit, refHref, refsIn, openRef } from './refs'
 import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
 import { ADD_COLOR, DEL_COLOR, JUMP_COLOR, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
-import { allGuards, GUARD_TOOLS, guardIn, guardOver, outsideOf, parseGuards, toggled } from './guard'
+import { allGuards, GUARD_TOOLS, guardIn, loadGuards, noteOutside, guardFor } from './guard'
 import {
   age,
   DEFAULT_THEME,
@@ -45,7 +45,7 @@ import { settings, machine, tree, vcs, flashing, ui, previewing, pics, working, 
 import { PANE, BRANCH_ROW, OUTSIDE, SPIN_MS, ROOT_PRESS } from './consts'
 import { exists, shortPath, osName, cwdOf, has, focusPane, strings, faint, toHex, clean, weigh } from './util'
 import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
-import { isIgnored, realOf, watchTree, sinceNow } from './listing'
+import { isIgnored, watchTree, sinceNow } from './listing'
 import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground, ACTIVITY_TTL_MS } from './gitstate'
 import { wantTimes, wantSizes, wantCounts, wantLoc } from './sizes'
 import { claimMarks, autoCollapseOn, scheduleScan, touched, reveal } from './activity'
@@ -82,7 +82,6 @@ const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 const DESK_ROW_CHARS = 40
 const GIT_POLL_MS = 2000
 const AGE_TICK_MS = 60_000
-const GUARDS = 'guards'
 
 let gitPoll: Timer | null = null
 let ageTick: Timer | null = null
@@ -117,58 +116,6 @@ function directPreview(elements: ReturnType<EngineInterface['ui']['resolve']>, w
     )
   }
   return markdown ? <Markdown text={win.text} /> : <Code source={win.text} path={path} startLine={win.top + 1} wrap="truncate-end" />
-}
-
-function loadGuards($: EngineInterface): Promise<void> {
-  guarding.guardsLoaded ??= $.store.get(GUARDS).then(v => {
-    guarding.guards = parseGuards(v)
-  }, () => undefined)
-  return guarding.guardsLoaded
-}
-
-export async function toggleGuard($: EngineInterface, path: string): Promise<void> {
-  await loadGuards($)
-  const t = await get($)
-  const over = guardOver(allGuards(guarding.guards), path)
-  if (over && over !== path) {
-    $.ui.toast(`${shortPath(path)} is already guarded by ${shortPath(over)}`)
-    return
-  }
-  const owner = over === path ? Object.keys(guarding.guards).find(k => guarding.guards[k]?.includes(path)) : undefined
-  const key = owner ?? (t.top && inside(t.top, path) ? t.top : t.root)
-  const own = toggled(guarding.guards[key] ?? [], path)
-  const next = { ...guarding.guards }
-  if (own.length) next[key] = own
-  else delete next[key]
-  guarding.guards = next
-  void $.ui.invalidate('ui.render')
-  await $.store.set(GUARDS, guarding.guards)
-}
-
-async function guardFor($: EngineInterface, path: string): Promise<string | undefined> {
-  const list = allGuards(guarding.guards)
-  const hit = guardOver(list, path)
-  if (hit) return hit
-  const real = await realOf($, path)
-  for (const g of list) if (inside(g, real) || inside(await realOf($, g), real)) return g
-  return undefined
-}
-
-async function noteOutside($: EngineInterface, file: string): Promise<void> {
-  const t = await get($)
-  const abs = resolve(await cwdOf($), posix(file), machine.home)
-  if (!outsideOf(t.top || t.root, abs) || guarding.outside.includes(abs)) return
-  guarding.outside = [...guarding.outside, abs]
-  if (guarding.outside.length === 1) $.ui.toast(`Claude wrote outside ${shortPath(t.top || t.root)}: ${shortPath(abs)}. w lists these writes.`)
-  if (previewing.previewed?.path === OUTSIDE) previewing.previewed = null
-  void $.ui.invalidate('ui.render')
-}
-
-export async function showOutside($: EngineInterface): Promise<void> {
-  if (!guarding.outside.length) return
-  await loadPreview($, OUTSIDE)
-  await patch($, () => ({ preview: OUTSIDE, previewTop: 0 }))
-  $.clock.after(100, () => parkPreview($))
 }
 
 export const register: Register = (on, options) => {
