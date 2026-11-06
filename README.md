@@ -72,7 +72,13 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
 - File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
 - Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
-- The selected file and up to 100 marked entries go to Claude as context; shift+click or shift+j / shift+k mark a range ([context](docs/context.md))
+- IDE-style multi-select; the selected file and up to 100 marked entries go to Claude as context ([context](docs/context.md)):
+  - click selects one row and clears the marks
+  - shift+click marks the range from the last click, in tree order
+  - ctrl+click marks or unmarks one row without opening it; alt+click on macOS
+  - double-click or Enter opens a file
+  - the clear selection button clears every marked and selected row
+  - marked rows show the selection background
 - Split preview of code, Markdown, images, video frames, PDF and Word pages ([preview and treemap](docs/preview-treemap.md))
 - Treemap of a folder by bytes or lines, with Claude's activity lit ([preview and treemap](docs/preview-treemap.md))
 - Diff of a file or every changed file in a folder, in the pane or your diff tool ([diff](docs/diff.md))
