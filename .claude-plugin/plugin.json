@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -24,6 +24,16 @@
         "writes",
         "reads",
         "none"
+      ]
+    },
+    "shimmer": {
+      "type": "string",
+      "title": "Activity shimmer",
+      "description": "on: the files Claude reads, writes and commits shimmer in the tree. off: they draw as plain rows, and folders still open to show them. The Clawd button in the Desktop app header flips it, and every session, terminal or Desktop, follows it.",
+      "default": "on",
+      "options": [
+        "on",
+        "off"
       ]
     },
     "glyphs": {
@@ -272,7 +282,7 @@
     "palette": {
       "type": "string",
       "title": "Palette",
-      "description": "Your own colors, laid over the Omarchy, light or default theme: key=#hex pairs separated by spaces. Keys: fg, bg, accent (folders, links), muted (dates, sizes), urgent (deleted, conflicts), selection (selected row), hover (hovered row), added, modified, renamed (git status), add and del (line counts). A key you leave out keeps the theme's color. Example (Gruvbox Dark Hard): fg=#ebdbb2 bg=#1d2021 accent=#83a598 muted=#928374 urgent=#fb4934 selection=#3c3836 added=#b8bb26 modified=#fabd2f renamed=#83a598 add=#b8bb26 del=#fb4934",
+      "description": "Your own colors, laid over the Omarchy, light or default theme: key=#hex pairs separated by spaces. Keys: fg, bg, accent (folders, links), muted (dates, sizes), urgent (deleted, conflicts), selection (selected row), hover (hovered row), jump (folders in z jump mode), added, modified, renamed (git status), add and del (line counts). A key you leave out keeps the theme's color. Example (Gruvbox Dark Hard): fg=#ebdbb2 bg=#1d2021 accent=#83a598 muted=#928374 urgent=#fb4934 selection=#3c3836 added=#b8bb26 modified=#fabd2f renamed=#83a598 add=#b8bb26 del=#fb4934",
       "default": ""
     }
   },

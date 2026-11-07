@@ -29,12 +29,14 @@ jobs:
           no-cache: true
       - name: Type check
         run: bunx --bun --package typescript@5.9.3 tsc -p tsconfig.json
-      - name: Install oxlint 1.88.0 and tsgolint 7.0.2004
-        run: bun add --global --exact oxlint@1.88.0 oxlint-tsgolint@7.0.2004
+      - name: Install oxlint 1.88.0, tsgolint 7.0.2004 and typescript 5.9.3
+        run: bun add --global --exact oxlint@1.88.0 oxlint-tsgolint@7.0.2004 typescript@5.9.3
       - name: Oxlint
         run: oxlint --format github
       - name: Grep rules
         run: sh scripts/ci/greps.sh
+      - name: JSX sizes
+        run: bun scripts/ci/jsx-sizes.ts
       - name: Version rule test
         run: sh scripts/ci/version-test.sh
 

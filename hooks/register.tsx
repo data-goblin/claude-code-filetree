@@ -8,17 +8,17 @@ import type { Activity, FileNode, FileTree, Theme } from '../types'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, LIGHT_TONES, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { type DiffGroups, type DiffLine, diffGroups, diffWindow, GROUP, groupFiles, splitPatch } from './diff'
-import { type Candidate, type Visit, frecency, parseZoxide, rankJump } from './jump'
+import { type Candidate, type Visit, frecency, parseZoxide, rankJump, recentJump } from './jump'
 import { pickRepo, shellPaths, shellWrites, type Touch, workIgnored } from './work'
 import { counted, formatLoc, locArgv, locUsage, parseLocIn, scanFrom, scanned, sumDirs } from './loc'
 import { draw, layout, layoutPixels, parseDu, REST, type Tile, type Usage } from './treemap'
 import { boxLook, fitPixels, inkOn, over, paint, type PixelLook, png, readable, type Rgb, rgbOf, textHeight } from './pixmap'
-import { CELL_PROBE, colorOf, GHOSTTY_ARGS, parseGhostty, type TermColors } from './term'
+import { CELL_PROBE, colorOf, GHOSTTY_ARGS, narrowEmoji, parseGhostty, type TermColors } from './term'
 import type { ZoneProps } from './zone'
 import type { HitProps } from './hit'
 import { type FileRef, fileRefs, markdownSplit, parseHref, refHref } from './refs'
 import { activityIcon, barSvg, lineSvg, selectionOn, DESK, DESK_GIT, DESK_GIT_TEXT, GAP_PX, iconSvg, type IconName, ink, lighten, nodeIcon, ROW_PX, rowSvg, STEP_PX, toolSvg } from './svg'
-import { ADD_COLOR, DEL_COLOR, type Palette, parsePalette } from './palette'
+import { ADD_COLOR, DEL_COLOR, JUMP_COLOR, type Palette, parsePalette } from './palette'
 import { BRAIN, CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR, GUARD, isMemory } from './icons'
 import { allGuards, GUARD_TOOLS, guardIn, guardOver, type Guards, outsideOf, parseGuards, toggled } from './guard'
 import {
@@ -66,6 +66,8 @@ const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const VISITS = { plugin: 'filetree', key: 'visits' } as const
 const ZOXIDE_TTL_MS = 10_000
 const JUMP_INDEX_LIMIT = 4000
+const JUMP_BLUR_MS = 400
+const JUMP_RECENT = 10
 const PANE = 'filetree'
 const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
 const LIGHT_SHIMMER = Object.fromEntries(Object.entries(LIGHT_TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
@@ -77,6 +79,7 @@ const DOUBLE_MS = 450
 const FIND_LIMIT = 200
 const GREP_LIMIT = 200
 const MARK_LIMIT = 100
+const MARKS_FULL = `at most ${MARK_LIMIT} marks; press "${MARK_LIMIT} marked" in the footer to clear them`
 const GREP_MS = 15_000
 const GREP_WAIT_MS = 150
 const GREP_TEXT = 300
@@ -84,7 +87,11 @@ const GREP_WORK = 50_000_000
 const GREP_LINE = 10_000
 const IMAGE_BYTES = 2_097_152
 const ROWS_BUDGET = 80_000
-const DESK_ROWS = 400
+const DESK_ROWS = 150
+const DESK_PAGE_CHARS = 200_000
+const DESK_ROW_PAGE = 1_000
+const DESK_TREE_CHARS = 180_000
+const DESK_TREE_NODES = 1_400
 const DESK_SHIMMER_MAX = 4
 const NAME_MIN = 10
 const COLS = ['+', '-', '?', 'M', 'D', 'metric'] as const
@@ -92,7 +99,7 @@ const GIT_COLS = ['+', '-', '?', 'M', 'D'] as const
 type Col = (typeof COLS)[number]
 const DESK_ICON_COLS = 3
 const HINT_MS = 5_000
-const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse']
+const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 const SPIN_MS = 400
 const DESK_ROW_CHARS = 40
 const READ_REVEAL_LIMIT = 12
@@ -117,6 +124,7 @@ const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
 const AGE_TICK_MS = 60_000
 const GUARDS = 'guards'
+const SHIMMER_KEY = /^filetree(@[^.]+)?\.shimmer$/
 const OUTSIDE = 'writes outside the repo'
 
 let blink: Timer | null = null
@@ -155,6 +163,7 @@ const workRepos = new Map<string, Promise<string | null>>()
 let peeked: Preview | null = null
 let marks: string[] = []
 let markAnchor = ''
+let markBase: string[] = []
 type LinkState = { kind: 'ok' | 'outside' | 'broken' | 'circular'; target: string }
 const links = new Set<string>()
 const linkStates = new Map<string, LinkState | null>()
@@ -188,6 +197,7 @@ let gitNext: Promise<void> | null = null
 let queuedReads: string[] = []
 let showReads = true
 let showWrites = true
+let shimmerOn = true
 let searchIndex: { root: string; paths: Promise<Indexed> } | null = null
 let activityId = 0
 let pointer = true
@@ -227,7 +237,9 @@ let longFile = 500
 let guards: Guards = {}
 let guardsLoaded: Promise<void> | null = null
 let outside: string[] = []
-const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false }
+const zjump = { on: false, query: '', sel: 0, rows: [] as string[], seq: 0, held: false, focused: false, when: {} as Record<string, number> }
+let jumpBlur: Timer | null = null
+const jumpExists = new Map<string, boolean>()
 let zoxideCache: { at: number; rows: Candidate[] } | null = null
 let visitsCache: Record<string, Visit> | null = null
 let autoCollapseDefault = false
@@ -319,12 +331,28 @@ function faint(hex: string): string {
   return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
 }
 
-async function readThemeSetting($: EngineInterface): Promise<void> {
-  const row = (await $.config.list()).find(r => r.key === 'theme')
-  const light = typeof row?.value === 'string' && row.value.startsWith('light')
-  if (light === lightTerminal) return
+async function readConfig($: EngineInterface): Promise<void> {
+  const rows = await $.config.list()
+  const theme = rows.find(r => r.key === 'theme')
+  const light = typeof theme?.value === 'string' && theme.value.startsWith('light')
+  const shimmer = rows.find(r => SHIMMER_KEY.test(r.key))
+  const lit = shimmer ? shimmer.value !== 'off' : shimmerOn
+  if (light === lightTerminal && lit === shimmerOn) return
   lightTerminal = light
+  shimmerOn = lit
   void $.ui.invalidate('ui.render')
+}
+
+async function saveShimmer($: EngineInterface, lit: boolean): Promise<string> {
+  const key = (await $.config.list().catch(() => [])).find(r => SHIMMER_KEY.test(r.key))?.key
+  if (!key) return ''
+  const result = await $.config.set({ key, value: lit ? 'on' : 'off' }).catch((err: unknown) => ({ deny: err instanceof Error ? err.message : String(err) }))
+  return result.deny ?? ''
+}
+
+function weigh(el: unknown): [number, number] {
+  const text = JSON.stringify(el) ?? ''
+  return [text.length, text.split('"type":').length - 1]
 }
 
 function get(_$: EngineInterface): Promise<FileTree> {
@@ -404,7 +432,7 @@ async function loadDirs($: EngineInterface, dirs: string[]): Promise<Map<string,
     const nodes = replaceChildren(t.nodes, listed)
     const up = dirname(t.cursor)
     const lost = t.cursor && listed.has(up) && !nodes.some(n => n.id === t.cursor)
-    return lost ? { nodes, cursor: up === root ? '' : up } : { nodes }
+    return lost ? { nodes, cursor: up === root ? '' : up, ...(t.selected === t.cursor ? { selected: '' } : {}) } : { nodes }
   })
   void watchTree($)
   return listed
@@ -551,6 +579,7 @@ async function reset($: EngineInterface, root: string, focus = false, ready?: Pr
   hintRoot = ''
   marks = []
   markAnchor = ''
+  markBase = []
   linkStates.clear()
   searchIndex = null
   grepClear()
@@ -1080,9 +1109,9 @@ function peekMessage(data: unknown): { key: unknown; over: unknown; scrollTo: un
   return { key: has(data, 'key') ? data.key : undefined, over: has(data, 'over') ? data.over : undefined, scrollTo: has(data, 'scrollTo') ? data.scrollTo : undefined }
 }
 
-function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
+function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unknown; alt: unknown; shift: unknown; scrollTo: unknown; copy: unknown } {
   const at = <K extends string>(key: K): unknown => (has(data, key) ? data[key] : undefined)
-  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
+  return { press: at('press'), key: at('key'), ctrl: at('ctrl'), alt: at('alt'), shift: at('shift'), scrollTo: at('scrollTo'), copy: at('copy') }
 }
 
 async function startGit($: EngineInterface, actions: GitAction[]): Promise<number[]> {
@@ -1296,34 +1325,64 @@ function linkNote(state: LinkState | null | undefined): string {
   return ` →${to}${state.kind === 'outside' ? ' (outside the tree)' : state.kind === 'broken' ? ' (broken: target missing)' : state.kind === 'circular' ? ' (circular link)' : ''}`
 }
 
-function toggleMark($: EngineInterface, id: string): void {
+function picks(t: FileTree): { ids: string[]; marked: boolean } {
+  return marks.length ? { ids: marks, marked: true } : { ids: t.selected ? [t.selected] : [], marked: false }
+}
+
+function anchorAt(id: string): void {
   markAnchor = id
-  if (marks.includes(id)) marks = marks.filter(m => m !== id)
-  else if (marks.length >= MARK_LIMIT) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
-  else marks = [...marks, id]
-  void $.ui.invalidate('ui.render')
+  markBase = marks.filter(m => m !== id)
+}
+
+function flip($: EngineInterface, t: FileTree, id: string, pin: boolean): boolean {
+  const { ids, marked } = picks(t)
+  const on = ids.includes(id)
+  if (!on && ids.length >= MARK_LIMIT) {
+    $.ui.toast(MARKS_FULL)
+    return false
+  }
+  marks = on && pin && !marked ? [id] : on ? ids.filter(m => m !== id) : [...ids, id]
+  anchorAt(id)
+  return true
+}
+
+async function markRow($: EngineInterface, id: string): Promise<void> {
+  if (flip($, await get($), id, true)) await patch($, cur => ({ selected: marks.length ? cur.selected : '' }))
 }
 
 function addMarks($: EngineInterface, ids: string[]): void {
   const fresh = ids.filter(id => id && !marks.includes(id))
   const room = Math.max(0, MARK_LIMIT - marks.length)
-  if (fresh.length > room) $.ui.toast(`filetree: at most ${MARK_LIMIT} marks; V clears them`)
+  if (fresh.length > room) $.ui.toast(MARKS_FULL)
   marks = [...marks, ...fresh.slice(0, room)]
   void $.ui.invalidate('ui.render')
 }
 
 async function markRange($: EngineInterface, id: string): Promise<void> {
-  const ids = rowsOf(await get($)).map(r => r.node.id)
+  const t = await get($)
+  const ids = rowsOf(t).map(r => r.node.id)
+  if (!ids.includes(markAnchor)) anchorAt(ids.includes(t.cursor) ? t.cursor : id)
   const to = ids.indexOf(id)
-  const from = markAnchor ? ids.indexOf(markAnchor) : -1
-  addMarks($, from < 0 || to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
-  markAnchor = id
+  const from = ids.indexOf(markAnchor)
+  marks = markBase
+  addMarks($, to < 0 ? [id] : ids.slice(Math.min(from, to), Math.max(from, to) + 1))
   await patch($, () => ({ cursor: id, selected: id }))
 }
 
-function clearMarks($: EngineInterface): void {
+async function pickRow($: EngineInterface, id: string): Promise<void> {
+  if (flip($, await get($), id, false)) await patch($, () => ({ cursor: id, selected: marks.length ? id : '' }))
+}
+
+function pickOnly(id: string): void {
   marks = []
-  void $.ui.invalidate('ui.render')
+  anchorAt(id)
+}
+
+function clearMarks($: EngineInterface): void {
+  if (!marks.length) return
+  marks = []
+  markBase = []
+  void patch($, cur => ({ selected: cur.cursor }))
 }
 
 async function exists($: EngineInterface, path: string): Promise<boolean> {
@@ -1456,13 +1515,15 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
   if (await followCwd($)) return
   await revealPaths($, paths)
   const opened: string[] = []
+  const to = paths[paths.length - 1]
+  if (to) anchorAt(to)
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of paths) for (const a of ancestorsOf(p, cur.root)) if (!open.has(a)) {
       open.add(a)
       opened.push(a)
     }
-    return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
+    return { expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
   })
   await markOpened($, opened, paths)
 }
@@ -1593,7 +1654,7 @@ async function search($: EngineInterface, query: string): Promise<string[]> {
   const scope = t.searchScope ? `${t.searchScope.replace(/\/$/, '')}/` : ''
   for (let i = 0; i < index.rel.length && hits.length < SEARCH_REVEAL_LIMIT; i++) if ((!scope || (index.paths[i] ?? '').startsWith(scope)) && match(index.rel[i] ?? '')) hits.push(index.paths[i] ?? '')
   if ((await get($)).query !== query) return []
-  if (match.partial) void $.ui.toast(`filetree: regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
+  if (match.partial) void $.ui.toast(`regex search stopped after ${hits.length} match${hits.length === 1 ? '' : 'es'}; the pattern is too slow to check every path`)
   await revealPaths($, hits)
   const shown = await get($)
   const ids = new Set(shown.nodes.map(n => n.id))
@@ -1824,8 +1885,9 @@ async function grepNav($: EngineInterface, key: string, surface?: RenderSurface)
 async function grepAct($: EngineInterface, key: string, shift: boolean, surface?: RenderSurface): Promise<boolean> {
   if (!['x', 'd', 'v', 't', 'y', 'Y', 'u', 'i'].includes(key) || (key === 'v' && shift)) return false
   const path = grep.rows[grep.sel]?.path
+  const { ids, marked } = picks(await get($))
   if (!path) {
-    if ((key === 'y' || key === 'Y' || key === 'u') && marks.length) await copyPaths($, marks, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+    if ((key === 'y' || key === 'Y' || key === 'u') && marked) await copyPaths($, ids, key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
     return true
   }
   if (key === 'i') {
@@ -1835,9 +1897,9 @@ async function grepAct($: EngineInterface, key: string, shift: boolean, surface?
     $.clock.after(50, () => focusPane($, t.root, 'q'))
   } else if (key === 'x') await toggleGuard($, path)
   else if (key === 'd') await diffFile($, path)
-  else if (key === 'v') toggleMark($, path)
+  else if (key === 'v') await markRow($, path)
   else if (key === 't') await openTerminal($, dirname(path))
-  else await copyPaths($, marks.length ? marks : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else await copyPaths($, ids.length ? ids : [path], key === 'u' ? 'name' : key === 'Y' || shift ? 'absolute' : 'relative', surface)
   return true
 }
 
@@ -1971,13 +2033,36 @@ async function jumpRefresh($: EngineInterface): Promise<void> {
     for (let d = dirname(p); d.length > t.root.length && !dirs.has(d); d = dirname(d)) dirs.add(d)
   }
   for (const d of dirs) cands.push({ path: d, score: 0 })
-  zjump.rows = rankJump(cands, zjump.query).filter(p => p !== t.root || zjump.query.trim() !== '')
+  const typed = zjump.query.trim() !== ''
+  const recent = typed ? [] : recentJump(seen).map(posix).filter(p => p !== t.root).slice(0, JUMP_RECENT * 2)
+  const ranked = typed ? rankJump(cands, zjump.query) : [...new Set([...recent, ...rankJump(cands, '').filter(p => p !== t.root)])]
+  const known = new Set([t.root, ...dirs])
+  const remembered = new Set(Object.keys(seen).map(posix))
+  const there = await Promise.all(ranked.map(async p => known.has(p) || !remembered.has(p) || (jumpExists.get(p) ?? jumpExists.set(p, await $.fs.exists(p).catch(() => false)).get(p) ?? false)))
+  if (mine !== zjump.seq || !zjump.on) return
+  const gone = ranked.filter((_, k) => !there[k])
+  if (gone.some(p => p in seen)) await forgetVisits($, gone)
+  if (mine !== zjump.seq || !zjump.on) return
+  zjump.rows = ranked.filter((_, k) => there[k]).slice(0, typed ? undefined : JUMP_RECENT)
+  zjump.when = Object.fromEntries(Object.entries(seen).map(([p, v]) => [posix(p), v.at]))
   zjump.sel = Math.min(zjump.sel, Math.max(0, zjump.rows.length - 1))
   void $.ui.invalidate('ui.render')
 }
 
+async function forgetVisits($: EngineInterface, dirs: string[]): Promise<void> {
+  visitsCache = Object.fromEntries(Object.entries(await visits($)).filter(([dir]) => !dirs.includes(posix(dir))))
+  await $.state.set(VISITS, visitsCache)
+}
+
+function jumpBlurCancel(): void {
+  jumpBlur?.cancel()
+  jumpBlur = null
+}
+
 function jumpOpen($: EngineInterface): void {
+  jumpBlurCancel()
   zjump.on = true
+  jumpExists.clear()
   zjump.held = false
   zjump.query = ''
   zjump.sel = 0
@@ -1994,6 +2079,7 @@ async function jumpInput($: EngineInterface, value: string): Promise<void> {
 }
 
 function jumpClose($: EngineInterface, refocus = false): void {
+  jumpBlurCancel()
   zjump.on = false
   zjump.query = ''
   zjump.rows = []
@@ -2034,13 +2120,14 @@ async function considerWork($: EngineInterface): Promise<void> {
   if (!followWork || workDeciding) return
   workDeciding = true
   try {
-    const base = jumpMovesClaude ? await cwdOf($) : (await get($)).root
+    const moves = jumpMovesClaude && (await canCd($))
+    const base = moves ? await cwdOf($) : (await get($)).root
     const current = (await repoOf($, base)) ?? base
     const now = await $.clock.now()
     const repo = pickRepo(workTouches, current, now, workLast)
     if (!repo || inside(repo, base)) return
     workLast = now
-    if (!jumpMovesClaude) {
+    if (!moves) {
       follow = false
       await reset($, repo)
       return
@@ -2048,10 +2135,10 @@ async function considerWork($: EngineInterface): Promise<void> {
     $.clock.after(0, async () => {
       try {
         await $.command.run({ command: 'cd', args: repo })
-        void $.ui.toast(`filetree: followed the work to ${shortPath(repo)}`)
+        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
         $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
       } catch (error) {
-        void $.ui.toast(`filetree: could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
+        void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
       }
     })
   } finally {
@@ -2059,17 +2146,27 @@ async function considerWork($: EngineInterface): Promise<void> {
   }
 }
 
+async function canCd($: EngineInterface): Promise<boolean> {
+  return (await $.command.list().catch(() => [])).some(c => c.name === 'cd')
+}
+
 async function jumpTo($: EngineInterface, dir: string): Promise<void> {
+  if (!(await $.fs.exists(dir).catch(() => false))) {
+    await forgetVisits($, [dir])
+    void $.ui.toast(`${shortPath(dir)} no longer exists`)
+    void jumpRefresh($)
+    return
+  }
   jumpClose($, true)
   workLast = await $.clock.now()
   follow = false
   await reset($, dir)
-  if (!jumpMovesClaude || (await cwdOf($)) === dir) return
+  if (!jumpMovesClaude || (await cwdOf($)) === dir || !(await canCd($))) return
   $.clock.after(0, async () => {
     try {
       await $.command.run({ command: 'cd', args: dir })
     } catch (error) {
-      void $.ui.toast(`filetree: could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
+      void $.ui.toast(`could not move Claude to ${dir}: ${error instanceof Error ? error.message : String(error)}`)
     }
   })
 }
@@ -2106,10 +2203,12 @@ async function jump($: EngineInterface, query: string, surface?: RenderSurface):
     return
   }
   const hits = (await search($, query)).slice(0, 10)
+  const to = hits[0]
+  if (to) anchorAt(to)
   await patch($, cur => {
     const open = new Set(cur.expanded)
     for (const p of hits) for (const a of ancestorsOf(p, cur.root)) open.add(a)
-    return { query: '', expanded: [...open], cursor: hits[0] ?? cur.cursor, scroll: null }
+    return { query: '', expanded: [...open], ...(to ? { cursor: to, selected: to } : {}), scroll: null }
   })
 }
 
@@ -2883,11 +2982,15 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   const rows = rowsOf(t)
   const at = rows.findIndex(r => r.node.id === t.cursor)
   const cur = rows[at]?.node
+  const picked = picks(t).ids
   const onRoot = Boolean(t.root) && t.cursor === t.root
   const move = (d: number) => {
-    const to = onRoot ? (d < 0 ? -1 : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? -1 : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
+    const top = surface === 'desktop' && rows.length ? 0 : -1
+    const to = onRoot ? (d < 0 ? top : Math.min(rows.length - 1, d - 1)) : at === 0 && d === -1 ? top : Math.max(0, Math.min(rows.length - 1, (at < 0 ? 0 : at) + d))
     const id = to < 0 ? t.root : rows[to]?.node.id
-    return id ? patch($, () => ({ cursor: id, selected: id, scroll: null })) : Promise.resolve()
+    if (!id) return Promise.resolve()
+    anchorAt(id)
+    return patch($, () => ({ cursor: id, selected: id, scroll: null }))
   }
   const page = Math.max(1, peekRows - 1)
   const peek: Record<string, number> = { f: page, b: -page, pageup: -page, pagedown: page }
@@ -2902,7 +3005,7 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
     await move(key === 'up' || key === 'k' || key === 'K' ? -1 : 1)
     const next = (await get($)).cursor
     if (next && next !== t.root) addMarks($, [next])
-    if (next) markAnchor = next
+    if (next) anchorAt(next)
   } else if (key === 'up' || key === 'k') await move(-1)
   else if (key === 'down' || key === 'j') await move(1)
   else if (key === 'pageup') await move(-10)
@@ -2926,14 +3029,17 @@ async function steer($: EngineInterface, key: string, shift = false, surface?: R
   else if (cur && key === 'x') await toggleGuard($, cur.id)
   else if (cur && key === 'd') await diffFile($, cur.id)
   else if (key === 'V' || (key === 'v' && shift)) clearMarks($)
-  else if (cur && key === 'v') toggleMark($, cur.id)
+  else if (cur && key === 'v') await markRow($, cur.id)
   else if (key === 't') await openTerminal($, cur ? (cur.kind === 'dir' ? cur.id : cur.parent) : t.root)
-  else if ((cur || marks.length) && (key === 'y' || key === 'Y')) await copyPaths($, marks.length ? marks : [cur?.id ?? ''], key === 'Y' || shift ? 'absolute' : 'relative', surface)
-  else if ((cur || marks.length) && key === 'u') await copyPaths($, marks.length ? marks : [cur?.id ?? ''], 'name', surface)
+  else if (picked.length && (key === 'y' || key === 'Y')) await copyPaths($, picked, key === 'Y' || shift ? 'absolute' : 'relative', surface)
+  else if (picked.length && key === 'u') await copyPaths($, picked, 'name', surface)
   else if (cur && (key === 'right' || key === 'l') && cur.kind === 'dir' && !t.expanded.includes(cur.id)) await toggle($, cur)
   else if (cur && (key === 'left' || key === 'h')) {
     if (cur.kind === 'dir' && t.expanded.includes(cur.id)) await toggle($, cur)
-    else if (cur.parent !== t.root) await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
+    else if (cur.parent !== t.root) {
+      anchorAt(cur.parent)
+      await patch($, () => ({ cursor: cur.parent, selected: cur.parent }))
+    }
   } else if (cur && (key === 'return' || key === 'o')) await (cur.kind !== 'dir' ? openNode($, cur) : toggle($, cur))
   else if (cur && (key === ' ' || key === 'space') && isGhost(t, cur.id)) await diffFile($, cur.id)
   else if (cur && (key === ' ' || key === 'space')) await (cur.kind !== 'dir' && (await osName($)) === 'darwin' ? quickLook($, cur.id) : toggle($, cur))
@@ -2975,9 +3081,25 @@ async function pressHeader($: EngineInterface, id: string): Promise<void> {
   else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
   else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
-  else if (id === 'unselect') await patch($, () => ({ selected: '', cursor: '' }))
+  else if (id === 'unselect') {
+    marks = []
+    markBase = []
+    markAnchor = ''
+    await patch($, () => ({ selected: '', cursor: '' }))
+  }
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
+  else if (id === 'shimmer') {
+    const lit = !shimmerOn
+    shimmerOn = lit
+    void $.ui.invalidate('ui.render')
+    const deny = await saveShimmer($, lit)
+    if (deny) {
+      shimmerOn = !lit
+      void $.ui.invalidate('ui.render')
+      $.ui.toast(`Activity shimmer stays ${shimmerOn ? 'on' : 'off'}: ${deny}`)
+    }
+  }
   else if (id === 'outside') await showOutside($)
   else if (id === 'autocollapse') {
     await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
@@ -3076,6 +3198,7 @@ function shortPath(path: string): string {
 
 export const register: Register = (on, options) => {
   glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
+  shimmerOn = options?.shimmer !== 'off'
   const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
   showReads = activity.includes('reads')
   showWrites = activity.includes('writes')
@@ -3114,7 +3237,7 @@ export const register: Register = (on, options) => {
     void loadGuards($)
     cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
-    if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, added, modified, renamed, add or del`)
+    if (palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, jump, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
     inTmux = !windows && Boolean(await $.env.get('TMUX'))
@@ -3138,7 +3261,7 @@ export const register: Register = (on, options) => {
         } catch {
           noNerd = true
         }
-        await readThemeSetting($).catch(() => undefined)
+        await readConfig($).catch(() => undefined)
       })()
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
@@ -3157,9 +3280,9 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('config.set', { key: 'theme' }, async ($, e, next) => {
+  on('config.set', async ($, e, next) => {
     const result = await next(e)
-    await readThemeSetting($).catch(() => undefined)
+    if (e.key === 'theme' || SHIMMER_KEY.test(e.key)) await readConfig($).catch(() => undefined)
     return result
   })
 
@@ -3353,6 +3476,8 @@ export const register: Register = (on, options) => {
       return {}
     }
     if (data.press === ROOT_PRESS) {
+      if (e.surface === 'desktop') return {}
+      pickOnly(t.root)
       await selectRoot($)
       focusPane($, (await get($)).root, 'hk-tree')
       return {}
@@ -3360,25 +3485,23 @@ export const register: Register = (on, options) => {
     if (typeof data.press === 'string') {
       const ghost = ghostsOf(t).find(x => x.id === data.press)
       const n = t.nodes.find(x => x.id === data.press)
-      if (data.shift && !data.ctrl && (ghost || n)) {
+      if (!ghost && !n) return {}
+      const flip = data.ctrl === true || (data.alt === true && (await osName($)) === 'darwin')
+      if (data.shift === true || flip) {
         if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
-        await markRange($, data.press)
+        await (data.shift === true ? markRange($, data.press) : pickRow($, data.press))
         if (autoOpened.size) claimMarks((await get($)).cursor)
         return {}
       }
+      pickOnly(data.press)
       if (ghost) {
-        markAnchor = ghost.id
         await patch($, () => ({ cursor: ghost.id, selected: ghost.id }))
         await diffFile($, ghost.id)
         return {}
       }
       if (!n) return {}
       if (t.scroll === null) await patch($, () => ({ scroll: view.from }))
-      if (data.ctrl) await openNode($, n)
-      else {
-        markAnchor = n.id
-        await press($, n)
-      }
+      await press($, n)
       if (autoOpened.size) claimMarks((await get($)).cursor)
       return {}
     }
@@ -3469,9 +3592,10 @@ export const register: Register = (on, options) => {
     if (!(await followCwd($))) void sync($)
     const t = await get($)
     const context = [...(e.context ?? [])]
-    const marked = (await Promise.all(marks.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
-    if (marked.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${marked.join('\n')}`)
-    if (t.selected && (await exists($, t.selected))) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${t.selected}`)
+    const picked = picks(t)
+    const live = (await Promise.all(picked.ids.map(async p => ((await exists($, p)) ? p : '')))).filter(Boolean)
+    if (picked.marked && live.length) context.push(`The user has marked these entries in the file tree; "these" or "them" in the prompt likely refers to them:\n${live.join('\n')}`)
+    else if (!picked.marked && live[0]) context.push(`The user has this file selected in the file tree; "this" or "it" in the prompt likely refers to it: ${live[0]}`)
     const mentions = [...e.text.matchAll(/@([^\s"'`]+)/g)]
       .map(m => (m[1] ?? '').replace(/[.,;:!?)]+$/, ''))
       .filter(Boolean)
@@ -3495,7 +3619,8 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    const drawn = await next(e)
+    const narrow = e.component === 'AssistantMessage' && e.surface === 'terminal' ? narrowEmoji(e.props.text) : null
+    const drawn = await next(narrow !== null && e.component === 'AssistantMessage' && narrow !== e.props.text ? { ...e, props: { ...e.props, text: narrow } } : e)
     if (e.component !== 'AssistantMessage' || e.props.isSummary || (e.surface !== 'terminal' && e.surface !== 'desktop') || !fileRefs(e.props.text).length) return drawn
     const t = await get($)
     if (!t.root) return drawn
@@ -3522,8 +3647,14 @@ export const register: Register = (on, options) => {
       return <Empty />
     }
     if (zjump.on) {
-      if (e.props.isFocused) zjump.held = true
-      else if (zjump.held) $.clock.after(0, () => (zjump.on && zjump.held ? jumpClose($) : undefined))
+      zjump.focused = Boolean(e.props.isFocused)
+      if (e.props.isFocused) {
+        zjump.held = true
+        jumpBlurCancel()
+      } else if (zjump.held && !jumpBlur) jumpBlur = $.clock.after(JUMP_BLUR_MS, () => {
+        jumpBlur = null
+        if (zjump.on && zjump.held && !zjump.focused) jumpClose($)
+      })
     }
     const unicode = glyphSetting === 'plain' || glyphSetting === 'text' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const elements = $.ui.resolve(e)
@@ -3569,11 +3700,11 @@ export const register: Register = (on, options) => {
       return (
         <Box key={`${key}-diff`} flexDirection="column">
           {rows.map((r, j) => r.kind === '@' ? (
-            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" height={ROW_PX} paddingLeft={1} backgroundColor={DESK.hover}>
+            <Box key={`${key}-h${j}`} flexDirection="row" alignItems="center" paddingLeft={1} backgroundColor={DESK.hover}>
               <Text dimColor size="footnote" tabular wrap="truncate-end">{r.text}</Text>
             </Box>
           ) : (
-            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" height={ROW_PX} backgroundColor={tintOf(r.kind)}>
+            <Box key={`${key}-l${j}`} flexDirection="row" alignItems="center" backgroundColor={tintOf(r.kind)}>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.old ? String(r.old) : ''}</Text></Box>
               <Box width={digits + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text dimColor tabular mono>{r.new ? String(r.new) : ''}</Text></Box>
               <Box width={2} flexShrink={0} flexDirection="row" justifyContent="center"><Text color={r.kind === '+' ? add : r.kind === '-' ? del : mutedInk} mono>{r.kind === ' ' ? '' : r.kind}</Text></Box>
@@ -3615,6 +3746,8 @@ export const register: Register = (on, options) => {
     const deskSel = palette.theme.selection ?? DESK.selection
     const deskHover = palette.hover ?? DESK.hover
     const deskCur = e.props.isFocused ? deskSel : deskHover
+    const deskCursor = palette.theme.accent ? `${accentInk}1f` : DESK.cursor
+    const jumpSel = palette.jump ? `${palette.jump}1f` : DESK.jumpSel
     const button = (b: ButtonProps & { icon?: IconName; hint?: string }) => desk && Svg && b.icon ? (
       <Box key={`tool-${b.id}`} position="relative" flexDirection="row" alignItems="center" flexShrink={0}>
         <Svg key={`tool-icon-${b.id}${b.id === 'refresh' ? `-${reloading ? 'spin' : reloadSpin}` : ''}`} source={toolSvg(b.icon, glow(b.id === 'outside' ? ink(warnColor, DESK_GIT.M ?? DESK.accent) : b.dim && !(b.id === 'refresh' && reloading) ? mutedInk : accentInk, b.id), b.id === 'refresh' && reloading ? SPIN_MS : 0)} alt={`${WORDS[b.id] ?? b.id} button`} width={24} height={24} />
@@ -3777,6 +3910,8 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = rowsOf(t)
+    const picked = picks(t)
+    const inSet = new Set(picked.ids)
     const grepping = !zjump.on && grepOn(t)
     if (grepping && grep.key !== grepKey(t)) grepRun($, t)
     const body = e.props.scroll?.bodyRows ?? 40
@@ -3794,7 +3929,7 @@ export const register: Register = (on, options) => {
     const lit = followClaude && t.flashOn ? rows.findIndex(r => isLit(r.node.id)) : -1
     const cap = Math.max(1, Math.floor(room / 3))
     let from = Math.max(0, Math.min(lit >= 0 && at - lit < room - 2 ? Math.max(0, lit - 1) : at - Math.floor(room / 2), rows.length - room))
-    let pinned = !nativeScroll && followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
+    let pinned = !nativeScroll && shimmerOn && followClaude && t.flashOn ? rows.slice(0, from).filter(r => isLit(r.node.id)).slice(-cap) : []
     if (pinned.length) {
       const rest = Math.max(3, room - pinned.length)
       from = Math.max(0, Math.min(at - Math.floor(rest / 2), rows.length - rest))
@@ -3807,8 +3942,8 @@ export const register: Register = (on, options) => {
     }
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
-    const deskFrom = nativeScroll && shown.length > DESK_ROWS ? Math.max(0, Math.min(at - Math.floor(DESK_ROWS / 2), shown.length - DESK_ROWS)) : 0
-    const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS) : shown
+    const deskFrom = nativeScroll && shown.length > DESK_ROWS + 2 ? Math.max(0, Math.min(at - from - Math.floor(DESK_ROWS / 2) - 1, shown.length - DESK_ROWS - 2)) : 0
+    const drawn = nativeScroll ? shown.slice(deskFrom, deskFrom + DESK_ROWS + 2) : shown
     if (t.column === 'date') wantTimes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir').map(r => r.node))
     if (t.column === 'size') wantSizes($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (t.column === 'files') wantCounts($, [...pinned, ...drawn].filter(r => r.node.kind === 'dir' && !fileCounts.has(r.node.id)).map(r => r.node.id))
@@ -3829,7 +3964,7 @@ export const register: Register = (on, options) => {
     const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
     const plainButtons = [
       ...(outside.length ? [{ id: 'outside', label: `${unicode ? '⚠' : '\u{ea6c}'} ${outside.length}`, dim: false, hint: `${outside.length} file${outside.length === 1 ? '' : 's'} written outside the repo`, icon: 'warning' as const }] : []),
-      ...(t.selected ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
+      ...(picked.ids.length ? [{ id: 'unselect', label: unicode ? '⊘' : '\u{eabd}', dim: false, hint: 'clear selection', icon: 'ban' as const }] : []),
       { id: 'up', label: unicode ? '↑' : '\u{f19f3}', dim: true, hint: 'parent folder', icon: 'folder-up-line' as const },
       { id: 'cwd', label: unicode ? '⌂' : '\u{eb46}', dim: !follow, hint: 'go to cwd', icon: 'root-folder' as const },
       { id: 'hidden', label: unicode ? (t.showHidden ? '⊙' : '○') : t.showHidden ? '\u{ea70}' : '\u{eae7}', dim: !t.showHidden, hint: t.showHidden ? 'hide hidden files' : 'show hidden files', icon: t.showHidden ? ('eye' as const) : ('eye-off' as const) },
@@ -3837,6 +3972,7 @@ export const register: Register = (on, options) => {
       { id: 'collapse', label: unicode ? '⊟' : '\u{eac5}', dim: true, hint: t.expanded.length ? 'collapse all' : 'expand all', icon: t.expanded.length ? 'square-minus' as const : 'square-plus' as const },
       { id: 'autocollapse', label: unicode ? '◷' : '\u{ea82}', dim: !autoCollapseOn(t), hint: 'auto-collapse opened folders', icon: 'folder-minus' as const },
       ...(nativeScroll ? [] : [{ id: 'split', label: unicode ? '⊡' : '\u{eb57}', dim: !t.split, hint: t.split ? 'hide preview' : 'show preview', icon: 'panel' as const }]),
+      ...(desk ? [{ id: 'shimmer', label: '', dim: !shimmerOn, hint: shimmerOn ? 'disable agent activity shimmer effect' : 'enable agent activity shimmer effect', icon: 'clawd' as const }] : []),
       { id: 'refresh', label: unicode ? '↻' : '\u{eb37}', dim: !reloading, hint: 'reload tree and git', icon: 'refresh' as const },
     ]
     const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${outside.length}` : (WORDS[b.id] ?? b.label) }))
@@ -3847,7 +3983,7 @@ export const register: Register = (on, options) => {
     const toolRoom = e.props.bodyColumns - header.length - 4
     const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + (desk ? DESK_ICON_COLS : [...b.label].length), 0) + gap * Math.max(0, list.length - 1) + 1
     let toolButtons = buttons
-    for (const drop of ['autocollapse', 'size', 'collapse', 'refresh']) {
+    for (const drop of ['autocollapse', 'size', 'collapse', 'shimmer', 'refresh']) {
       if (toolWidth(toolButtons, 1) <= toolRoom) break
       toolButtons = toolButtons.filter(b => b.id !== drop)
     }
@@ -3923,8 +4059,8 @@ export const register: Register = (on, options) => {
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
       const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (gitColors[status] ?? theme.muted) : undefined
-      const isBright = bright.has(n.id)
-      const isDim = !isBright && dimmed.has(n.id)
+      const isBright = shimmerOn && bright.has(n.id)
+      const isDim = shimmerOn && !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
       const isGuard = guarded.has(n.id)
       const iconColor = isGuard ? theme.urgent : isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
@@ -3936,12 +4072,12 @@ export const register: Register = (on, options) => {
       const rel = relative(t.root, n.id)
       const spans = searching ? matchSpans(t.query, Boolean(t.searchCase), Boolean(t.searchRegex), rel) : []
       const hl = (text: string) => (spans.length ? highlight(text, spans, rel.length - n.name.length) : [{ t: text, hit: false }])
-      const isMarked = marks.includes(n.id)
+      const isPicked = inSet.has(n.id)
       const isLink = links.has(n.id)
       const link = isLink ? linkStates.get(n.id) : undefined
       if (isLink && !linkStates.has(n.id)) void classifyLink($, n.id)
       const linkColor = link?.kind === 'broken' || link?.kind === 'circular' ? theme.urgent : link?.kind === 'outside' ? warnColor : theme.muted
-      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isMarked ? 2 : 0) - (isLink ? 2 : 0))
+      const cols = Math.max(4, width - r.depth * 2 - 6 - tailCells - badge.length - (isLink ? 2 : 0))
       const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
       const isCur = n.id === t.cursor
       const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : isCur ? '▎ ' : '  '
@@ -3954,7 +4090,6 @@ export const register: Register = (on, options) => {
         lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
         ...(lit ? [{ t: name, sh: tone, dim: isDim, b: isBright }] : hl(name).map(x => ({ t: x.t, c: x.hit ? theme.accent : nameColor, b: x.hit || n.id === t.selected || isCur, s: status === 'D' && n.kind !== 'dir' }))),
         ...(isLink ? [{ t: ' →', c: linkColor }] : []),
-        ...(isMarked ? [{ t: ' ●', c: theme.accent }] : []),
       ]
       const right: Seg[] = COLS.filter(c => widths[c]).map(c => {
         const cell = cells[c]
@@ -3962,7 +4097,7 @@ export const register: Register = (on, options) => {
         return cell ? { t: pad, c: cell.c } : { t: pad }
       })
       right.push({ t: badge, c: status && !hasCounts ? gitColor : theme.muted, b: true })
-      return { spec: { id: n.id, left: clean(left), right: clean(right) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isMarked, isLink, link, linkColor, parts: hl(n.name) }
+      return { spec: { id: n.id, left: clean(left), right: clean(right), ...(isPicked ? { on: true as const } : {}) }, n, r, cells, status: hasCounts ? '' : (status ?? ''), gitColor, isIgnored: isIgnored && !hasCounts && !status, iconColor, nameColor, lit, tone, isDim, isBright, isRepo, isGuard, isPicked, isLink, link, linkColor, parts: hl(n.name) }
     }
     const rowSpec = (r: (typeof rows)[number]): RowSpec => rowParts(r).spec
     const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
@@ -4000,17 +4135,20 @@ export const register: Register = (on, options) => {
         </Button>
       )
     }
-    const gitSpan = GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
-    const metricSpan = widths.metric ? (widths.metric ?? 0) + 1 : 0
+    const jumpWhen = (dir: string) => (at => (at ? (showAge ? age(at, now) : stamp(at, dateSetting, clock)) : ''))(zjump.when[dir] ?? 0)
+    const jumpDate = zjump.on ? zjump.rows.reduce((m, dir) => Math.max(m, [...jumpWhen(dir)].length), 0) : 0
+    const gitSpan = zjump.on ? 0 : GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
+    const metricSpan = zjump.on ? (jumpDate ? jumpDate + 1 : 0) : widths.metric ? (widths.metric ?? 0) + 1 : 0
     const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
-    const metricLabel = t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
+    const headCell = (col: 'name' | 'git' | 'metric', label: string) => (!zjump.on ? sortCell(col, label) : desk ? <Text key={`head-${col}`} color={mutedInk}>{label}</Text> : <Text key={`head-${col}`} dimColor>{label}</Text>)
     const headerRow = () => (
       <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
         {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
-        {sortCell('name', 'Name')}
+        {headCell('name', 'Name')}
         <Box flexGrow={1} />
-        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('git', gitLabel)}</Box> : null}
-        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{sortCell('metric', metricLabel)}</Box> : null}
+        {gitSpan ? <Box key="sort-git-cell" width={Math.max(gitSpan, gitLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('git', gitLabel)}</Box> : null}
+        {metricSpan ? <Box key="sort-metric-cell" width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end">{headCell('metric', metricLabel)}</Box> : null}
         <Box width={2} flexShrink={0} />
       </Box>
     )
@@ -4026,7 +4164,7 @@ export const register: Register = (on, options) => {
       )
     })
 
-    const deskRow = (p: ReturnType<typeof rowParts>) => {
+    const deskRow = (p: ReturnType<typeof rowParts>, deskShimmer: boolean) => {
       const r = p.r
       const n = p.n
       const icon = p.isGuard ? 'x' : nodeIcon(n, p.isRepo)
@@ -4039,13 +4177,12 @@ export const register: Register = (on, options) => {
         ? <Text color={tone?.solid ?? accentText} bold={p.isBright || undefined} strikethrough={strike || undefined} wrap="truncate-end">{n.name}</Text>
         : <Text {...tint(p.nameColor)} strikethrough={strike || undefined} wrap="truncate-end">{p.parts.some(x => x.hit) ? p.parts.map((x, i) => (x.hit ? <Text key={`hl-${i}`} color={accentText} weight="semibold">{x.t}</Text> : x.t)) : n.name}</Text>
       return (
-        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor ? deskCur : deskHover }}>
-          {n.id === t.cursor && e.props.isFocused && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
+        <Box key={`row:${n.id}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={n.id === t.cursor && !p.isPicked ? deskCursor : p.isPicked ? deskCur : undefined} hover={{ backgroundColor: n.id === t.cursor && !p.isPicked ? deskCursor : p.isPicked ? deskCur : deskHover }}>
+          {n.id === t.cursor && (e.props.isFocused || !p.isPicked) && Svg ? <Box key={`bar:${n.id}`} position="absolute" top={0} left={0} bottom={0}><Svg key={`bar-svg:${n.id}`} source={barSvg(accentInk)} alt="cursor" width={2} height={ROW_PX} /></Box> : null}
           {Svg ? <Svg key={`icon:${n.id}`} source={rowSvg(r.depth, n.kind === 'dir' ? (r.open ? 'open' : 'closed') : null, icon, iconInk)} alt={`${p.isGuard ? 'guarded ' : ''}${n.kind === 'dir' ? 'folder' : n.kind === 'link' ? 'link' : 'file'} ${n.name}`} width={r.depth * STEP_PX + STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
           <Box flexGrow={p.isLink ? 0 : 1} flexShrink={1} overflow="hidden">{name}</Box>
           {p.isLink ? <Text key={`link:${n.id}`} {...tint(p.linkColor)}>{` → `}</Text> : null}
           {p.isLink ? <Box flexGrow={1} /> : null}
-          {p.isMarked && Svg ? <Svg key={`mark:${n.id}`} source={iconSvg('mark', accentInk, 12)} alt={`marked ${n.name}`} width={12} height={12} /> : null}
           {tailCols(p.cells, `tail:${n.id}`)}
           <Box width={2} flexShrink={0} flexDirection="row" justifyContent="flex-end" alignItems="center">
             {p.status ? <Text {...tint(p.gitColor)} bold>{p.status}</Text> : p.isIgnored && Svg ? <Svg key={`ignored:${n.id}`} source={iconSvg('ban', mutedInk, 12)} alt="ignored by git" width={12} height={12} /> : null}
@@ -4059,7 +4196,7 @@ export const register: Register = (on, options) => {
 
     const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const jumpSpecs: RowSpec[] = zjump.rows.length
-      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: theme.accent }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: [] }))
+      ? zjump.rows.map(dir => ({ id: dir, left: clean([{ t: unicode ? '■ ' : '\u{e5ff} ', c: palette.jump ?? JUMP_COLOR }, { t: dir.split('/').filter(Boolean).pop() ?? dir, c: theme.fg || undefined }, { t: `  ${shortPath(dirname(dir))}`, c: theme.muted }]), right: jumpWhen(dir) ? [{ t: ` ${jumpWhen(dir)} `, c: theme.muted }] : [] }))
       : [note('no matching folder')]
     const grepDigits = Math.max(2, ...grep.rows.map(h => String(h.line).length))
     const grepName = (path: string) => (inside(t.root, path) ? relative(t.root, path) : shortPath(path))
@@ -4073,7 +4210,7 @@ export const register: Register = (on, options) => {
         : { id: grepId(h), left: clean([{ t: `${unicode ? '∙' : fileIcon(grepNode(h.path), false, false)} `, c: theme.muted }, { t: grepName(h.path), c: theme.fg || undefined, b: true }]), right: [{ t: ` ${h.text} `, c: theme.muted }] }),
       ...(grepNote ? [note(grepNote)] : []),
     ]
-    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : [
+    const specs: RowSpec[] = zjump.on ? jumpSpecs : grepping ? grepSpecs : desk ? [] : [
       ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
       ...(pinned.length > 0 ? [note('  ⋮')] : []),
@@ -4085,21 +4222,47 @@ export const register: Register = (on, options) => {
       if (cut >= 0) specs.splice(cut, specs.length - cut, note(`  … ${specs.length - cut} more rows, collapse folders or use search`))
     }
     const deskParts: ReturnType<typeof rowParts>[] = []
-    if (desk) {
-      let size = 0
-      for (const r of drawn) {
-        size += r.node.name.length + DESK_ROW_CHARS
-        if (size > ROWS_BUDGET) break
-        deskParts.push(rowParts(r))
+    let deskStart = deskFrom
+    if (desk && !grepping && !zjump.on && drawn.length) {
+      const parts = new Map<number, ReturnType<typeof rowParts>>()
+      const part = (k: number) => {
+        const known = parts.get(k)
+        if (known) return known
+        const made = rowParts(drawn[k] as (typeof drawn)[number])
+        parts.set(k, made)
+        return made
       }
+      let chars = 0
+      let nodes = 0
+      const fits = (k: number) => {
+        const [c, n] = weigh(deskRow(part(k), true))
+        if (chars + c > DESK_TREE_CHARS || nodes + n > DESK_TREE_NODES) return false
+        chars += c
+        nodes += n
+        return true
+      }
+      const focusAt = Math.min(drawn.length - 1, Math.max(0, at - from - deskFrom))
+      let lo = focusAt
+      let hi = focusAt - 1
+      let down = true
+      let up = true
+      while (hi - lo + 1 < DESK_ROWS && (down || up)) {
+        if (down) down = hi + 1 < drawn.length && fits(hi + 1) ? (hi++, true) : false
+        if (up && hi - lo + 1 < DESK_ROWS && hi >= lo) up = lo - 1 >= 0 && fits(lo - 1) ? (lo--, true) : false
+        if (hi < lo) break
+      }
+      for (let k = lo; k <= hi; k++) deskParts.push(part(k))
+      deskStart = deskFrom + lo
     }
     const deskShimmer = deskParts.filter(x => x.lit).length <= DESK_SHIMMER_MAX
     const deskGrep: GrepHit[] = []
     if (desk && grepping) {
       let size = 0
+      let page = 0
       for (const g of grep.rows) {
-        size += DESK_ROW_CHARS + 6 * grepId(g).length + g.text.length
-        if (size > ROWS_BUDGET) break
+        size += DESK_ROW_CHARS + 7 * grepId(g).length + g.text.length
+        page += DESK_ROW_PAGE + 5 * grepId(g).length + g.text.length
+        if (size > ROWS_BUDGET || page > DESK_PAGE_CHARS || deskGrep.length >= DESK_ROWS) break
         deskGrep.push(g)
       }
     }
@@ -4126,7 +4289,7 @@ export const register: Register = (on, options) => {
             </Box>
           ))}
           {deskGrepNote ? (
-            <Box key="grep-note" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="grep-note" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>{deskGrepNote}</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:grep-note" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
@@ -4138,16 +4301,18 @@ export const register: Register = (on, options) => {
       if (zjump.on) return (
         <Box key="jump-list" flexDirection="column">
           {zjump.rows.length ? zjump.rows.map((dir, k) => (
-            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" backgroundColor={k === zjump.sel ? deskSel : undefined} hover={{ backgroundColor: k === zjump.sel ? deskSel : deskHover }}>
-              {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', accentInk)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
-              <Text>{dir.split('/').filter(Boolean).pop() ?? dir}</Text>
-              <Box flexGrow={1} flexShrink={1} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
+            <Box key={`jump:${dir}`} position="relative" flexDirection="row" alignItems="center" overflow="hidden" backgroundColor={k === zjump.sel ? jumpSel : undefined} hover={{ backgroundColor: k === zjump.sel ? jumpSel : deskHover }}>
+              {Svg ? <Svg key={`jump-icon:${dir}`} source={rowSvg(0, null, 'folder', palette.jump ?? DESK.jump)} alt={`folder ${dir}`} width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : null}
+              <Box flexShrink={1} overflow="hidden"><Text wrap="truncate-end">{dir.split('/').filter(Boolean).pop() ?? dir}</Text></Box>
+              <Box flexGrow={1} flexShrink={3} overflow="hidden" marginLeft={1}><Text {...mutedText} wrap="truncate-start">{shortPath(dirname(dir))}</Text></Box>
+              {metricSpan ? <Box width={Math.max(metricSpan, metricLabel.length + 3)} flexShrink={0} flexDirection="row" justifyContent="flex-end"><Text {...mutedText}>{jumpWhen(dir)}</Text></Box> : null}
+              <Box width={2} flexShrink={0} />
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key={`hit:${dir}`} module="./hit.tsx" props={{ id: dir } satisfies HitProps} width="100%" height="100%" />
               </Box>
             </Box>
           )) : (
-            <Box key="jump-none" position="relative" flexDirection="row" height={ROW_PX} alignItems="center">
+            <Box key="jump-none" position="relative" flexDirection="row" alignItems="center">
               <Text {...mutedText}>no matching folder</Text>
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
                 <Client key="hit:jump-none" module="./hit.tsx" props={{ id: '' } satisfies HitProps} width="100%" height="100%" />
@@ -4157,9 +4322,9 @@ export const register: Register = (on, options) => {
         </Box>
       )
       const out: RenderElement[] = rows.length === 0 ? [<Text key="empty" {...mutedText}>empty</Text>] : []
-      for (const p of deskParts) out.push(deskRow(p))
-      if (deskFrom > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskFrom} rows above, collapse folders or use search`}</Text>)
-      const below = shown.length - deskFrom - deskParts.length
+      for (const p of deskParts) out.push(deskRow(p, deskShimmer))
+      if (deskStart > 0) out.unshift(<Text key="above" {...mutedText}>{`  … ${deskStart} rows above, collapse folders or use search`}</Text>)
+      const below = shown.length - deskStart - deskParts.length
       if (below > 0) out.push(<Text key="more" {...mutedText}>{`  … ${below} more rows, collapse folders or use search`}</Text>)
       return <Box key="tree" flexDirection="column">{out}</Box>
     }
@@ -4172,7 +4337,7 @@ export const register: Register = (on, options) => {
     const branchRow = () => {
       if (!t.top || !t.branch) return null
       const b = t.branch
-      const isFlash = bright.has(BRANCH_ROW)
+      const isFlash = shimmerOn && bright.has(BRANCH_ROW)
       const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
       const label = b.head
       return (
@@ -4282,7 +4447,7 @@ export const register: Register = (on, options) => {
         const cols = Math.max(8, e.props.bodyColumns - 1)
         const tiles = layout(scan.items, cols, peekRows)
         const total = scan.done ? scan.total : scan.items.reduce((a, u) => a + u.bytes, 0)
-        const lit = t.flashOn ? t.flash : []
+        const lit = shimmerOn && t.flashOn ? t.flash : []
         const pick = tiles.find(x => x.path === mapPick)
         const ground = theme.bg
         const shade = ground.startsWith('#') && theme.accent.startsWith('#')
@@ -4510,7 +4675,7 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
         {desk && Svg ? (
           <Box key="head" flexDirection="row" alignItems="center">
-            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative" backgroundColor={t.cursor === t.root ? deskSel : undefined}>
+            <Box flexDirection="row" alignItems="center" flexShrink={1} overflow="hidden" position="relative">
               <Svg key="root-icon" source={rowSvg(0, null, t.top === t.root ? 'folder-git' : 'folder-open', e.props.isFocused ? accentInk : mutedInk)} alt="root folder" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} />
               {e.props.isFocused ? <Text bold color={accentText}>{header}</Text> : <Text {...mutedText}>{header}</Text>}
               <Box position="absolute" top={0} left={0} right={0} bottom={0}>
@@ -4550,7 +4715,7 @@ export const register: Register = (on, options) => {
           <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
             <Svg key="search-icon" source={iconSvg('search', mutedInk, 14)} alt="search" width={14} height={14} />
             {zjump.on ? (
-              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}><Text color={accentText}>jump</Text></Box>
+              <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={palette.jump ? `${palette.jump}0f` : DESK.jumpOn}><Text color={palette.jump ?? DESK.jump}>jump</Text></Box>
             ) : scopeChip()}
             <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
               {zjump.on ? <>
@@ -4575,7 +4740,7 @@ export const register: Register = (on, options) => {
         ) : (
           <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
             {glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
-            {zjump.on ? <Text key="jump-chip" color={theme.accent} bold>{'jump '}</Text> : scopeChip()}
+            {zjump.on ? <Text key="jump-chip" color={palette.jump ?? JUMP_COLOR} bold>{'jump '}</Text> : scopeChip()}
             <Box flexGrow={1}>
               {zjump.on ? <>
                 <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
@@ -4604,7 +4769,7 @@ export const register: Register = (on, options) => {
           <Client
             key="rows"
             module="./rows.tsx"
-            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : t.cursor, ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            props={overlay ? { rows: keyRows.slice(shortcutsTop, shortcutsTop + room), active: '', ...rowColors, pointer } satisfies RowsProps : { rows: specs, active: zjump.on ? (zjump.rows[zjump.sel] ?? "") : grepping ? (grep.rows[grep.sel] ? grepId(grep.rows[grep.sel] as GrepHit) : '') : inSet.has(t.cursor) ? t.cursor : '', ...rowColors, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
           />
         )}
         <Box flexGrow={1} />
@@ -4635,7 +4800,7 @@ export const register: Register = (on, options) => {
                 <Text {...tipProps} wrap="truncate-end">{tipText}</Text>
               </Box>
             ) : null}
-            {marks.length > 0 && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${marks.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${marks.length} marked`}</Text></Button></Box> : null}
+            {picked.marked && !tipText ? <Box key="marked" flexShrink={0} marginLeft={2}><Button key="marked-clear" plain label={`${picked.ids.length} marked`} onPress={() => { clearMarks($); park() }}><Text color={desk ? accentInk : theme.accent}>{`${picked.ids.length} marked`}</Text></Button></Box> : null}
             {footerName && (desk || !tipText) ? (
               <Box flexShrink={1} marginLeft={2}>
                 <Text {...mutedText} wrap="truncate-start">{footer && links.has(footer) ? footerName + linkNote(footerLink) : footerName}</Text>

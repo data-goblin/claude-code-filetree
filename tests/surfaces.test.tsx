@@ -7,7 +7,7 @@ import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, compileSpans, toEre } from '../hooks/regex'
 import { fileRefs, markdownSplit } from '../hooks/refs'
-import { ICONS } from '../hooks/svg'
+import { DESK, ICONS } from '../hooks/svg'
 import { jumpMatch, rankJump, terms } from '../hooks/jump'
 import { shellPaths, workIgnored } from '../hooks/work'
 import { age, ancestorsOf, badPattern, stamp, formatSize, replaceChildren, toNodes } from '../hooks/tree'
@@ -55,6 +55,7 @@ type World = {
   fullName?: boolean
   linkTo?: Record<string, string>
   loops?: string[]
+  noCd?: boolean
 }
 type Ran = string[][]
 const HERDR_SPLIT = '{"id":"cli:pane:split","result":{"pane":{"agent_status":"unknown","cwd":"/home/k/proj","focused":false,"pane_id":"w1:p37","parent_pane_id":"w1:p35","tab_id":"w1:tV","workspace_id":"w1"},"type":"pane_info"}}'
@@ -70,6 +71,7 @@ function world(on: On, w: World, ran: Ran) {
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('session.cwd', () => ({ value: w.cwd }))
   on('session.id', () => ({ value: 'test-session' }))
+  on('command.list', () => ({ value: w.noCd ? [] : [{ name: 'cd', description: 'cd', source: 'builtin' as const }] }))
   on('command.register', (_$, e) => {
     registered.push(e)
     return { value: { command: e.name } }
@@ -95,7 +97,7 @@ function world(on: On, w: World, ran: Ran) {
   const dirOf = (p: string) => w.dirs[p] ?? w.dirs[p.replace(/^[A-Za-z]:/, '')]
   on('fs.exists', (_$, e) => {
     const file = norm(e.path).replace(/^[A-Za-z]:/, '')
-    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined }
+    return { value: w.files?.[file] !== undefined || dirOf(file) !== undefined || dirOf(norm(e.path)) !== undefined }
   })
   on('fs.write', (_$, e) => {
     ran.push(['write', e.path])
@@ -705,6 +707,242 @@ test('desktop: past a few lit rows the names stop running their own shimmer cloc
   await clock.settle()
   expect(await litClients()).toBe(0)
   expect(await texts(ui)).toContain('"children":["f09.txt"]')
+  await ui.unmount()
+})
+
+const shimmering = (tree: unknown): Seg[] => every(tree, n => has(n, 'type') && n.type === 'Client').map(n => propsOf(propsOf(n))).filter(isRowsProps).flatMap(p => p.rows.flatMap(r => [...r.left, ...r.right])).filter(s => s.sh)
+const fillOf = (source: string): string => /fill="(#[0-9a-f]{6})"/.exec(source)?.[1] ?? ''
+const strokeOf = (source: string): string => / stroke="(#[0-9a-f]{6})"/.exec(source)?.[1] ?? ''
+
+test('the shimmer setting turns the activity shimmer off in the terminal and the Desktop app, /config flips it live, and only the Desktop app draws the Clawd button that writes it', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 12 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, [])
+  const config: Record<string, string> = { 'filetree.shimmer': 'off' }
+  const writes: string[] = []
+  on('config.list', () => ({ value: Object.entries(config).map(([key, value]) => ({ key, label: key, kind: 'choice' as const, value, options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: false })) }))
+  on('config.set', (_$, e) => {
+    config[e.key] = String(e.value)
+    writes.push(`${e.key}=${String(e.value)}`)
+    return { value: e.value }
+  })
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  const start = async (surface: 'terminal' | 'desktop') => {
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    return ui
+  }
+  type Ui = Awaited<ReturnType<typeof start>>
+  const press = async (ui: Ui) => {
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+    await tap(ui, 'shimmer')
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+  }
+  const read = async (count: number) => {
+    await clock.advance(3_000)
+    for (const [name] of names.slice(0, count)) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+    await clock.settle()
+  }
+  const hint = async (ui: Ui) => {
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    const shown = await texts(ui)
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    return /"((?:en|dis)able agent activity shimmer effect) ?"/.exec(shown)?.[1]
+  }
+  const look = async (ui: Ui) => {
+    const tree = await ui.drawn()
+    const icon = (alt: string) => svgs(tree).find(s => s.alt === alt)?.source ?? ''
+    const clawd = icon('shimmer button')
+    expect(clawd).toContain(ICONS.clawd)
+    return fillOf(clawd) === strokeOf(icon('dots button')) ? 'blue like the shown dots' : fillOf(clawd) === strokeOf(icon('up button')) ? 'grey like up' : clawd
+  }
+  const lit = async (ui: Ui) => {
+    const tree = await ui.drawn()
+    return { segs: shimmering(tree).length, clients: every(tree, n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:')).length }
+  }
+  const ticks = async (ui: Ui, key: string) => {
+    const before = JSON.stringify(await ui.drawn({ in: key }))
+    await ui.advance(450)
+    return JSON.stringify(await ui.drawn({ in: key })) !== before
+  }
+  const DARK = { segs: 0, clients: 0 }
+  let ui = await start('desktop')
+  expect(await look(ui)).toBe('grey like up')
+  expect(await hint(ui)).toBe('enable agent activity shimmer effect')
+  await read(10)
+  expect(await lit(ui)).toEqual(DARK)
+  expect(await texts(ui)).toContain('f09.txt')
+  await press(ui)
+  expect(writes).toEqual(['filetree.shimmer=on'])
+  expect(await look(ui)).toBe('blue like the shown dots')
+  expect(await hint(ui)).toBe('disable agent activity shimmer effect')
+  await read(3)
+  expect(await lit(ui)).toEqual({ segs: 3, clients: 3 })
+  expect(await ticks(ui, `lit:${root}/f00.txt`)).toBe(true)
+  await press(ui)
+  expect(writes).toEqual(['filetree.shimmer=on', 'filetree.shimmer=off'])
+  expect(await look(ui)).toBe('grey like up')
+  expect(await lit(ui)).toEqual(DARK)
+  await ui.unmount()
+  await $.session.end({ reason: 'other', sessionId: 'test-session', resume: { id: 'test-session' } })
+  ui = await start('terminal')
+  expect(clientProps(await ui.drawn(), 'button-shimmer')).toBeUndefined()
+  await read(10)
+  expect(await lit(ui)).toEqual(DARK)
+  expect(await ticks(ui, 'rows')).toBe(false)
+  await $.config.set({ key: 'filetree.shimmer', value: 'on', previous: 'off', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+  await clock.settle()
+  await read(3)
+  expect(await lit(ui)).toEqual({ segs: 6, clients: 0 })
+  expect(await ticks(ui, 'rows')).toBe(true)
+  expect(writes).toEqual(['filetree.shimmer=on', 'filetree.shimmer=off', 'filetree.shimmer=on'])
+  await ui.unmount()
+})
+
+const shimmerConfig = (on: On, value: string) => {
+  const config: Record<string, string> = { 'filetree.shimmer': value }
+  on('config.list', () => ({ value: Object.entries(config).map(([key, v]) => ({ key, label: key, kind: 'choice' as const, value: v, options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: false })) }))
+  on('config.set', (_$, e) => {
+    config[e.key] = String(e.value)
+    return { value: e.value }
+  })
+}
+const shimmerOnAgain = ($: Engine) => $.config.set({ key: 'filetree.shimmer', value: 'on', previous: 'off', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+
+test('desktop: k on the first row and a click on the root header never put the cursor on the root folder', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['b.ts', 'file']] }, status: '', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  const cursorOn = async () => every(await ui.drawn(), n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('bar:')).map(n => keyOf(n).slice(4))
+  await ui.post({ press: `${root}/a.ts` }, { in: `hit:${root}/a.ts` })
+  await clock.advance(1000)
+  await ui.post({ key: 'k' }, { in: `hit:${root}/a.ts` })
+  await ui.post({ key: 'k' }, { in: `hit:${root}/a.ts` })
+  await clock.settle()
+  expect(await cursorOn()).toEqual([`${root}/a.ts`])
+  await ui.post({ press: '\u0000root' }, { in: 'hit:root' })
+  await clock.settle()
+  expect(await cursorOn()).toEqual([`${root}/a.ts`])
+  expect(await selected($)).toContain(`${root}/a.ts`)
+  await ui.unmount()
+})
+
+test('desktop: when /config refuses the shimmer write, the Clawd button keeps the shimmer as it was and says why', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 4 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+  const ran: Ran = []
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, ran)
+  on('config.list', () => ({ value: [{ key: 'filetree.shimmer', label: 'Activity shimmer', kind: 'choice' as const, value: 'off', options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: true }] }))
+  on('config.set', () => ({ deny: 'managed settings own this value' }))
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const hint = async () => {
+    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    const shown = JSON.stringify(await ui.drawn())
+    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+    await clock.settle()
+    return /(?:en|dis)able agent activity shimmer effect/.exec(shown)?.[0]
+  }
+  expect(await hint()).toBe('enable agent activity shimmer effect')
+  await tap(ui, 'shimmer')
+  await clock.settle()
+  const tree = await ui.drawn()
+  const icon = (alt: string) => svgs(tree).find(s => s.alt === alt)?.source ?? ''
+  expect(fillOf(icon('shimmer button'))).toBe(strokeOf(icon('up button')))
+  expect(ran.some(r => r[0] === 'toast' && (r[1] ?? '').includes('managed settings own this value'))).toBe(true)
+  await clock.advance(3_000)
+  for (const [name] of names) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+  await clock.settle()
+  expect(every(await ui.drawn(), n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:'))).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('terminal: with the shimmer off, a file Claude read above the view is not pinned there, and turning it on pins it again', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 80 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: '', dirs: { [root]: names }, status: '', numstat: '' }, [])
+  shimmerConfig(on, 'off')
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const view = async () => treeRows(await ui.drawn()).rows
+  const readPair = async () => {
+    await clock.advance(3_000)
+    await $.tool.call({ tool: 'Read', file_path: `${root}/f00.txt` })
+    await $.tool.call({ tool: 'Read', file_path: `${root}/f70.txt` })
+    await clock.settle()
+  }
+  await readPair()
+  let rows = await view()
+  expect(rows.map(r => r.id)).toContain(`${root}/f70.txt`)
+  expect(rows.map(r => r.id)).not.toContain(`${root}/f00.txt`)
+  expect(rows.some(r => r.left.some(s => s.t.includes('⋮')))).toBe(false)
+  await shimmerOnAgain($)
+  await clock.settle()
+  await readPair()
+  rows = await view()
+  expect(rows.map(r => r.id)).toContain(`${root}/f00.txt`)
+  expect(rows.some(r => r.left.some(s => s.t.includes('⋮')))).toBe(true)
+  await ui.unmount()
+})
+
+test('treemap: with the shimmer off, an edit inside a box leaves its color alone, and turning it on lights the box again', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['src', 'dir'], ['big.bin', 'file'], ['a.ts', 'file']], [`${root}/src`]: [['x.ts', 'file'], ['y.ts', 'file']] },
+    files: { [`${root}/src/x.ts`]: 'export const x = 1\n' },
+    du: { [root]: `5120\t${root}/src/x.ts\n1024\t${root}/src/y.ts\n6144\t${root}/src\n3072\t${root}/big.bin\n4\t${root}/a.ts\n9220\t${root}\n` },
+  }, [])
+  shimmerConfig(on, 'off')
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.press({ key: 'split' })
+  await clock.settle()
+  const look = async () => JSON.stringify(mapAt(await ui.drawn()).rows.flatMap(r => r.left).filter(s => s.tab === `${root}/src`).map(s => [s.bg, s.b]))
+  const edit = async () => {
+    await clock.advance(3_000)
+    await $.tool.call({ tool: 'Edit', file_path: `${root}/src/x.ts`, old_string: 'a', new_string: 'b' })
+    await clock.settle()
+  }
+  const calm = await look()
+  await edit()
+  expect(await look()).toBe(calm)
+  await shimmerOnAgain($)
+  await clock.settle()
+  await edit()
+  expect(await look()).not.toBe(calm)
+  await ui.unmount()
+})
+
+test('terminal: the shimmer setting set to off in the plugin options starts with no shimmer and no Clawd button', { timeoutMs: 20_000, options: { shimmer: 'off' } }, async ($, on) => {
+  const root = '/Users/k/lit'
+  const names = Array.from({ length: 4 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  for (const [name] of names) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
+  await clock.settle()
+  const tree = await ui.drawn()
+  expect(clientProps(tree, 'button-shimmer')).toBeUndefined()
+  expect(shimmering(tree)).toEqual([])
+  expect(await texts(ui)).toContain('f3.txt')
   await ui.unmount()
 })
 
@@ -3252,7 +3490,7 @@ test('desktop: a diff draws native rows with old and new line numbers, +/- marke
   await ui.unmount()
 })
 
-test('desktop: a narrow pane drops toolbar buttons in the same order as the terminal', { timeoutMs: 20_000 }, async ($, on) => {
+test('desktop: a narrow pane drops toolbar buttons in the same order as the terminal, and the Clawd shimmer button outlasts auto-collapse, size and fold', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/Users/k/proj'
   const clock = world(on, ICON_WORLD(root), [])
   await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
@@ -3263,6 +3501,12 @@ test('desktop: a narrow pane drops toolbar buttons in the same order as the term
   expect(shown).not.toContain('"key":"button-autocollapse"')
   expect(shown).toContain('"key":"button-up"')
   await ui.unmount()
+  const mid = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(37) })
+  await clock.settle()
+  const kept = JSON.stringify(await mid.drawn())
+  expect(kept).not.toContain('"key":"button-autocollapse"')
+  expect(kept).toContain('"key":"button-shimmer"')
+  await mid.unmount()
 })
 
 test('regex search on (a+)+$ finishes at once with no match, and an over-long pattern turns .* red', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
@@ -3671,7 +3915,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await clock.settle()
     const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
     await clock.settle()
-    const ids = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'autocollapse', ...(surface === 'terminal' ? ['split'] : [])]
+    const ids = ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse', 'autocollapse', ...(surface === 'terminal' ? ['split'] : ['shimmer'])]
     for (const id of ids) {
       const before = await texts(ui)
       await ui.pointer({ type: 'enter', x: 0, y: 0, in: `button-${id}` })
@@ -3747,7 +3991,7 @@ test('jump mode closes when the pane loses the keyboard and never pulls focus ba
   await focused.unmount()
   const before = opens.length
   const blurred = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await clock.advance(200)
+  await clock.advance(600)
   await clock.settle()
   expect(JSON.stringify(await blurred.drawn())).not.toContain('"key":"jump"')
   expect(opens.slice(before).some(o => has(o, 'focus') && o.focus === true)).toBe(false)
@@ -4180,7 +4424,7 @@ test('the contents toggle searches file contents, groups matches per file, opens
   await clock.settle()
   const drawn = JSON.stringify(await desktop.drawn())
   expect(drawn).toContain(`hit:grep:1:${root}/b.md`)
-  expect(drawn).toContain('first 200 matches; keep typing to narrow')
+  expect(drawn).toMatch(/first 150 of \d+ rows; keep typing to narrow/)
   await desktop.post({ press: `grep:3:${root}/b.md` }, { in: `hit:grep:3:${root}/b.md` })
   await clock.settle()
   expect(JSON.stringify(await desktop.drawn())).toContain('pv-head')
@@ -4193,7 +4437,7 @@ test('the contents toggle searches file contents, groups matches per file, opens
   await ui.unmount()
 })
 
-test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc clear them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+test('v marks rows: y and Y copy every mark, the marks go to Claude, V clears them, on the terminal and the desktop', { timeoutMs: 20_000 }, async ($, on) => {
   const root = '/home/k/proj'
   const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file']], [`${root}/src`]: [['c.ts', 'file']] } }, [])
   const copied: string[] = []
@@ -4205,14 +4449,13 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  for (const name of ['a.txt', 'src']) {
-    await ui.post({ press: `${root}/${name}` }, { in: 'rows' })
-    await clock.advance(1000)
-    await ui.post({ key: 'v' }, { in: 'rows' })
-  }
+  await ui.post({ press: `${root}/a.txt` }, { in: 'rows' })
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await ui.post({ key: 'k' }, { in: 'rows' })
+  await ui.post({ key: 'v' }, { in: 'rows' })
   await clock.settle()
-  const marked = (rows: RowSpec[]) => rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id)
-  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([`${root}/src`, `${root}/a.txt`])
+  const lit = (rows: RowsProps) => rows.rows.filter(r => r.on).map(r => r.id)
+  expect(lit(treeRows(await ui.drawn()))).toEqual([`${root}/src`, `${root}/a.txt`])
   expect(JSON.stringify(await ui.drawn())).toContain('2 marked')
   for (const key of ['y', 'Y']) await ui.post({ key }, { in: 'rows' })
   await clock.settle()
@@ -4221,64 +4464,156 @@ test('v marks rows: y and Y copy every mark, the marks go to Claude, V and Esc c
   expect(JSON.stringify(sent)).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/a.txt\\n${root}/src`)
   await ui.post({ key: 'V' }, { in: 'rows' })
   await clock.settle()
-  expect(marked(treeRows(await ui.drawn()).rows)).toEqual([])
+  expect(lit(treeRows(await ui.drawn()))).toEqual([`${root}/src`])
+  expect(JSON.stringify(await ui.drawn())).not.toContain(' marked')
   const desktop = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  await desktop.post({ press: `${root}/b.txt` }, { in: `hit:${root}/b.txt` })
+  await desktop.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${root}/b.txt` })
+  await desktop.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${root}/b.txt` })
   await desktop.post({ key: 'v' }, { in: `hit:${root}/b.txt` })
   await clock.settle()
-  expect(svgs(await desktop.drawn()).filter(s => s.alt.startsWith('marked ')).map(s => s.alt)).toEqual(['marked b.txt'])
+  expect(JSON.stringify(await desktop.drawn())).toContain('1 marked')
   await desktop.post({ key: 'V' }, { in: `hit:${root}/b.txt` })
   await clock.settle()
-  expect(svgs(await desktop.drawn()).some(s => s.alt.startsWith('marked '))).toBe(false)
+  expect(JSON.stringify(await desktop.drawn())).not.toContain(' marked')
   await desktop.unmount()
   await ui.unmount()
 })
 
 const RANGE_WORLD = (root: string): World => ({ os: 'darwin', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.txt', 'file'], ['b.txt', 'file'], ['c.txt', 'file'], ['d.txt', 'file']], [`${root}/src`]: [['e.ts', 'file']] } })
 
+type Mods = { shift?: true; ctrl?: true; alt?: true }
+
 async function rangeMount($: Engine, surface: 'terminal' | 'desktop') {
   const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   const zone = (id: string) => ({ in: surface === 'desktop' ? `hit:${id}` : 'rows' })
-  const marked = async () => {
-    const tree = await ui.drawn()
-    return surface === 'desktop'
-      ? svgs(tree).filter(s => s.alt.startsWith('marked ')).map(s => s.alt.slice('marked '.length))
-      : treeRows(tree).rows.filter(r => r.left.some(s => s.t === ' ●')).map(r => r.id.split('/').pop() ?? '')
+  const click = async (id: string, mods: Mods = {}) => {
+    const y = surface === 'desktop' ? 0 : treeRows(await ui.drawn()).rows.findIndex(r => r.id === id)
+    const at = { x: 2, y, button: 'left' as const, ...mods, ...zone(id) }
+    await ui.pointer({ type: 'down', ...at })
+    await ui.pointer({ type: 'up', ...at })
   }
-  return { ui, zone, marked }
+  const shaded = async (): Promise<{ id: string; bg: string }[]> => {
+    const tree = await ui.drawn()
+    if (surface === 'desktop') {
+      return every(tree, n => has(n, 'type') && n.type === 'Box' && keyOf(n).startsWith('row:')).flatMap(n => {
+        const props = propsOf(n)
+        return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' && props.backgroundColor !== DESK.cursor ? [{ id: keyOf(n).slice(4), bg: props.backgroundColor }] : []
+      })
+    }
+    const specs = treeRows(tree).rows
+    return kids(await ui.drawn({ in: 'rows' })).flatMap((box, i) => {
+      const props = propsOf(box)
+      return has(props, 'backgroundColor') && typeof props.backgroundColor === 'string' ? [{ id: specs[i]?.id ?? '', bg: props.backgroundColor }] : []
+    })
+  }
+  const marked = async () => (await shaded()).map(s => s.id.split('/').pop() ?? '')
+  const selBg = async () => (surface === 'desktop' ? [...new Set((await shaded()).map(s => s.bg))] : [treeRows(await ui.drawn()).activeBg])
+  return { ui, zone, click, marked, shaded, selBg }
 }
 
+const sentTo = async ($: Engine) => JSON.stringify(await $.prompt.submit({ text: 'look at these', wait: false, origin: { kind: 'composer' } }))
+
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`shift+click marks every row from the last clicked or marked row to the clicked one, in tree order, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+  test(`a click selects one row, shift+click selects the range from the anchor in tree order, and every selected row gets the selection background, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const ran: Ran = []
     const clock = world(on, RANGE_WORLD(root), ran)
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { click, marked, shaded, selBg, ui } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/d.txt` }, zone(`${root}/d.txt`))
+    await click(`${root}/d.txt`)
+    await clock.settle()
+    expect(await marked()).toEqual(['d.txt'])
+    const one = await selBg()
+    expect(one).toHaveLength(1)
+    expect(one[0]).not.toBe('')
     await clock.advance(1000)
-    await ui.post({ press: `${root}/a.txt`, shift: true }, zone(`${root}/a.txt`))
+    await click(`${root}/a.txt`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt', 'd.txt'])
-    await clock.advance(1000)
-    await ui.post({ press: `${root}/src`, shift: true }, zone(`${root}/src`))
+    expect([...new Set((await shaded()).map(s => s.bg))]).toEqual(one)
+    expect(JSON.stringify(await ui.drawn())).not.toContain('"alt":"marked ')
+    await click(`${root}/src`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['src', 'a.txt', 'b.txt', 'c.txt', 'd.txt'])
+    await click(`${root}/c.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['c.txt', 'd.txt'])
+    const sent = await sentTo($)
+    expect(sent).toContain(`marked these entries in the file tree; \\"these\\" or \\"them\\" in the prompt likely refers to them:\\n${root}/c.txt\\n${root}/d.txt`)
+    expect(sent).not.toContain('selected in the file tree')
+    await clock.advance(1000)
+    await click(`${root}/b.txt`)
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt'])
+    expect(await sentTo($)).not.toContain('marked these entries')
     expect(ran.some(a => a[0] === 'open')).toBe(false)
     await ui.unmount()
   })
 
-  test(`shift+j / shift+k and shift+down / shift+up mark the row, move and mark the next, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+  test(`ctrl+click and alt+click on macOS add or drop one row and open nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const ran: Ran = []
+    const clock = world(on, RANGE_WORLD(root), ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { click, marked, ui } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await click(`${root}/c.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'c.txt'])
+    expect(await sentTo($)).toContain(`refers to them:\\n${root}/a.txt\\n${root}/c.txt`)
+    await click(`${root}/b.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    await click(`${root}/a.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt', 'c.txt'])
+    await click(`${root}/c.txt`, { alt: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['b.txt'])
+    await click(`${root}/b.txt`, { ctrl: true })
+    await clock.settle()
+    expect(await marked()).toEqual([])
+    const sent = await sentTo($)
+    expect(sent).not.toContain('marked these entries')
+    expect(sent).not.toContain('selected in the file tree')
+    expect(ran.some(a => a[0] === 'open')).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`the clear selection button clears every selected row, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, RANGE_WORLD(root), [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { click, marked, ui } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/a.txt` }, zone(`${root}/a.txt`))
+    await click(`${root}/a.txt`)
+    await click(`${root}/c.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt', 'c.txt'])
+    await (surface === 'desktop' ? tap(ui, 'unselect') : ui.press({ key: 'unselect' }))
+    await clock.settle()
+    expect(await marked()).toEqual([])
+    const sent = await sentTo($)
+    expect(sent).not.toContain('marked these entries')
+    expect(sent).not.toContain('selected in the file tree')
+    await ui.unmount()
+  })
+
+  test(`shift+j / shift+k and shift+down / shift+up select the row, move and select the next, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
     await clock.advance(1000)
     await ui.post({ key: 'j', shift: true }, zone(`${root}/a.txt`))
     await clock.settle()
@@ -4301,16 +4636,160 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 
+  test(`with rows marked, j moves only the cursor, and the shaded rows, the footer count, y and the prompt context name the same rows, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    const copied: string[] = []
+    on('ui.copy', (_$, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true } }
+    })
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await click(`${root}/b.txt`, { ctrl: true })
+    await ui.post({ key: 'j' }, zone(`${root}/b.txt`))
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt'])
+    const tree = await ui.drawn()
+    expect(JSON.stringify(tree)).toContain('2 marked')
+    if (surface === 'desktop') expect(every(tree, n => isKeyed(n, 'Box', `bar:${root}/c.txt`))).toHaveLength(1)
+    if (surface === 'desktop') {
+      const bg = (id: string) => (propsOf(search(tree, n => isKeyed(n, 'Box', `row:${root}/${id}`))) as { backgroundColor?: string } | undefined)?.backgroundColor
+      expect(bg('c.txt')).toBe(DESK.cursor)
+      expect(bg('a.txt')).toBeDefined()
+      expect(bg('a.txt')).not.toBe(DESK.cursor)
+      expect(bg('d.txt')).toBeUndefined()
+    }
+    else expect(treeRows(tree).rows.find(r => r.id === `${root}/c.txt`)?.left.some(s => s.t === '▎ ')).toBe(true)
+    await ui.post({ key: 'y' }, zone(`${root}/c.txt`))
+    await clock.settle()
+    expect(copied).toEqual(['a.txt\nb.txt'])
+    const sent = await sentTo($)
+    expect(sent).toContain(`refers to them:\\n${root}/a.txt\\n${root}/b.txt`)
+    expect(sent).not.toContain(`${root}/c.txt`)
+    await ui.unmount()
+  })
+
+  test(`v adds or drops the row under the cursor and its shading follows, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await ui.post({ key: 'v' }, zone(`${root}/a.txt`))
+    await ui.post({ key: 'j' }, zone(`${root}/a.txt`))
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt'])
+    expect(JSON.stringify(await ui.drawn())).toContain('1 marked')
+    await ui.post({ key: 'v' }, zone(`${root}/b.txt`))
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt'])
+    expect(JSON.stringify(await ui.drawn())).toContain('2 marked')
+    await ui.post({ key: 'v' }, zone(`${root}/b.txt`))
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt'])
+    await ui.post({ key: 'k' }, zone(`${root}/b.txt`))
+    await ui.post({ key: 'v' }, zone(`${root}/a.txt`))
+    await clock.settle()
+    expect(await marked()).toEqual([])
+    expect(JSON.stringify(await ui.drawn())).not.toContain(' marked')
+    const sent = await sentTo($)
+    expect(sent).not.toContain('marked these entries')
+    expect(sent).not.toContain('selected in the file tree')
+    await ui.unmount()
+  })
+
+  test(`an @path in a prompt moves the selection with the cursor while nothing is marked, and only the cursor while rows are marked, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await $.prompt.submit({ text: 'look at @c.txt', wait: false, origin: { kind: 'composer' } })
+    await clock.settle()
+    expect(await marked()).toEqual(['c.txt'])
+    expect(await sentTo($)).toContain(`refers to it: ${root}/c.txt`)
+    await click(`${root}/a.txt`, { ctrl: true })
+    await clock.settle()
+    await $.prompt.submit({ text: 'look at @d.txt', wait: false, origin: { kind: 'composer' } })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'c.txt'])
+    const sent = await sentTo($)
+    expect(sent).toContain(`refers to them:\\n${root}/c.txt\\n${root}/a.txt`)
+    expect(sent).not.toContain(`${root}/d.txt`)
+    await ui.unmount()
+  })
+
+  test(`j / k and the arrows make the row they move to the anchor, so shift+click selects the range from there, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, RANGE_WORLD(root), [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone, click, marked } = await rangeMount($, surface)
+    await clock.settle()
+    await click(`${root}/a.txt`)
+    await clock.advance(1000)
+    await ui.post({ key: 'j' }, zone(`${root}/a.txt`))
+    await ui.post({ key: 'j' }, zone(`${root}/b.txt`))
+    await clock.settle()
+    await click(`${root}/d.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['c.txt', 'd.txt'])
+    await clock.advance(1000)
+    await click(`${root}/d.txt`)
+    await clock.advance(1000)
+    await ui.post({ key: 'up' }, zone(`${root}/d.txt`))
+    await ui.post({ key: 'up' }, zone(`${root}/c.txt`))
+    await clock.settle()
+    await click(`${root}/a.txt`, { shift: true })
+    await clock.settle()
+    expect(await marked()).toEqual(['a.txt', 'b.txt'])
+    await ui.unmount()
+  })
+
+  test(`past 100 marks the toast points to the "100 marked" footer count without the plugin name or the V key, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const names = Array.from({ length: 101 }, (_, i) => `f${String(i).padStart(3, '0')}.txt`)
+    const ran: Ran = []
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: names.map(n => [n, 'file'] as const) } }, ran)
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const { ui, zone } = await rangeMount($, surface)
+    await clock.settle()
+    await ui.post({ key: 'home' }, zone(`${root}/f000.txt`))
+    for (const name of names.slice(0, 99)) await ui.post({ key: 'j', shift: true }, zone(`${root}/${name}`))
+    await clock.settle()
+    expect(JSON.stringify(await ui.drawn())).toContain('100 marked')
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([])
+    await ui.post({ press: `${root}/f100.txt`, ctrl: true }, zone(`${root}/f100.txt`))
+    await ui.post({ key: 'j', shift: true }, zone(`${root}/f099.txt`))
+    await clock.settle()
+    const full = ['toast', 'at most 100 marks; press "100 marked" in the footer to clear them']
+    expect(ran.filter(a => a[0] === 'toast')).toEqual([full, full])
+    expect(JSON.stringify(await ui.drawn())).toContain('100 marked')
+    await ui.unmount()
+  })
+
   test(`shift+click on a deleted file's ghost row ends a range instead of opening its diff, on the ${surface}`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, { ...RANGE_WORLD(root), status: '## main\0 D gone.ts\0', numstat: '0\t7\tgone.ts\0', patch: 'diff --git a/gone.ts b/gone.ts\ndeleted file mode 100644\n--- a/gone.ts\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-const gone = 1\n' }, [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { ui, click, marked } = await rangeMount($, surface)
     await clock.settle()
-    await ui.post({ press: `${root}/b.txt` }, zone(`${root}/b.txt`))
+    await click(`${root}/b.txt`)
     await clock.advance(1000)
-    await ui.post({ press: `${root}/gone.ts`, shift: true }, zone(`${root}/gone.ts`))
+    await click(`${root}/gone.ts`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['b.txt', 'c.txt', 'd.txt', 'gone.ts'])
     expect(await texts(ui)).not.toContain('"format":"diff"')
@@ -4323,33 +4802,18 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const clock = world(on, RANGE_WORLD(root), [])
     await $.session.start({ cwd: root, surface, isInteractive: true })
     await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
+    const { ui, click, marked } = await rangeMount($, surface)
     await clock.settle()
     await $.tool.call({ tool: 'Read', file_path: `${root}/src/e.ts` })
     await clock.settle()
     await clock.advance(3_000)
     await clock.settle()
-    await ui.post({ press: `${root}/src/e.ts`, shift: true }, zone(`${root}/src/e.ts`))
+    await click(`${root}/src/e.ts`, { shift: true })
     await clock.settle()
     expect(await marked()).toEqual(['e.ts'])
     await clock.advance(11_000)
     await clock.settle()
     expect(await marked()).toEqual(['e.ts'])
-    await ui.unmount()
-  })
-
-  test(`ctrl+click opens the file and marks nothing, on the ${surface}`, { timeoutMs: 20_000 }, async ($, on) => {
-    const root = '/home/k/proj'
-    const ran: Ran = []
-    const clock = world(on, RANGE_WORLD(root), ran)
-    await $.session.start({ cwd: root, surface, isInteractive: true })
-    await clock.settle()
-    const { ui, zone, marked } = await rangeMount($, surface)
-    await clock.settle()
-    await ui.post({ press: `${root}/b.txt`, ctrl: true }, zone(`${root}/b.txt`))
-    await clock.settle()
-    expect(ran).toContainEqual(['open', '--', `${root}/b.txt`])
-    expect(await marked()).toEqual([])
     await ui.unmount()
   })
 }
@@ -4522,6 +4986,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await plain.unmount()
     await reply.unmount()
     await pane.unmount()
+  })
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(surface === 'terminal' ? 'a reply drops the VS16 selector after a text-style emoji on the terminal, so the engine and a terminal that ignores it both draw it one cell wide' : 'a reply keeps its emoji as written on the desktop', { timeoutMs: 20_000 }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, status: '## main\0', numstat: '', dirs: { [root]: [] } }, [])
+    on('ui.render', { component: 'AssistantMessage' }, (_$, e) => ({ type: 'Text', props: {}, children: [e.component === 'AssistantMessage' ? e.props.text : ''] }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const text = '\u2753 Q1\n\u27A1\uFE0F Yes: v7, pinned \u26A0\uFE0F \u2764\uFE0F\u200D\uD83D\uDD25 \u2B50\uFE0F 1\uFE0F\u20E3'
+    const reply = await $.ui.mount({ plugin: 'filetree', surface, component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+    await clock.settle()
+    const drawn = JSON.stringify(await reply.drawn())
+    expect(drawn).toContain(JSON.stringify(surface === 'terminal' ? '\u2753 Q1\n\u27A1 Yes: v7, pinned \u26A0 \u2764\uFE0F\u200D\uD83D\uDD25 \u2B50\uFE0F 1\uFE0F\u20E3' : text).slice(1, -1))
+    await reply.unmount()
   })
 }
 
@@ -5403,3 +5883,507 @@ test('desktop (#53): every background is translucent or a theme key and no text 
   expect([...new Set(bad)]).toEqual([])
   await ui.unmount()
 })
+
+const LONG_ROOT = '/Users/k/work/clients/a-long-client-organisation-name/projects/data-platform-migration-2026/repositories/flood'
+
+function withinPage(tree: unknown) {
+  const text = JSON.stringify(tree)
+  expect(every(tree, n => has(n, 'type')).length).toBeLessThan(1800)
+  expect(text.length).toBeLessThan(230_000)
+  expect(every(tree, n => keyOf(n).startsWith('hk-')).length).toBeGreaterThan(0)
+  return text
+}
+
+async function deskPane($: Engine, on: On, root: string, dirs: World['dirs'], extra: Partial<World> = {}) {
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', dirs, status: '', numstat: '', ...extra }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  return { clock, ui }
+}
+
+const selected = async ($: Engine) => JSON.stringify(await $.prompt.submit({ text: 'x', wait: false, origin: { kind: 'composer' } }))
+
+test('desktop (#63): a long root with 300 open files stays under the page caps, so the app accepts every redraw, and a real click selects the row under the pointer', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = Array.from({ length: 300 }, (_, i): [string, 'file'] => [`m${String(i + 1).padStart(3, '0')}.sql`, 'file'])
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] })
+  await ui.post({ press: `${root}/migrations` }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  await ui.post({ key: 'l' }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  const text = withinPage(await ui.drawn())
+  expect(text).toContain('m001.sql')
+  expect(text).toContain('more rows, collapse folders or use search')
+  for (const id of [`${root}/migrations/m002.sql`, `${root}/migrations/m005.sql`]) {
+    await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${id}` })
+    await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${id}` })
+    await clock.advance(1000)
+    await clock.settle()
+    expect(await selected($)).toContain(id)
+  }
+  await ui.unmount()
+})
+
+test('desktop (#63): a short root with 5000 files in one folder stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/huge'
+  const names = Array.from({ length: 5000 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+  const { ui } = await deskPane($, on, root, { [root]: names })
+  expect(withinPage(await ui.drawn())).toContain('more rows, collapse folders or use search')
+  await ui.unmount()
+})
+
+test('desktop (#63): a deep open tree under a long root stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const dirs: World['dirs'] = {}
+  let dir = root
+  for (let d = 0; d < 25; d++) {
+    const next = `${dir}/level-${String(d).padStart(2, '0')}-folder`
+    dirs[dir] = [[next.split('/').pop() ?? '', 'dir'], ...Array.from({ length: 20 }, (_, i): [string, 'file'] => [`file-${i}.ts`, 'file'])]
+    dir = next
+  }
+  dirs[dir] = [['leaf.ts', 'file']]
+  const { clock, ui } = await deskPane($, on, root, dirs)
+  await $.tool.call({ tool: 'Read', file_path: `${dir}/leaf.ts` })
+  await clock.settle()
+  withinPage(await ui.drawn())
+  await ui.unmount()
+})
+
+const sqlFiles = (n: number) => Array.from({ length: n }, (_, i): [string, 'file'] => [`m${String(i + 1).padStart(3, '0')}.sql`, 'file'])
+
+async function openMigrations(ui: Awaited<ReturnType<typeof deskPane>>['ui'], clock: Awaited<ReturnType<typeof deskPane>>['clock'], root: string, folder = 'migrations') {
+  await ui.post({ press: `${root}/${folder}` }, { in: `hit:${root}/${folder}` })
+  await clock.settle()
+  await ui.post({ key: 'l' }, { in: `hit:${root}/${folder}` })
+  await clock.settle()
+}
+
+const drawnHits = (tree: unknown) => every(tree, n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('hit:')).map(n => keyOf(n).slice(4))
+
+test('desktop (#63): 300 modified files with line counts under a long root stay under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = sqlFiles(300)
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] }, {
+    top: root,
+    status: `## main\0${sql.map(([n]) => ` M migrations/${n}\0`).join('')}`,
+    numstat: sql.map(([n]) => `12\t3\tmigrations/${n}\0`).join(''),
+  })
+  await openMigrations(ui, clock, root)
+  const text = withinPage(await ui.drawn())
+  expect(text).toContain('m001.sql')
+  expect(text).toContain('more rows, collapse folders or use search')
+  await ui.unmount()
+})
+
+test('desktop (#63): an open ignored folder of 300 entries stays under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/app'
+  const mods = Array.from({ length: 300 }, (_, i): [string, 'dir'] => [`package-number-${String(i).padStart(3, '0')}`, 'dir'])
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['node_modules', 'dir'], ['src', 'dir']], [`${root}/node_modules`]: mods, [`${root}/src`]: [['a.ts', 'file']] }, { top: root, status: '## main\0!! node_modules/\0' })
+  await openMigrations(ui, clock, root, 'node_modules')
+  const tree = await ui.drawn()
+  const text = withinPage(tree)
+  expect(text).toContain('package-number-000')
+  expect(svgs(tree).filter(s => s.alt === 'ignored by git').length).toBeGreaterThan(10)
+  await ui.unmount()
+})
+
+for (const depth of [4, 12]) {
+  test(`desktop (#63): ${depth} levels of open folders with 30 files each stay under the page caps`, { timeoutMs: 30_000 }, async ($, on) => {
+    const root = '/Users/k/service'
+    const dirs: World['dirs'] = {}
+    let dir = root
+    for (let d = 0; d < depth; d++) {
+      const next = `${dir}/package-level-${d}`
+      dirs[dir] = [[next.split('/').pop() ?? '', 'dir'], ...Array.from({ length: 30 }, (_, i): [string, 'file'] => [`ServiceComponent${i}Factory.java`, 'file'])]
+      dir = next
+    }
+    dirs[dir] = Array.from({ length: 30 }, (_, i): [string, 'file'] => [`Leaf${i}.java`, 'file'])
+    const { clock, ui } = await deskPane($, on, root, dirs)
+    await $.tool.call({ tool: 'Read', file_path: `${dir}/Leaf0.java` })
+    await clock.settle()
+    const tree = await ui.drawn()
+    withinPage(tree)
+    expect(drawnHits(tree)).toContain(`${dir}/Leaf0.java`)
+    await ui.unmount()
+  })
+}
+
+test('desktop (#63): End, Home and a click deep in a long cut list keep the cursor row drawn', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = LONG_ROOT
+  const sql = sqlFiles(300)
+  const { clock, ui } = await deskPane($, on, root, { [root]: [['.git', 'dir'], ['migrations', 'dir'], ['src', 'dir']], [`${root}/migrations`]: sql, [`${root}/src`]: [['a.ts', 'file']] }, {
+    top: root,
+    status: `## main\0${sql.map(([n]) => ` M migrations/${n}\0`).join('')}`,
+    numstat: sql.map(([n]) => `12\t3\tmigrations/${n}\0`).join(''),
+  })
+  await openMigrations(ui, clock, root)
+  await ui.post({ key: 'end' }, { in: `hit:${root}/migrations` })
+  await clock.settle()
+  let tree = await ui.drawn()
+  withinPage(tree)
+  expect(drawnHits(tree)).toContain(`${root}/src`)
+  expect(drawnHits(tree)).toContain(`${root}/migrations/m300.sql`)
+  const deep = `${root}/migrations/m280.sql`
+  expect(drawnHits(tree)).toContain(deep)
+  await ui.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: `hit:${deep}` })
+  await ui.pointer({ type: 'up', x: 0, y: 0, button: 'left', in: `hit:${deep}` })
+  await clock.advance(1000)
+  await clock.settle()
+  tree = await ui.drawn()
+  expect(drawnHits(tree)).toContain(deep)
+  expect(await selected($)).toContain(deep)
+  await ui.post({ key: 'home' }, { in: `hit:${deep}` })
+  await clock.settle()
+  tree = await ui.drawn()
+  withinPage(tree)
+  expect(drawnHits(tree)).toContain(`${root}/.git`)
+  await ui.unmount()
+})
+
+test('desktop (#63): 2000 short content matches stay under the page caps', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, grepWorld(root, `${Array.from({ length: 2000 }, (_, i) => `f${i}.ts\x001\x00x`).join('\n')}\n`, { os: 'darwin' }), [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ key: 'q' }, { in: `hit:${root}/a.ts` })
+  await ui.input({ key: 'q', text: 'x', kind: 'change' })
+  await clock.settle()
+  await clock.advance(200)
+  await clock.settle()
+  expect(withinPage(await ui.drawn())).toContain('keep typing to narrow')
+  await ui.unmount()
+})
+
+test('jump mode stays open through a short focus blip, as the Desktop app reports while focus moves into the jump field', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const mount = (isFocused: boolean) => $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused } })
+  const first = await mount(true)
+  await clock.settle()
+  await first.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await first.unmount()
+  const blip = await mount(false)
+  await clock.advance(100)
+  await clock.settle()
+  await blip.unmount()
+  const back = await mount(true)
+  await clock.advance(1000)
+  await clock.settle()
+  expect(JSON.stringify(await back.drawn())).toContain('"key":"jump"')
+  await back.unmount()
+})
+
+test('jump mode leaves out remembered folders that no longer exist and forgets them', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  let saved: unknown = null
+  const seeded = { '/home/k/moved-away': { n: 9, at: 1_799_999_000_000 }, '/home/k/kept': { n: 9, at: 1_799_999_000_000 } }
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: saved ?? seeded, version: 1 } } : next(e)))
+  on('state.set', (_$, e, next) => {
+    if (e.key === 'visits') saved = e.value
+    return next(e)
+  })
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], '/home/k/kept': [['b.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  const ids = treeRows(await ui.drawn()).rows.map(r => r.id)
+  expect(ids).toContain('/home/k/kept')
+  expect(ids).not.toContain('/home/k/moved-away')
+  expect(JSON.stringify(saved)).not.toContain('moved-away')
+  await ui.unmount()
+})
+
+test('Follow work in an app without /cd re-roots the tree and leaves Claude where it is, with no failure toast', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { ui, root, reads } = await workSession($, on, { ...WORK_WORLD(a, b), noCd: true }, ran)
+  await reads(b)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(ran.some(r => r[0] === 'toast')).toBe(false)
+  expect(await root()).toBe(`${b}/b.ts`)
+  await ui.unmount()
+})
+
+test('desktop: jump mode heads the date column Last accessed and dates each remembered folder by its last visit', { timeoutMs: 20_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const at = 1_799_990_000_000
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/Users/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+  const clock = world(on, {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/Users/k/kept': [['c.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('Modified')
+  await ui.post({ key: 'z' }, { in: `hit:${root}/a.ts` })
+  await clock.advance(100)
+  await clock.settle()
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('Last accessed')
+  expect(drawn).not.toContain('"Modified"')
+  expect(drawn).toContain(stamp(at))
+})
+
+test('jump mode opens on the 10 most recently visited folders, newest first, and ranks by match once you type', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const names = Array.from({ length: 12 }, (_, i) => `/home/k/r${String(i).padStart(2, '0')}`)
+  const seeded = Object.fromEntries(names.map((p, i) => [p, { n: 1, at: 1_799_000_000_000 + i * 1000 }]))
+  seeded['/home/k/often-api'] = { n: 50, at: 1_700_000_000_000 }
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: seeded, version: 1 } } : next(e)))
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], ...Object.fromEntries([...names, '/home/k/often-api'].map(p => [p, [['x.ts', 'file']]])) },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual([...names].reverse().slice(0, 10))
+  await ui.input({ key: 'jump', text: 'api', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)[0]).toBe('/home/k/often-api')
+  await ui.unmount()
+})
+
+test('terminal: jump mode heads the date column Last accessed and dates each remembered folder by its last visit', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const at = 1_799_990_000_000
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/home/k/kept': [['c.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+  await clock.settle()
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  const drawn = await texts(ui)
+  expect(drawn).toContain('Last accessed')
+  expect(drawn).toContain(stamp(at))
+  await ui.unmount()
+})
+
+for (const [label, options, terminalInk, deskInk] of [['default', {}, 'ansi256(5)', '#9a64f7'], ['palette jump=#ff00aa', { palette: 'jump=#ff00aa' }, '#ff00aa', '#ff00aa']] as const) {
+  for (const surface of ['terminal', 'desktop'] as const) {
+    test(`${surface}: jump mode draws its folder glyphs and its chip in the jump color (${label}), apart from the blue tree folders`, { timeoutMs: 20_000, options: { glyphs: 'plain', ...options } }, async ($, on) => {
+      const root = '/home/k/proj'
+      on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at: 1_799_990_000_000 } }, version: 1 } } : next(e)))
+      const clock = world(on, {
+        os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+        dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']], '/home/k/kept': [['c.ts', 'file']] },
+        find: `${root}/hooks/b.ts\0`,
+        exits: { zoxide: [127, 'zoxide: not found'] },
+      }, [])
+      await $.session.start({ cwd: root, surface, isInteractive: true })
+      await clock.settle()
+      const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+      await clock.settle()
+      const folderInk = async (id: string, name: string) => {
+        const tree = await ui.drawn()
+        if (surface === 'desktop') return /fill="(#[0-9a-f]{6})"/.exec(svgs(tree).find(s => s.alt === `folder ${name}`)?.source ?? '')?.[1]
+        const row = treeRows(tree).rows.find(r => r.id === id)
+        return row?.left.find(s => s.t === '■ ')?.c
+      }
+      const treeInk = await folderInk(`${root}/hooks`, 'hooks')
+      expect(treeInk).toBeDefined()
+      expect(treeInk).not.toBe(surface === 'desktop' ? deskInk : terminalInk)
+      await ui.post({ key: 'z' }, surface === 'desktop' ? { in: `hit:${root}/a.ts` } : { in: 'rows' })
+      await clock.advance(100)
+      await clock.settle()
+      expect(await folderInk('/home/k/kept', '/home/k/kept')).toBe(surface === 'desktop' ? deskInk : terminalInk)
+      const chipInk = (surface === 'desktop' ? deskInk : terminalInk).replace(/[()]/g, '\\$&')
+      expect(JSON.stringify(await ui.drawn())).toMatch(new RegExp(`"color":"${chipInk}"[^{}]*\\},"children":\\["jump ?"\\]`))
+      await ui.unmount()
+    })
+  }
+}
+
+const tallBoxes = (tree: unknown) => every(tree, n => has(n, 'type') && n.type === 'Box' && has(propsOf(n), 'height') && typeof (propsOf(n) as { height?: unknown }).height === 'number' && ((propsOf(n) as { height: number }).height > 2))
+
+test('desktop: no row in the tree, the jump list or its empty note is drawn taller than two lines', { timeoutMs: 30_000 }, async ($, on) => {
+  const root = '/Users/k/proj'
+  const w: World = {
+    os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir'], ['a.ts', 'file']], [`${root}/hooks`]: [['b.ts', 'file']] },
+    find: `${root}/hooks/b.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }
+  const clock = world(on, w, [])
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.post({ key: 'z' }, { in: `hit:${root}/a.ts` })
+  await clock.advance(100)
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('jump:')
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.input({ key: 'jump', text: 'zzzz-nothing', kind: 'change' })
+  await clock.settle()
+  expect(JSON.stringify(await ui.drawn())).toContain('no matching folder')
+  expect(tallBoxes(await ui.drawn())).toEqual([])
+  await ui.unmount()
+})
+
+test('Follow work without /cd keeps the tree on the repo it moved to while the work stays there, and moves it back once the work returns to the first repo', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const w: World = { ...WORK_WORLD(a, b), noCd: true }
+  w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
+  const ran: Ran = []
+  const { ui, root, reads, clock } = await workSession($, on, w, ran)
+  await reads(b)
+  expect(await root()).toBe(`${b}/b.ts`)
+  await ui.post({ press: `${b}/c.ts` }, { in: 'rows' })
+  await clock.advance(1000)
+  await ui.post({ key: 'v' }, { in: 'rows' })
+  await clock.settle()
+  const marked = async () => JSON.stringify(await ui.drawn()).includes('1 marked') && (await selected($)).includes(`${b}/c.ts`)
+  expect(await marked()).toBe(true)
+  await clock.advance(200_000)
+  await reads(b)
+  expect(await marked()).toBe(true)
+  await clock.advance(200_000)
+  await reads(a)
+  expect(await root()).toBe(`${a}/b.ts`)
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  await ui.unmount()
+})
+
+test('jump mode stays open through two short focus blips in a row, and a blip before Esc never closes the jump opened after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  const focus = async (isFocused: boolean, ms: number) => {
+    await ui.redraw({ ...paneProps(60), isFocused })
+    await clock.advance(ms)
+    await clock.settle()
+  }
+  const open = async () => JSON.stringify(await ui.drawn()).includes('"key":"jump"')
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 100)
+  await focus(false, 300)
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await focus(false, 300)
+  await ui.post({ key: 'escape' }, { in: 'rows' })
+  await clock.settle()
+  expect(await open()).toBe(false)
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await focus(true, 50)
+  await focus(false, 300)
+  await focus(true, 1000)
+  expect(await open()).toBe(true)
+  await ui.unmount()
+})
+
+test('an older jump listing still forgetting a missing folder never overwrites the rows of the query typed after it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const seeded = { '/home/k/moved-away': { n: 9, at: 1_799_999_000_000 }, '/home/k/kept': { n: 9, at: 1_799_998_000_000 }, '/home/k/other': { n: 9, at: 1_799_997_000_000 } }
+  let saved: unknown = null
+  let slow = false
+  on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: saved ?? seeded, version: 1 } } : next(e)))
+  on('state.set', async (_$, e, next) => {
+    if (e.key === 'visits') {
+      saved = e.value
+      if (slow) await clock.sleep(500)
+    }
+    return next(e)
+  })
+  const clock = world(on, {
+    os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+    dirs: { [root]: [['hooks', 'dir']], [`${root}/hooks`]: [['a.ts', 'file']], '/home/k/kept': [['b.ts', 'file']], '/home/k/other': [['c.ts', 'file']] },
+    find: `${root}/hooks/a.ts\0`,
+    exits: { zoxide: [127, 'zoxide: not found'] },
+  }, [])
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: { ...paneProps(60), isFocused: true } })
+  await clock.settle()
+  slow = true
+  await ui.post({ key: 'z' }, { in: 'rows' })
+  await clock.advance(100)
+  await clock.settle()
+  await ui.input({ key: 'jump', text: 'kept', kind: 'change' })
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  await clock.advance(1000)
+  await clock.settle()
+  expect(treeRows(await ui.drawn()).rows.map(r => r.id)).toEqual(['/home/k/kept'])
+  expect(JSON.stringify(saved)).not.toContain('moved-away')
+  await ui.unmount()
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: jump mode in an empty root dates each remembered folder under a plain Last accessed header that sorts nothing`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+    const root = '/home/k/empty'
+    const at = 1_799_990_000_000
+    on('state.get', (_$, e, next) => (e.key === 'visits' ? { value: { value: { '/home/k/kept': { n: 3, at } }, version: 1 } } : next(e)))
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [], '/home/k/kept': [['c.ts', 'file']] },
+      find: '',
+      exits: { zoxide: [127, 'zoxide: not found'] },
+    }, [])
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: { ...paneProps(80), isFocused: true } })
+    await clock.settle()
+    await ui.post({ key: 'z' }, { in: surface === 'desktop' ? 'hit:root' : 'rows' })
+    await clock.advance(100)
+    await clock.settle()
+    const drawn = JSON.stringify(await ui.drawn())
+    expect(drawn).toContain('/home/k/kept')
+    expect(drawn).toContain('Last accessed')
+    expect(drawn).toContain(stamp(at))
+    expect(drawn).not.toMatch(/ [▾▴]/)
+    expect(drawn).not.toMatch(/"key":"(button-)?sort-(name|git|metric)"/)
+    await ui.unmount()
+  })
+}
