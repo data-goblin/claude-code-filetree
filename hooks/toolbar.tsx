@@ -11,7 +11,7 @@ import { selectRoot } from './nav'
 import { focusPane } from './util'
 
 export function toolbarOf(c: Look & Layout) {
-  const { e, t, unicode, desk, theme, gitColors, addColor, accentText, picked } = c
+  const { site, t, unicode, desk, theme, gitColors, addColor, accentText, picked } = c
   const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
   const countSegs = (c: [number, number, number] | undefined): Seg[] => {
     if (!c) return []
@@ -37,10 +37,10 @@ export function toolbarOf(c: Look & Layout) {
   ]
   const wordButtons = plainButtons.map(b => ({ ...b, label: b.id === 'outside' ? `outside ${guarding.outside.length}` : (WORDS[b.id] ?? b.label) }))
   const wordWidth = wordButtons.reduce((w, b) => w + b.label.length + 1, 1)
-  const buttons = settings.glyphSetting === 'text' && e.props.bodyColumns - wordWidth >= 8 ? wordButtons : plainButtons
+  const buttons = settings.glyphSetting === 'text' && site.columns - wordWidth >= 8 ? wordButtons : plainButtons
   const rootGlyph = unicode ? '■' : t.top === t.root ? '\u{f02a2}' : '\u{e5fe}'
   const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
-  const toolRoom = e.props.bodyColumns - header.length - 4
+  const toolRoom = site.columns - header.length - 4
   const toolWidth = (list: typeof buttons, gap: number) => list.reduce((w, b) => w + (desk ? DESK_ICON_COLS : [...b.label].length), 0) + gap * Math.max(0, list.length - 1) + 1
   let toolButtons = buttons
   for (const drop of ['autocollapse', 'size', 'collapse', 'shimmer', 'refresh']) {

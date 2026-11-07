@@ -11,7 +11,7 @@ import { badPattern } from './tree'
 import { JUMP_COLOR } from './palette'
 
 export function searchBar($: EngineInterface, c: Look & Columns & Footer) {
-  const { e, t, unicode, Box, Text, Button, Input, Svg, desk, mutedText, mutedInk, searchBg, toggle, scopeChip, onQuery, park } = c
+  const { e, site, t, unicode, Box, Text, Button, Input, Svg, desk, mutedText, mutedInk, searchBg, toggle, scopeChip, onQuery, park } = c
   return (
     desk && Svg ? (
       <Box key="search-bar" flexDirection="row" alignItems="center" backgroundColor={DESK.field} paddingX={1}>
@@ -19,7 +19,7 @@ export function searchBar($: EngineInterface, c: Look & Columns & Footer) {
         {zjump.on ? (
           <Box key="jump-chip" flexShrink={0} flexDirection="row" marginLeft={1} paddingX={1} backgroundColor={settings.palette.jump ? `${settings.palette.jump}0f` : DESK.jumpOn}><Text color={settings.palette.jump ?? DESK.jump}>jump</Text></Box>
         ) : scopeChip()}
-        <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, e.props.bodyColumns - (t.query ? 18 : 16))}>
+        <Box flexGrow={1} flexShrink={1} marginLeft={1} flexDirection="column" width={Math.max(10, site.columns - (t.query ? 18 : 16))}>
           {zjump.on ? <>
             <Box key="jump-up-box" height={0} overflow="hidden"><Button key="jump-up" plain label="up" onPress={() => void jumpKey($, 'up')} /></Box>
             <Input key="jump" autoFocus placeholder="folder name…" value={zjump.query} onInput={(v: string) => void jumpInput($, v)} onSubmit={() => void jumpKey($, 'return')} />
@@ -40,7 +40,7 @@ export function searchBar($: EngineInterface, c: Look & Columns & Footer) {
         </Box>
       </Box>
     ) : (
-      <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
+      <Box flexDirection="row" width={site.columns} backgroundColor={searchBg}>
         {settings.glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
         {zjump.on ? <Text key="jump-chip" color={settings.palette.jump ?? JUMP_COLOR} bold>{'jump '}</Text> : scopeChip()}
         <Box flexGrow={1}>

@@ -11,16 +11,15 @@ import { isIgnored } from './listing'
 import { inside, formatSize } from './tree'
 import { formatLoc } from './loc'
 import type { ZoneProps } from './zone'
-import { PANE } from './consts'
 import type { RowsProps } from './rows'
 
 export function mapPane($: EngineInterface, c: Look & Layout & Columns, anchor: string): { content: RenderElement; status: string } {
-  const { e, t, Box, Text, Client, Image, theme, tones, light, mutedText, rowColors } = c
+  const { site, t, Box, Text, Client, Image, theme, tones, light, mutedText, rowColors } = c
   let content: RenderElement
   let status = ''
   mapping.mapAnchor = anchor
   const scan = usageOf($, anchor, t.column === 'loc')
-  const cols = Math.max(8, e.props.bodyColumns - 1)
+  const cols = Math.max(8, site.columns - 1)
   const tiles = layout(scan.items, cols, previewing.peekRows)
   const total = scan.done ? scan.total : scan.items.reduce((a, u) => a + u.bytes, 0)
   const lit = settings.shimmerOn && t.flashOn ? t.flash : []
@@ -94,7 +93,7 @@ export function mapPane($: EngineInterface, c: Look & Layout & Columns, anchor: 
     const zone: ZoneProps = { columns: cols, rows: previewing.peekRows, boxes: boxes.map(b => [b.path, b.x0 / cw, b.y0 / ch, b.x1 / cw, b.y1 / ch]) }
     if (!machine.imageChecked) {
       machine.imageChecked = true
-      $.clock.after(300, () => void $.ui.blit({ requestId: PANE, key: 'treemap-image', source: { png: mapping.mapImage?.png ?? '' } }).then(r => {
+      $.clock.after(300, () => void $.ui.blit({ requestId: site.id, key: 'treemap-image', source: { png: mapping.mapImage?.png ?? '' } }).then(r => {
         if (r.deny && /alt/i.test(r.deny)) {
           machine.imageDenied = true
           $.ui.invalidate('ui.render')

@@ -1,4 +1,4 @@
-import type { Register, Timer } from 'claude-code'
+import type { Register, StateWrite, Timer } from 'claude-code'
 import { bindKeys } from './keybind'
 import { CLEAN } from './peek'
 import { gitActions, readOnly, readTargets, resolve } from './git'
@@ -22,6 +22,8 @@ import { scrollSplit, scrollPreview } from './preview'
 import { readOptions } from './options'
 import { onMessage } from './messages'
 import { renderPane } from './pane'
+import { fillSlot, isScrollIn, offerChoice, readPlacement, scrollsKey } from './pane-grid'
+import { isSite, openPane, placeOwnPane, PLUGIN } from './site'
 
 const PANE = 'filetree'
 const TREE = { plugin: 'filetree', key: 'tree' } as const
@@ -72,7 +74,7 @@ export const register: Register = (on, options) => {
       if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
-      const shown = !t.root || t.nodes.length === 0 || (tree.follow && t.root !== cwd) ? reset($, cwd, false, ready) : ready.then(() => (settings.noDock ? undefined : $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })))
+      const shown = !t.root || t.nodes.length === 0 || (tree.follow && t.root !== cwd) ? reset($, cwd, false, ready) : ready.then(() => (settings.noDock ? undefined : openPane($, t.root)))
       await ready
       ageTick?.cancel()
       ageTick = settings.showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
@@ -93,7 +95,8 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'filetree' }, async ($, e) => {
     const given = (e.args ?? '').trim()
     if (given === 'keys') return { text: await bindKeys($, machine.home) }
-    const mine = given ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
+    const placement = await readPlacement($, PLUGIN)
+    const mine = given || placement ? undefined : (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)
     if (mine?.isShown) {
       settings.noDock = true
       if (zjump.on) jumpClose($)
@@ -101,15 +104,16 @@ export const register: Register = (on, options) => {
       return { text: 'File tree closed.' }
     }
     const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
-    if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
-    if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
+    if (!placement && terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
+    if (!placement && terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
     settings.noDock = false
     const arg = given === 'open' ? '' : given
     const cwd = await cwdOf($)
     tree.follow = !arg
     const root = arg ? resolve(cwd, arg, machine.home) : cwd
     await reset($, root, settings.focusOnOpen || given !== '' || mine?.isPlaced === true)
-    return { text: `File tree on ${shortPath(root)}${tree.follow ? ' (follows the cwd)' : ''}.` }
+    const where = placement ? ` in pane-grid cell ${placement.cell} of tab ${placement.tab}` : ''
+    return { text: `File tree on ${shortPath(root)}${tree.follow ? ' (follows the cwd)' : ''}${where}.` }
   })
 
   on('tool.call', async ($, e, next) => {
@@ -253,7 +257,8 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+  on('ui.focus', { component: 'Pane', requestId: [PANE, /^grid-/] }, async ($, e, next) => {
+    if (!(await isSite($, e.requestId))) return next(e)
     if (zjump.on && e.origin.kind === 'person' && (e.element === 'jump-up' || e.element === 'jump-down')) {
       await jumpKey($, e.element === 'jump-up' ? 'up' : 'down')
       return {}
@@ -263,7 +268,8 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+  on('ui.scroll', { component: 'Pane', requestId: [PANE, /^grid-/] }, async ($, e, next) => {
+    if (e.requestId !== PANE && !isScrollIn(await readPlacement($, PLUGIN), e)) return next(e)
     if (ui.nativeScroll) return next(e)
     const t = await get($)
     if (t.preview) {
@@ -341,6 +347,38 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    return renderPane($, e)
+    if (e.surface === 'terminal' && e.props.placement === 'inline') {
+      if (e.viewport?.isFullscreen === false) {
+        settings.noDock = true
+        void $.ui.close({ id: PANE }).catch(() => undefined)
+      }
+      const { Box: Empty } = $.ui.resolve(e)
+      return <Empty />
+    }
+    return renderPane($, e, { id: PANE, columns: e.props.bodyColumns, rows: e.props.scroll?.bodyRows, isActive: true })
+  })
+
+  on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
+    const placement = await readPlacement($, PLUGIN)
+    const below = await next(e)
+    if (e.surface !== 'terminal') return below
+    const { Box, Button } = $.ui.resolve(e)
+    const offered = offerChoice(below, PLUGIN, placement, choice => <Button key={choice.key} plain label={choice.label} hotkey={choice.hotkey} onPress={() => undefined} />)
+    if (!placement || placement.requestId !== e.requestId) return offered
+    const site = { id: e.requestId, columns: placement.columns > 0 ? placement.columns : e.props.bodyColumns, rows: placement.rows > 0 ? placement.rows : e.props.scroll?.bodyRows, isActive: placement.isActive ?? true }
+    const cell = (
+      <Box key={`cell:${PLUGIN}`} flexDirection="column">
+        <Box key={scrollsKey(PLUGIN)} />
+        {await renderPane($, e, site)}
+      </Box>
+    )
+    return fillSlot(offered, PLUGIN, cell) ?? <Box flexDirection="column">{offered}{cell}</Box>
+  })
+
+  on('state.set', { plugin: 'pane-grid' as never, key: 'layout' as never }, async ($, e, next) => {
+    const write = e as StateWrite
+    const result = await next(e)
+    await placeOwnPane($, (await get($)).root, write.value, write.previous)
+    return result
   })
 }

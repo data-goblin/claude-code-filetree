@@ -3,7 +3,7 @@ import { resolve } from './git'
 import { machine } from './state'
 import { inside } from './tree'
 import { get } from './store'
-import { PANE } from './consts'
+import { openPane } from './site'
 import { openHit } from './grep'
 
 type FileRef = { path: string; line: number; end: number }
@@ -88,6 +88,6 @@ export async function openRef($: EngineInterface, href: string, surface: RenderS
   if (!ref) return
   const t = await get($)
   if (!inside(t.root, ref.path)) return
-  void $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` }).catch(() => undefined)
+  void openPane($, t.root).catch(() => undefined)
   await openHit($, { path: ref.path, line: ref.line, text: '' }, surface)
 }

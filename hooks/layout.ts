@@ -16,7 +16,7 @@ export const DESK_ROWS = 150
 const HINT_MS = 5_000
 
 export async function layoutOf($: EngineInterface, v: Look) {
-  const { e, t, desk } = v
+  const { site, t, desk } = v
   const now = await $.clock.now()
   if (t.top) ui.hintRoot = ''
   else if (settings.showHints && ui.hintRoot !== t.root) {
@@ -31,13 +31,13 @@ export async function layoutOf($: EngineInterface, v: Look) {
   const dimmed = new Set(t.flashOn ? t.flashDim : [])
   const ignored = new Set(t.ignored)
   const untracked = new Set(t.untrackedDirs)
-  const width = Math.max(24, e.props.bodyColumns)
+  const width = Math.max(24, site.columns)
   const rows = rowsOf(t)
   const picked = picks(t)
   const inSet = new Set(picked.ids)
   const grepping = !zjump.on && grepOn(t)
   if (grepping && grep.key !== grepKey(t)) grepRun($, t)
-  const body = e.props.scroll?.bodyRows ?? 40
+  const body = site.rows ?? 40
   const footer = t.nodes.find(n => n.id === t.cursor)?.id ?? (t.selected || '')
   const chrome = 1 + (settings.searchGap ? 2 : settings.sortHeader ? 1 : 0) + 1 + (t.top ? (t.branch ? 1 : 0) : settings.showHints ? 1 : 0) + (latest ? 1 : 0) + (!desk || footer || settings.shortcutsSetting === 'auto' ? 1 : 0)
   const spare = body - chrome - 5
@@ -45,7 +45,7 @@ export async function layoutOf($: EngineInterface, v: Look) {
   previewing.splitShown = splitRows > 0
   if (!previewing.splitShown) previewing.overPeek = false
   const fixed = splitRows + chrome
-  const room = ui.nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
+  const room = ui.nativeScroll ? Math.max(1, rows.length) : Math.max(5, (site.rows ?? 40) - fixed)
   const isLit = (id: string) => bright.has(id) || dimmed.has(id)
   const focus = settings.followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
   const at = Math.max(0, rows.findIndex(r => r.node.id === focus))

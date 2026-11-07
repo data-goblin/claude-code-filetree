@@ -2,7 +2,8 @@ import { type DiffLine, splitPatch, groupFiles } from './diff'
 import type { EngineInterface } from 'claude-code'
 import { previewing, guarding, settings, machine, pics } from './state'
 import { unlessAborted, shortPath, messageOf, osName, focusPane } from './util'
-import { OUTSIDE, PANE } from './consts'
+import { OUTSIDE } from './consts'
+import { focusKey } from './site'
 import { pictureKind } from './peek'
 import { formatSize, dirname } from './tree'
 import { git } from './gitstate'
@@ -184,7 +185,7 @@ function previewFocusKey(): 'edit' | 'back' {
 }
 
 export function parkPreview($: EngineInterface): void {
-  void $.ui.focus({ requestId: PANE, key: previewFocusKey() }).catch(() => {})
+  void focusKey($, previewFocusKey()).catch(() => {})
 }
 
 export async function closePreview($: EngineInterface): Promise<void> {

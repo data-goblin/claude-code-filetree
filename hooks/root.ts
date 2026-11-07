@@ -5,7 +5,7 @@ import { clearAutoCollapse } from './activity'
 import { emptyTree } from './tree'
 import { loadDirs } from './listing'
 import { detectRepo, refreshGit } from './gitstate'
-import { PANE } from './consts'
+import { openPane } from './site'
 import { cwdOf } from './util'
 import { grepClear } from './grep'
 import { recordVisit } from './jump'
@@ -38,12 +38,11 @@ export async function reset($: EngineInterface, root: string, focus = false, rea
   metrics.sizeEpoch += 1
   metrics.sizeQueue = []
   await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : settings.columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
-  const title = `Files: ${root.split('/').pop() || root}`
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
   await ready
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!settings.noDock) await $.ui.open({ id: PANE, title })
+  if (focus) await openPane($, root, true)
+  else if (!settings.noDock) await openPane($, root)
   await listed
   await repo
   await refreshGit($)

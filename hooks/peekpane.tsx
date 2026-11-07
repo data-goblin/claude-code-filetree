@@ -14,7 +14,7 @@ import type { RowsProps } from './rows'
 const IMAGE_BYTES = 2_097_152
 
 export async function peekPane($: EngineInterface, c: Look & Layout & Columns) {
-  const { e, t, unicode, Box, Text, Button, Client, Image, theme, mutedText, rowColors, splitRows } = c
+  const { site, t, unicode, Box, Text, Button, Client, Image, theme, mutedText, rowColors, splitRows } = c
   if (!splitRows) {
     stopScans()
     return null
@@ -35,14 +35,14 @@ export async function peekPane($: EngineInterface, c: Look & Layout & Columns) {
     previewing.overPeek = false
   }
   let start = previewing.peekTop
-  const rule = <Text key="peek-rule" {...mutedText}>{'─'.repeat(Math.max(1, e.props.bodyColumns))}</Text>
+  const rule = <Text key="peek-rule" {...mutedText}>{'─'.repeat(Math.max(1, site.columns))}</Text>
   const shown = target || anchor
   const name = shown ? (shown === t.root ? shown.split('/').pop() || shown : inside(t.root, shown) ? relative(t.root, shown) : shortPath(shown)) : ''
   const docKind = target ? pictureKind(target) : ''
   const isDoc = docKind === 'pdf' || docKind === 'office'
   const docPixels = Boolean(Image) && !machine.imageDenied && !machine.inTmux && !machine.inHerdr
   const page = isDoc ? (previewing.docPages.get(target) ?? 1) : 0
-  const px = Math.round(Math.max(1, e.props.bodyColumns - 1) * (machine.cellPx?.cw ?? 10))
+  const px = Math.round(Math.max(1, site.columns - 1) * (machine.cellPx?.cw ?? 10))
   const raw = target && (!isDoc || docPixels) ? await picture($, target, page, px) : null
   const pic = isDoc && raw && raw.state !== 'ready' && !(raw.state === 'failed' && raw.note === 'encrypted') ? null : raw
   if (isDoc && raw?.state === 'ready' && raw.pages) {
@@ -59,7 +59,7 @@ export async function peekPane($: EngineInterface, c: Look & Layout & Columns) {
   } else if (!target) content = <Text {...mutedText}>no file selected</Text>
   else if (pic) {
     if (pic.state === 'ready' && Image) {
-      const fit = fitCells(pic, Math.max(1, e.props.bodyColumns - 1), previewing.peekRows)
+      const fit = fitCells(pic, Math.max(1, site.columns - 1), previewing.peekRows)
       status = isDoc ? `p ${page}/${pic.pages ?? '?'}` : `${pic.width}×${pic.height}`
       const raw = await pngOf($, pic)
       const big = Math.floor(raw.length * 3 / 4) > IMAGE_BYTES
