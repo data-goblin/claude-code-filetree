@@ -1,6 +1,7 @@
 import type { Hook } from 'claude-code'
 import { has, focusPane, osName } from './util'
-import { PANE, ROOT_PRESS, OUTSIDE } from './consts'
+import { ROOT_PRESS, OUTSIDE } from './consts'
+import { isSite } from './site'
 import { pressHeader, selectRoot, press, navigate } from './nav'
 import { ui, previewing, zjump, grep, flashing } from './state'
 import { scrollSplit, toggleSplit, turnPage, diffFile, closePreview, editPreview, jumpDiff, scrollPreview } from './preview'
@@ -27,7 +28,8 @@ function rowsMessage(data: unknown): { press: unknown; key: unknown; ctrl: unkno
 }
 
 export const onMessage: Hook<'ui.message'> = async ($, e, next) => {
-  if (e.requestId === PANE && e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
+  if (!(await isSite($, e.requestId))) return next(e)
+  if (e.element.startsWith('button-') && e.data && typeof e.data === 'object') {
     const id = e.element.slice('button-'.length)
     const data = headerMessage(e.data)
     if (data.press) await pressHeader($, id)
@@ -37,7 +39,7 @@ export const onMessage: Hook<'ui.message'> = async ($, e, next) => {
     }
     return {}
   }
-  if (e.requestId === PANE && e.element === 'peek' && e.data && typeof e.data === 'object') {
+  if (e.element === 'peek' && e.data && typeof e.data === 'object') {
     const data = peekMessage(e.data)
     if (typeof data.over === 'boolean') previewing.overPeek = data.over
     else if (typeof data.scrollTo === 'number') {
@@ -52,11 +54,11 @@ export const onMessage: Hook<'ui.message'> = async ($, e, next) => {
     }
     return {}
   }
-  if (e.requestId === PANE && e.element === 'treemap' && has(e.data, 'tab') && typeof e.data.tab === 'string') {
+  if (e.element === 'treemap' && has(e.data, 'tab') && typeof e.data.tab === 'string') {
     await pickTile($, e.data.tab)
     return {}
   }
-  if (e.requestId !== PANE || (e.element !== 'rows' && e.element !== 'treemap' && !e.element.startsWith('hit:')) || !e.data || typeof e.data !== 'object') return next(e)
+  if ((e.element !== 'rows' && e.element !== 'treemap' && !e.element.startsWith('hit:')) || !e.data || typeof e.data !== 'object') return next(e)
   const data = rowsMessage(e.data)
   void sync($)
   const t = await get($)

@@ -11,7 +11,7 @@ import { settings, zjump } from './state'
 import type { Seg } from './rows'
 
 export function columnsOf($: EngineInterface, c: Look & Layout & Grid) {
-  const { e, t, Box, Text, Button, Client, Svg, desk, theme, accentInk, accentText, mutedInk, tint, glow, now, widths } = c
+  const { site, t, Box, Text, Button, Client, Svg, desk, theme, accentInk, accentText, mutedInk, tint, glow, now, widths } = c
   const scopeName = t.searchScope ? `${relative(t.root, t.searchScope)}/` : ''
   const scopeChip = () => !scopeName ? null : desk ? (
     <Box key="scope-chip" position="relative" flexShrink={0} flexDirection="row" alignItems="center" marginLeft={1} paddingX={1} backgroundColor={DESK.toolOn}>
@@ -51,11 +51,11 @@ export function columnsOf($: EngineInterface, c: Look & Layout & Grid) {
   const jumpDate = zjump.on ? zjump.rows.reduce((m, dir) => Math.max(m, [...jumpWhen(dir)].length), 0) : 0
   const gitSpan = zjump.on ? 0 : GIT_COLS.reduce((w, c) => w + (widths[c] ? (widths[c] ?? 0) + 1 : 0), 0)
   const metricSpan = zjump.on ? (jumpDate ? jumpDate + 1 : 0) : widths.metric ? (widths.metric ?? 0) + 1 : 0
-  const gitLabel = e.props.bodyColumns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
+  const gitLabel = site.columns - Math.max(metricSpan, 11) - 20 >= 12 ? 'Git (LOC)' : 'Git'
   const metricLabel = zjump.on ? 'Last accessed' : t.column === 'size' ? 'Size' : t.column === 'loc' ? 'LOC' : t.column === 'files' ? '# Files' : 'Modified'
   const headCell = (col: 'name' | 'git' | 'metric', label: string) => (!zjump.on ? sortCell(col, label) : desk ? <Text key={`head-${col}`} color={mutedInk}>{label}</Text> : <Text key={`head-${col}`} dimColor>{label}</Text>)
   const headerRow = () => (
-    <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: e.props.bodyColumns, height: 1 })}>
+    <Box key="sort-header" flexDirection="row" alignItems="center" {...(desk ? {} : { width: site.columns, height: 1 })}>
       {desk && Svg ? <Svg key="sort-indent" source={rowSvg(0, null, null, mutedInk)} alt="column headers" width={STEP_PX * 2 + GAP_PX} height={ROW_PX} /> : <Text>{'    '}</Text>}
       {headCell('name', 'Name')}
       <Box flexGrow={1} />

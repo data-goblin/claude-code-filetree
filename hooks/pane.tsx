@@ -1,7 +1,7 @@
 import type { EngineInterface, RenderElement } from 'claude-code'
 import { type PaneEvent, lookOf } from './look'
 import { settings, zjump, ui, machine, grep } from './state'
-import { PANE } from './consts'
+import type { Site } from './site'
 import { jumpBlurCancel, jumpClose } from './jump'
 import { previewPane } from './previewpane'
 import { layoutOf } from './layout'
@@ -19,15 +19,7 @@ import { grepId, type GrepHit } from './grep'
 
 const JUMP_BLUR_MS = 400
 
-export async function renderPane($: EngineInterface, e: PaneEvent): Promise<RenderElement> {
-  if (e.surface === 'terminal' && e.props.placement === 'inline') {
-    if (e.viewport?.isFullscreen === false) {
-      settings.noDock = true
-      void $.ui.close({ id: PANE }).catch(() => undefined)
-    }
-    const { Box: Empty } = $.ui.resolve(e)
-    return <Empty />
-  }
+export async function renderPane($: EngineInterface, e: PaneEvent, site: Site): Promise<RenderElement> {
   if (zjump.on) {
     zjump.focused = Boolean(e.props.isFocused)
     if (e.props.isFocused) {
@@ -38,7 +30,7 @@ export async function renderPane($: EngineInterface, e: PaneEvent): Promise<Rend
       if (zjump.on && zjump.held && !zjump.focused) jumpClose($)
     })
   }
-  const v = await lookOf($, e)
+  const v = await lookOf($, e, site)
   if (v.t.preview) return previewPane($, v)
   const l = { ...v, ...(await layoutOf($, v)) }
   const b = { ...l, ...toolbarOf(l) }
@@ -50,7 +42,7 @@ export async function renderPane($: EngineInterface, e: PaneEvent): Promise<Rend
   const f = { ...d, ...footerOf($, d) }
   const { t, Box, Text, Client, desk, theme, rowColors, room, grepping, inSet, specs, bar, headerRow, headerRule, overlay, keyRows, deskShortcuts } = f
   return (
-    <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+    <Box flexDirection="column" minHeight={Math.max(1, site.rows ?? 1)} backgroundColor={theme.bg || undefined}>
       {headerBar($, f)}
       {settings.splitAt === 'top' ? split : null}
       {branchRow(f)}

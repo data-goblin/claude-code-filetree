@@ -13,13 +13,13 @@ import { markdownSplit } from './refs'
 import type { RowsProps } from './rows'
 
 export async function previewPane($: EngineInterface, v: Look): Promise<RenderElement> {
-  const { e, t, unicode, elements, Box, Text, Button, Client, Svg, desk, theme, mutedText, addColor, delColor, deskDiff, rowColors, accentInk, accentText, mutedInk, dc, button, hint } = v
+  const { site, t, unicode, elements, Box, Text, Button, Client, Svg, desk, theme, mutedText, addColor, delColor, deskDiff, rowColors, accentInk, accentText, mutedInk, dc, button, hint } = v
   if (previewing.previewed?.path !== t.preview) await loadPreview($, t.preview, previewing.deskLine?.path === t.preview ? previewing.deskLine.line : undefined)
   const p = previewing.previewed
   const first = p?.diff ? 0 : (p?.first ?? 0)
   const markdown = /\.(md|markdown|mdx|docx|odt|rtf)$/i.test(t.preview)
   const all = p?.diff?.length ?? (p?.text ?? '').split('\n').length
-  previewing.previewRows = ui.nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 3 : 2))
+  previewing.previewRows = ui.nativeScroll ? all : Math.max(4, (site.rows ?? 40) - (p?.note ? 3 : 2))
   const start = ui.nativeScroll ? 0 : p?.diff ? Math.min(t.previewTop, Math.max(0, all - 1)) : Math.min(t.previewTop, Math.max(0, all - previewing.previewRows))
   const win = p?.diff ? diffWindow(p.diff, start, previewing.previewRows) : previewLines(p?.text ?? '', start, previewing.previewRows, markdown)
   previewing.previewLine = first + win.top + 1
@@ -43,7 +43,7 @@ export async function previewPane($: EngineInterface, v: Look): Promise<RenderEl
     previewing.previewActs = new Map(acts.map(a => [a.id, () => void a.run().then(() => (a.id === 'external' ? undefined : parkPreview($)))]))
     const tools = acts.map(a => ({ id: a.id, label: '', dim: true, hint: a.hint, icon: a.icon }))
     return (
-      <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+      <Box flexDirection="column" minHeight={Math.max(1, site.rows ?? 1)} backgroundColor={theme.bg || undefined}>
         <Box key="pv-head" flexDirection="row" alignItems="center">
           <Box key="pv-back" flexDirection="row" alignItems="center" flexShrink={0}>
             <Svg key="pv-back-icon" source={rowSvg(0, null, 'chevron-left', mutedInk, DESK.muted, 0)} alt="back to files" width={STEP_PX * 2} height={ROW_PX} />
@@ -112,7 +112,7 @@ export async function previewPane($: EngineInterface, v: Look): Promise<RenderEl
   }
   previewing.previewDesk = false
   return (
-    <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+    <Box flexDirection="column" minHeight={Math.max(1, site.rows ?? 1)} backgroundColor={theme.bg || undefined}>
       <Box flexDirection="row">
         <Button key="back" plain hotkey="h" autoFocus={settings.editWithSetting || machine.inTmux || machine.inHerdr ? undefined : true} label={unicode ? '← files' : '\u{ea9b} files'} onPress={() => void closePreview($)} />
         <Text> </Text>

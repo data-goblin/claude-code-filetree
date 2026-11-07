@@ -4,6 +4,7 @@ import type { Seg } from './rows'
 import type { Rgb } from './pixmap'
 import { machine } from './state'
 import { PANE } from './consts'
+import { openPane } from './site'
 
 let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
 
@@ -74,7 +75,7 @@ export function unlessAborted(err: unknown): null {
 }
 
 export function focusPane($: EngineInterface, root: string, key: string): void {
-  void $.ui.open({ id: PANE, title: `Files: ${root.split('/').pop() || root}`, focus: true }).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
+  void openPane($, root, true).then(opened => (opened && key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
 }
 
 export function shortPath(path: string): string {

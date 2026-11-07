@@ -13,6 +13,7 @@ import { rgbOf, over } from './pixmap'
 import type { ButtonProps } from './button'
 import { searchFlag } from './search'
 import { SPIN_MS } from './consts'
+import type { Site } from './site'
 
 export type PaneEvent = RenderInputOf<'Pane', 'terminal'> | RenderInputOf<'Pane', 'desktop'>
 
@@ -22,7 +23,7 @@ export const DESK_ICON_COLS = 3
 const TOGGLES = ['cwd', 'hidden', 'size', 'split', 'autocollapse', 'shimmer']
 export const WORDS: Record<string, string> = { up: 'up', cwd: 'cwd', refresh: 'sync', hidden: 'dots', size: 'size', collapse: 'fold', autocollapse: 'auto', split: 'split', unselect: 'clear' }
 
-export async function lookOf($: EngineInterface, e: PaneEvent) {
+export async function lookOf($: EngineInterface, e: PaneEvent, site: Site) {
   const unicode = settings.glyphSetting === 'plain' || settings.glyphSetting === 'text' || (settings.glyphSetting === 'auto' && (machine.noNerd || e.surface === 'desktop'))
   const elements = $.ui.resolve(e)
   const { Box, Text, Button, Input, Client } = elements
@@ -129,10 +130,10 @@ export async function lookOf($: EngineInterface, e: PaneEvent) {
     const text = over?.hint
     if (!text) return null
     const tint = over && !over.dim ? accentInk : theme.fg ? ink(theme.fg, 'text') : 'text'
-    const room = e.props.bodyColumns - title - buttons.reduce((w, b) => w + (desk ? DESK_ICON_COLS : b.label.length + 1), 0) - 2
+    const room = site.columns - title - buttons.reduce((w, b) => w + (desk ? DESK_ICON_COLS : b.label.length + 1), 0) - 2
     return text.length <= room ? <Text color={tint} wrap="truncate-end">{`${text} `}</Text> : null
   }
-  return { e, unicode, elements, Box, Text, Button, Input, Client, Svg, desk, Image, t, light, theme, tones, mutedText, gitColors, addColor, delColor, warnColor, guarded, deskDiff, rowColors, accentInk, accentText, mutedInk, dc, tint, searchBg, glow, toggle, deskSel, deskHover, deskCur, deskCursor, jumpSel, button, hint }
+  return { e, site, unicode, elements, Box, Text, Button, Input, Client, Svg, desk, Image, t, light, theme, tones, mutedText, gitColors, addColor, delColor, warnColor, guarded, deskDiff, rowColors, accentInk, accentText, mutedInk, dc, tint, searchBg, glow, toggle, deskSel, deskHover, deskCur, deskCursor, jumpSel, button, hint }
 }
 
 export type Look = Awaited<ReturnType<typeof lookOf>>

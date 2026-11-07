@@ -80,6 +80,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Guard files and folders from Claude's edits, and see files written outside the repo ([guards](docs/guards.md))
 - Keyboard-driven: vim-style moves, a shortcuts overlay, and alt+l / alt+h in the terminal ([keys](docs/keys.md))
 - `/filetree` commands and where the pane shows in the terminal and the Desktop app ([sidebar](docs/sidebar.md))
+- Draws in a [pane-grid](https://github.com/hwanyong/pane-grid) cell in the terminal ([sidebar](docs/sidebar.md#in-a-pane-grid-cell))
 
 <img src="media/filetree-git.gif" alt="A committed file shimmers green and the footer shows the commit" width="800">
 

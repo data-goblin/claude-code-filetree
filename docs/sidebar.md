@@ -17,3 +17,14 @@ filetree is a Claude Code **mod** and needs **Claude Code 2.1.306+**.
 - `/filetree keys` binds alt+l and alt+h to move the keyboard to and from the tree, in the terminal only; see [Keys](keys.md)
 - `/filetree <path>` pins the tree to a folder
 - Tested on Linux, macOS and Windows; mods don't load in WSL sessions of the Desktop app
+
+## In a pane-grid cell
+
+[pane-grid](https://github.com/hwanyong/pane-grid) splits a Claude Code pane into cells. With both installed, empty cells list filetree, and `/grid place filetree` draws the tree in the active cell.
+
+- Terminal only; the Desktop app keeps the tree in its own pane
+- While placed, the Files tab closes; it opens again when the cell is emptied with `/grid place -`
+- The fullscreen layout and the 110-column width are not needed in a cell
+- `/filetree` and `/filetree <path>` change the tree in the cell and do not hide it
+- The wheel scrolls the tree under its header with pane-grid 0.4.0 or later; an older pane-grid scrolls the whole cell
+- alt+l and the other keys that move the keyboard to the tree do nothing while placed, because filetree cannot focus pane-grid's pane; click the cell instead
