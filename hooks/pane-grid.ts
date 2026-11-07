@@ -10,6 +10,8 @@ const PLACE_KEY = 'place:'
 const SCROLLS_KEY = 'scrolls:'
 const CHOICE_HOTKEYS = 9
 
+export const TOOLBAR_KEYS = ['v', 's', 'o', 'z', 'x', 'w', 'b', 'c', 'k', 'q'] as const
+
 type GridPlacement = { tab: string; requestId: string; cell: string; columns: number; rows: number; column?: number; row?: number; isActive?: boolean }
 
 const isPlacement = (value: unknown): value is GridPlacement => {

@@ -14,6 +14,7 @@ import { DESK, iconSvg, activityIcon, DESK_GIT, rowSvg, STEP_PX, GAP_PX, ROW_PX 
 import type { Activity } from '../types'
 import type { Toolbar } from './toolbar'
 import { clearMarks } from './select'
+import { takesKey } from './site'
 
 export function footerOf($: EngineInterface, c: Look & Layout & Specs) {
   const { e, t, Box, Text, Button, Svg, Image, desk, theme, accentInk, accentText, footer, room, grepping } = c
@@ -79,7 +80,7 @@ export function footerOf($: EngineInterface, c: Look & Layout & Specs) {
     ...(['j', 'k', 'h', 'l'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, ui.shortcutsShown || grepping ? e.surface : undefined).then(park)]),
     ...allKeys.filter(k => /^[a-z]$/.test(k.key)).map((k): [string, () => void] => [k.key, k.act]),
     ...(previewing.splitShown && e.surface !== 'desktop' ? (['f', 'b'] as const).map((k): [string, () => void] => [k, () => void navigate($, k, false, e.surface).then(park)]) : []),
-  ]
+  ].filter(([k]) => takesKey(c.site, k))
   return { park, footerLink, footerName, overlay, keyRows, deskShortcuts, hidden }
 }
 
@@ -155,10 +156,10 @@ export function footerBar($: EngineInterface, c: Look & Layout & Toolbar & Foote
 }
 
 export function hotkeys($: EngineInterface, c: Look & Footer) {
-  const { Box, Button, hidden } = c
+  const { Box, Button, hidden, site } = c
   return (
   <Box key="hotkeys" height={0} overflow="hidden" flexDirection="row">
-    <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} />
+    {site.isActive ? <Button key="hk-tree" plain autoFocus label="o" onPress={() => void navigate($, 'return')} /> : null}
     {hidden.map(([k, act]) => <Button key={`hk-${k}`} plain hotkey={k} label={k} onPress={act} />)}
   </Box>
   )

@@ -355,7 +355,7 @@ export const register: Register = (on, options) => {
       const { Box: Empty } = $.ui.resolve(e)
       return <Empty />
     }
-    return renderPane($, e, { id: PANE, columns: e.props.bodyColumns, rows: e.props.scroll?.bodyRows })
+    return renderPane($, e, { id: PANE, columns: e.props.bodyColumns, rows: e.props.scroll?.bodyRows, isActive: true })
   })
 
   on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
@@ -365,7 +365,7 @@ export const register: Register = (on, options) => {
     const { Box, Button } = $.ui.resolve(e)
     const offered = offerChoice(below, PLUGIN, placement, choice => <Button key={choice.key} plain label={choice.label} hotkey={choice.hotkey} onPress={() => undefined} />)
     if (!placement || placement.requestId !== e.requestId) return offered
-    const site = { id: e.requestId, columns: placement.columns > 0 ? placement.columns : e.props.bodyColumns, rows: placement.rows > 0 ? placement.rows : e.props.scroll?.bodyRows }
+    const site = { id: e.requestId, columns: placement.columns > 0 ? placement.columns : e.props.bodyColumns, rows: placement.rows > 0 ? placement.rows : e.props.scroll?.bodyRows, isActive: placement.isActive ?? true }
     const cell = (
       <Box key={`cell:${PLUGIN}`} flexDirection="column">
         <Box key={scrollsKey(PLUGIN)} />

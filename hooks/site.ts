@@ -1,13 +1,17 @@
 import type { EngineInterface } from 'claude-code'
 import { PANE } from './consts'
-import { placementIn, readPlacement } from './pane-grid'
+import { placementIn, readPlacement, TOOLBAR_KEYS } from './pane-grid'
 
 export const PLUGIN = 'filetree'
 
-export type Site = { id: string; columns: number; rows: number | undefined }
+export type Site = { id: string; columns: number; rows: number | undefined; isActive: boolean }
 
 export function titleOf(root: string): string {
   return `Files: ${root.split('/').pop() || root}`
+}
+
+export function takesKey(site: Site, key: string): boolean {
+  return site.isActive && (site.id === PANE || !(TOOLBAR_KEYS as readonly string[]).includes(key))
 }
 
 export async function isSite($: EngineInterface, requestId: string): Promise<boolean> {
