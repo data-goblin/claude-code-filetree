@@ -1,7 +1,7 @@
 import type { ClientModule, RenderElement } from 'claude-code'
 
 export type Seg = { t: string; c?: string; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
-export type RowSpec = { id: string; left: Seg[]; right: Seg[] }
+export type RowSpec = { id: string; left: Seg[]; right: Seg[]; on?: true }
 export type RowsProps = {
   rows: RowSpec[]
   active: string
@@ -83,7 +83,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
       }
       x += w
     }
-    if (row.id) surface.post({ press: row.id, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) })
+    if (row.id) surface.post({ press: row.id, ctrl: Boolean(e.ctrl), alt: Boolean(e.alt), shift: Boolean(e.shift) })
   })
   surface.onKey(e => surface.post({ key: e.key, ctrl: Boolean(e.ctrl), shift: Boolean(e.shift) }))
   if (props.preview) {
@@ -160,7 +160,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
       flexDirection="row"
       height={1}
       overflow="hidden"
-      backgroundColor={r.id && r.id === props.active ? props.activeBg : r.id && i === state.hover ? props.hoverBg || undefined : undefined}
+      backgroundColor={r.id && (r.on || r.id === props.active) ? props.activeBg : r.id && i === state.hover ? props.hoverBg || undefined : undefined}
     >
       <Box flexShrink={1} overflow="hidden">
         {r.left.map(draw)}

@@ -67,13 +67,14 @@ export const ICONS = {
   undo: 'M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11',
   brain: 'M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18ZM12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18ZM15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4M17.599 6.5a3 3 0 0 0 .399-1.375M6.003 5.125A3 3 0 0 0 6.401 6.5M3.477 10.896a4 4 0 0 1 .585-.396M19.938 10.5a4 4 0 0 1 .585.396M6 18a4 4 0 0 1-1.967-.516M19.967 17.484A4 4 0 0 1 18 18',
   warning: 'm21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01',
-  mark: 'M12 7a5 5 0 1 0 0 10 5 5 0 1 0 0-10',
   tag: 'M12.6 2.6A2 2 0 0 0 11.2 2H4a2 2 0 0 0-2 2v7.2a2 2 0 0 0 .6 1.4l8.7 8.7a2.4 2.4 0 0 0 3.4 0l6.6-6.6a2.4 2.4 0 0 0 0-3.4zM7.5 6.5a1 1 0 1 0 0 2 1 1 0 1 0 0-2',
+  clawd: 'M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z',
 } as const
 
 export type IconName = keyof typeof ICONS
 
-const FILLED: ReadonlySet<IconName> = new Set(['folder', 'mark'])
+const FILLED: ReadonlySet<IconName> = new Set(['folder'])
+const SOLID: ReadonlySet<IconName> = new Set(['clawd'])
 
 const NAMES: Record<string, IconName> = {
   'agents.md': 'file-text',
@@ -156,6 +157,9 @@ export const activityIcon = (plain: string): IconName => GIT_ICONS[plain] ?? 'gi
 
 export const DESK = {
   accent: '#3b82f6',
+  jump: '#9a64f7',
+  jumpOn: '#9a64f70f',
+  jumpSel: '#9a64f71f',
   muted: '#85858c',
   guide: '#808080',
   urgent: '#e5484d',
@@ -164,6 +168,7 @@ export const DESK = {
   field: '#8080801a',
   edge: '#80808040',
   toolOn: '#3b82f633',
+  cursor: '#4b8ef01f',
   addBg: '#3fb9502e',
   delBg: '#ef53502e',
 } as const
@@ -211,7 +216,7 @@ export function ink(color: string | undefined, fallback: string = DESK.muted): s
 
 const glyph = (name: IconName, color: string, x: number, y: number, size: number, stroke?: number): string => {
   const k = size / 24
-  const paint = FILLED.has(name) ? `fill="${color}" stroke="${color}"` : `fill="none" stroke="${color}"`
+  const paint = SOLID.has(name) ? `fill="${color}" fill-rule="evenodd" stroke="none"` : FILLED.has(name) ? `fill="${color}" stroke="${color}"` : `fill="none" stroke="${color}"`
   const width = stroke ? ` stroke-width="${stroke}"` : ''
   return `<path transform="translate(${x} ${y}) scale(${+k.toFixed(4)})" ${paint}${width} d="${ICONS[name]}"/>`
 }

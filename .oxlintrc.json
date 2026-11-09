@@ -15,7 +15,8 @@
     "denyWarnings": true
   },
   "ignorePatterns": [
-    "types/engine/**"
+    "types/engine/**",
+    "scripts/ci/jsx-sizes.ts"
   ],
   "rules": {
     "eslint/no-unused-vars": "error",
