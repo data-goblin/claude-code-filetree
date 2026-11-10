@@ -109,7 +109,7 @@ export const register: Register = (on, options) => {
     tree.follow = !arg
     const root = arg ? resolve(cwd, arg, machine.home) : cwd
     await reset($, root, settings.focusOnOpen || given !== '' || mine?.isPlaced === true)
-    return { text: `File tree on ${shortPath(root)}${tree.follow ? ' (follows the cwd)' : ''}.` }
+    return { text: `File tree on ${shortPath(root)}${tree.follow ? ' (moves with the cwd)' : ''}.` }
   })
 
   on('tool.call', async ($, e, next) => {
