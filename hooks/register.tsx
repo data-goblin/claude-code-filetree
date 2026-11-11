@@ -15,7 +15,7 @@ import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from '
 import { watchTree, sinceNow } from './listing'
 import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground } from './gitstate'
 import { scheduleScan, touched, reveal } from './activity'
-import { reset, followCwd, settleRoot } from './root'
+import { reset, followCwd, settleRoot, applyStart } from './root'
 import { picks } from './select'
 import { grepOn } from './grep'
 import { scrollSplit, scrollPreview } from './preview'
@@ -34,6 +34,7 @@ let ageTick: Timer | null = null
 export const register: Register = (on, options) => {
   readOptions(options)
   on('session.start', async ($, e, next) => {
+    settings.noDock = options?.start === 'off'
     guarding.outside = []
     working.workTouches = []
     working.workLast = 0
@@ -240,7 +241,10 @@ export const register: Register = (on, options) => {
       pics.pictures.clear()
       await $.process.run(['sh', '-c', CLEAN, 'sh', dir], { timeoutMs: 10_000 }).catch(() => undefined)
     }
-    if (e.reason === 'clear' || e.reason === 'resume' || e.reason === 'other') $.clock.after(0, () => void settleRoot($))
+    if (e.reason === 'clear' || e.reason === 'resume' || e.reason === 'other') {
+      settings.noDock = options?.start === 'off'
+      $.clock.after(0, () => void settleRoot($).then(() => applyStart($)))
+    }
     return result
   })
 

@@ -35,7 +35,6 @@ export function readOptions(options: PluginOptions): void {
   settings.diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   settings.groupSetting = diffGroups(options?.groups)
   settings.targetSetting = terminalTarget(options?.target)
-  settings.noDock = options?.start === 'off'
   settings.splitAt = options?.split === 'top' ? 'top' : 'bottom'
   settings.jumpMovesClaude = options?.jump !== 'tree'
 }

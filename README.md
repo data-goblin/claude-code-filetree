@@ -121,6 +121,8 @@ Glyphs:           auto | nerd | plain | text
 
 Follow work is described in [Claude activity](docs/activity.md).
 
+Open at start applies to every new session, `/clear` included. When you open or close the tree with `/filetree`, that choice lasts until the next `/clear`. After `/clear`, the tree is open or closed as Open at start says.
+
 ## Requirements
 
 ```yaml
