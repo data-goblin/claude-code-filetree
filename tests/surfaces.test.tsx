@@ -1289,6 +1289,39 @@ test('focus on open off: a bare /filetree opens the tree without taking the keyb
   expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
 })
 
+for (const [start, via] of [['off', 'clear'], ['on', 'clear'], ['off', 'reload'], ['on', 'reload']] as const) {
+  test(`open at start ${start}: ${via === 'clear' ? '/clear' : 'a plugin reload'} goes back to the setting after /filetree ${start === 'off' ? 'opened' : 'closed'} the tree (#73)`, { timeoutMs: 20_000, options: { start } }, async ($, on) => {
+    const ran: Ran = []
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
+    const first = opens.length
+    let closedAt = -1
+    const shown = () => opens.length > first && closedAt !== opens.length
+    on('session.surfaces', () => ({ value: ['desktop'] }))
+    on('ui.close', () => {
+      closedAt = opens.length
+      return { value: undefined }
+    })
+    on('ui.panes', () => ({ value: opens.length > first ? [{ id: 'filetree', title: 'Files', isFocused: false, isShown: shown(), isPlaced: shown() }] : [] }))
+    on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+    const bare = { command: 'filetree', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } } satisfies CommandRunInput
+    await $.session.start({ cwd: root, surface: null, isInteractive: false })
+    await clock.settle()
+    expect(shown()).toBe(start === 'on')
+    await $.command.run(bare)
+    await clock.settle()
+    expect(shown()).toBe(start === 'off')
+    const before = opens.length
+    if (via === 'clear') {
+      await $.session.end({ reason: 'clear', sessionId: 'test-session', resume: { id: 'test-session' } })
+      await clock.advance(10)
+    } else await $.session.start({ cwd: root, surface: null, isInteractive: false })
+    await clock.settle()
+    expect(opens.length > before).toBe(start === 'on')
+    if (via === 'clear') expect(shown()).toBe(start === 'on')
+  })
+}
+
 test('focus on open off: a bare /filetree toggles the tree and reopens it after a close without taking the keyboard', { timeoutMs: 20_000, options: { focus: 'off' } }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
