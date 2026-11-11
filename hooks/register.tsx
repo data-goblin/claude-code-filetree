@@ -3226,10 +3226,10 @@ export const register: Register = (on, options) => {
   diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   groupSetting = diffGroups(options?.groups)
   targetSetting = terminalTarget(options?.target)
-  noDock = options?.start === 'off'
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
+    noDock = options?.start === 'off'
     outside = []
     workTouches = []
     workLast = 0
