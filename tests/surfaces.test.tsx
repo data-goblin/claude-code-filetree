@@ -1289,8 +1289,8 @@ test('focus on open off: a bare /filetree opens the tree without taking the keyb
   expect(opens.at(-1)).toMatchObject({ id: 'filetree', focus: true })
 })
 
-for (const start of ['off', 'on'] as const) {
-  test(`open at start ${start}: /clear goes back to the setting after /filetree ${start === 'off' ? 'opened' : 'closed'} the tree (#73)`, { timeoutMs: 20_000, options: { start } }, async ($, on) => {
+for (const [start, via] of [['off', 'clear'], ['on', 'clear'], ['off', 'reload'], ['on', 'reload']] as const) {
+  test(`open at start ${start}: ${via === 'clear' ? '/clear' : 'a plugin reload'} goes back to the setting after /filetree ${start === 'off' ? 'opened' : 'closed'} the tree (#73)`, { timeoutMs: 20_000, options: { start } }, async ($, on) => {
     const ran: Ran = []
     const root = '/home/k/proj'
     const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.txt', 'file']] }, status: '', numstat: '' }, ran)
@@ -1303,6 +1303,7 @@ for (const start of ['off', 'on'] as const) {
       return { value: undefined }
     })
     on('ui.panes', () => ({ value: opens.length > first ? [{ id: 'filetree', title: 'Files', isFocused: false, isShown: shown(), isPlaced: shown() }] : [] }))
+    on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
     const bare = { command: 'filetree', args: '', origin: { kind: 'sdk' }, presentation: { isFullscreen: false, columns: 80 } } satisfies CommandRunInput
     await $.session.start({ cwd: root, surface: null, isInteractive: false })
     await clock.settle()
@@ -1311,9 +1312,13 @@ for (const start of ['off', 'on'] as const) {
     await clock.settle()
     expect(shown()).toBe(start === 'off')
     const before = opens.length
-    await $.session.start({ cwd: root, surface: null, isInteractive: false })
+    if (via === 'clear') {
+      await $.session.end({ reason: 'clear', sessionId: 'test-session', resume: { id: 'test-session' } })
+      await clock.advance(10)
+    } else await $.session.start({ cwd: root, surface: null, isInteractive: false })
     await clock.settle()
     expect(opens.length > before).toBe(start === 'on')
+    if (via === 'clear') expect(shown()).toBe(start === 'on')
   })
 }
 
