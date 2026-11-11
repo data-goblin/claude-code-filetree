@@ -1225,6 +1225,18 @@ async function gitChanged($: EngineInterface): Promise<void> {
   } else if (before && stamp && before !== stamp) void sync($, true)
 }
 
+async function applyStart($: EngineInterface): Promise<void> {
+  const shown = (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)?.isShown ?? false
+  if (noDock && shown) {
+    if (zjump.on) jumpClose($)
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+    return
+  }
+  if (noDock || shown) return
+  const t = await get($)
+  if (t.root) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+}
+
 async function settleRoot($: EngineInterface): Promise<void> {
   const root = follow || !lastRoot ? await cwdOf($) : lastRoot
   const t = await get($)
@@ -3226,10 +3238,10 @@ export const register: Register = (on, options) => {
   diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   groupSetting = diffGroups(options?.groups)
   targetSetting = terminalTarget(options?.target)
-  noDock = options?.start === 'off'
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
   on('session.start', async ($, e, next) => {
+    noDock = options?.start === 'off'
     outside = []
     workTouches = []
     workLast = 0
@@ -3537,7 +3549,10 @@ export const register: Register = (on, options) => {
       pictures.clear()
       await $.process.run(['sh', '-c', CLEAN, 'sh', dir], { timeoutMs: 10_000 }).catch(() => undefined)
     }
-    if (e.reason === 'clear' || e.reason === 'resume' || e.reason === 'other') $.clock.after(0, () => void settleRoot($))
+    if (e.reason === 'clear' || e.reason === 'resume' || e.reason === 'other') {
+      noDock = options?.start === 'off'
+      $.clock.after(0, () => void settleRoot($).then(() => applyStart($)))
+    }
     return result
   })
 

@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.8.2-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -130,6 +130,8 @@ Glyphs:           auto | nerd | plain | text
 ```
 
 Follow work is described in [Claude activity](docs/activity.md).
+
+Open at start applies to every new session, `/clear` included. When you open or close the tree with `/filetree`, that choice lasts until the next `/clear`. After `/clear`, the tree is open or closed as Open at start says.
 
 ## Requirements
 
