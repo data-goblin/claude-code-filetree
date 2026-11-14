@@ -257,7 +257,7 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('ui.focus', { component: 'Pane', requestId: [PANE, /^grid-/] }, async ($, e, next) => {
+  on('ui.focus', { component: 'Pane', requestId: [PANE, /^grid-/], plugin: [PLUGIN, 'pane-grid'] }, async ($, e, next) => {
     if (!(await isSite($, e.requestId))) return next(e)
     if (zjump.on && e.origin.kind === 'person' && (e.element === 'jump-up' || e.element === 'jump-down')) {
       await jumpKey($, e.element === 'jump-up' ? 'up' : 'down')
@@ -358,7 +358,10 @@ export const register: Register = (on, options) => {
     return renderPane($, e, { id: PANE, columns: e.props.bodyColumns, rows: e.props.scroll?.bodyRows, isActive: true })
   })
 
-  on('ui.render', { component: 'Pane', requestId: /^grid-/ }, async ($, e, next) => {
+  // Claude Code 2.1.325 and later fill in a missing matcher `plugin` with the plugin that registered the hook, for ui.render, ui.press, ui.focus,
+  // ui.input and ui.select. For ui.render, `plugin` is the plugin that opened the pane, and pane-grid opens every grid pane, so this hook needs
+  // `plugin: 'pane-grid'` to be called for one.
+  on('ui.render', { component: 'Pane', requestId: /^grid-/, plugin: 'pane-grid' }, async ($, e, next) => {
     const placement = await readPlacement($, PLUGIN)
     const below = await next(e)
     if (e.surface !== 'terminal') return below
