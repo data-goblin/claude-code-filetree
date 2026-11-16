@@ -154,6 +154,7 @@ let previewed: Preview | null = null
 let previewRows = 20
 let splitAt: 'bottom' | 'top' = 'bottom'
 let jumpMovesClaude = true
+let rightClickAbsolute = false
 let followWork = true
 let workTouches: Touch[] = []
 let workLast = 0
@@ -2147,7 +2148,7 @@ async function considerWork($: EngineInterface): Promise<void> {
     $.clock.after(0, async () => {
       try {
         await $.command.run({ command: 'cd', args: repo })
-        void $.ui.toast(`followed the work to ${shortPath(repo)}`)
+        void $.ui.toast(`filetree moved to the cwd`)
         $.clock.after(400, () => void (follow ? followCwd($) : reset($, repo)))
       } catch (error) {
         void $.ui.toast(`could not move Claude to ${shortPath(repo)}: ${error instanceof Error ? error.message : String(error)}`)
@@ -3240,6 +3241,7 @@ export const register: Register = (on, options) => {
   targetSetting = terminalTarget(options?.target)
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
+  rightClickAbsolute = options?.copy === 'absolute'
   on('session.start', async ($, e, next) => {
     noDock = options?.start === 'off'
     outside = []
@@ -3317,7 +3319,7 @@ export const register: Register = (on, options) => {
     follow = !arg
     const root = arg ? resolve(cwd, arg, home) : cwd
     await reset($, root, focusOnOpen || given !== '' || mine?.isPlaced === true)
-    return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
+    return { text: `File tree on ${shortPath(root)}${follow ? ' (moves with the cwd)' : ''}.` }
   })
 
   on('tool.call', async ($, e, next) => {
@@ -3466,7 +3468,7 @@ export const register: Register = (on, options) => {
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
-      await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
+      await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift) !== rightClickAbsolute, e.surface)
       return {}
     }
     if (typeof data.scrollTo === 'number') {

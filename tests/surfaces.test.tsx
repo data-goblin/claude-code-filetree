@@ -1009,6 +1009,44 @@ test('follow off: reads, writes and folders Claude opens above the view never mo
   await ui.unmount()
 })
 
+test('right-click copies absolute: a right-click copies the absolute path and shift+right-click the relative one', { timeoutMs: 20_000, options: { copy: 'absolute' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['.git', 'dir'], ['b.txt', 'file']], [`${root}/.git`]: [['HEAD', 'file']] }, status: '## main\0', numstat: '', mtimes: {} }, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ copy: `${root}/b.txt` }, { in: 'rows' })
+  await ui.post({ copy: `${root}/b.txt`, shift: true }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual([`${root}/b.txt`, 'b.txt'])
+  await ui.unmount()
+})
+
+test('right-click copies absolute: a content search hit copies the absolute path of its file and shift+right-click the relative one', { timeoutMs: 20_000, options: { copy: 'absolute' } }, async ($, on) => {
+  const root = '/home/k/proj'
+  const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: root, dirs: { [root]: [['a.ts', 'file']] }, status: '## main\0', numstat: '', mtimes: {} }, [])
+  const copied: string[] = []
+  on('ui.copy', (_$, e) => {
+    copied.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  await ui.post({ copy: `grep:3:${root}/a.ts` }, { in: 'rows' })
+  await ui.post({ copy: `grep:3:${root}/a.ts`, shift: true }, { in: 'rows' })
+  await clock.settle()
+  expect(copied).toEqual([`${root}/a.ts`, 'a.ts'])
+  await ui.unmount()
+})
+
 test('watches only git metadata, copies paths, clears search, Home and End', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const mtimes: Record<string, number> = {}

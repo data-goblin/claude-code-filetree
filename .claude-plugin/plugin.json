@@ -1,6 +1,6 @@
 {
   "name": "filetree",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "An IDE-style file tree for Claude Code that shows what Claude is doing and where in files",
   "types": "./types/index.d.ts",
   "author": {
@@ -66,6 +66,16 @@
       "options": [
         "tree and Claude",
         "tree"
+      ]
+    },
+    "copy": {
+      "type": "string",
+      "title": "Right-click copies",
+      "description": "relative: a right-click on an entry copies its path from the tree's root. absolute: it copies the full path. Shift+right-click copies the other one. y and Y keep copying the relative and the absolute path.",
+      "default": "relative",
+      "options": [
+        "relative",
+        "absolute"
       ]
     },
     "work": {
