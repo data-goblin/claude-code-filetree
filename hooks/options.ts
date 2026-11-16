@@ -37,4 +37,5 @@ export function readOptions(options: PluginOptions): void {
   settings.targetSetting = terminalTarget(options?.target)
   settings.splitAt = options?.split === 'top' ? 'top' : 'bottom'
   settings.jumpMovesClaude = options?.jump !== 'tree'
+  settings.rightClickAbsolute = options?.copy === 'absolute'
 }

@@ -93,6 +93,7 @@ All settings are in `/config` under filetree, each with its own description ther
 Claude activity:  reads and writes | writes | reads | none
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
+Right-click copies: relative | absolute
 Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
