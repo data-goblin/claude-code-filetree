@@ -25,6 +25,7 @@ import {
   age,
   ancestorsOf,
   type Change,
+  DARK_TERMINAL_THEME,
   DEFAULT_THEME,
   dirname,
   emptyTree,
@@ -3681,7 +3682,7 @@ export const register: Register = (on, options) => {
     const Image = 'Image' in elements ? elements.Image : undefined
     const t = await get($)
     const light = e.surface !== 'desktop' && lightTerminal
-    const theme: Theme = { ...DEFAULT_THEME, ...palette.theme }
+    const theme: Theme = { ...(e.surface === 'terminal' && !light ? DARK_TERMINAL_THEME : DEFAULT_THEME), ...palette.theme }
     const tones = light ? LIGHT_TONES : TONES
     const mutedText = theme.muted ? { color: theme.muted } : { dimColor: true }
     const gitColors = { ...(desk ? DESK_GIT_TEXT : GIT_COLOR), ...palette.git }
