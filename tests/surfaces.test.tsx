@@ -2167,6 +2167,31 @@ for (const [surface, theme, palette, folder] of [
   })
 }
 
+for (const [theme, palette, fill] of [
+  ['dark', '', 'ansi256(12)'],
+  ['light', '', 'ansi256(4)'],
+  ['dark', 'accent=#5fafff', '#5fafff'],
+] as const) {
+  test(`cells treemap with a ${theme} theme${palette ? ` and palette ${palette}` : ''}: a top-level box fills with the accent ${fill}, like the folders in the tree`, { timeoutMs: 20_000, options: palette ? { palette } : {} }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [['src', 'dir'], ['big.bin', 'file']], [`${root}/src`]: [['x.ts', 'file']] },
+      du: { [root]: `5120\t${root}/src/x.ts\n5120\t${root}/src\n3072\t${root}/big.bin\n8192\t${root}\n` },
+    }, [])
+    on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }))
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await ui.press({ key: 'split' })
+    await clock.settle()
+    const box = mapAt(await ui.drawn()).rows.flatMap(r => r.left).find(s => s.tab === `${root}/src` && s.t.trim())
+    expect(box?.bg).toBe(fill)
+    await ui.unmount()
+  })
+}
+
 test('formatSize: at most three digits, unit glued on, ? for unknown', () => {
   expect(formatSize(0)).toBe('0B')
   expect(formatSize(980)).toBe('980B')

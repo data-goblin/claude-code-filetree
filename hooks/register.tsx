@@ -4491,6 +4491,7 @@ export const register: Register = (on, options) => {
           const lift: [Rgb, number] | undefined = picked ? [ink, 0.85] : hot && tone ? [tone, 0.8] : tone ? [paper, 0.35] : undefined
           return { tone, lift }
         }
+        const topLabel = 'ansi256(0)'
         const look = (tile: Tile) => {
           const picked = tile === pick
           const { tone, lift } = heat(tile, picked)
@@ -4505,7 +4506,8 @@ export const register: Register = (on, options) => {
             return { name: c, size: c, bold: true, bg: hex(box.fill), rank: 0 }
           }
           const top = !dimmed(tile) && !(tile.depth % 2)
-          return { name: top ? 'ansi256(0)' : 'ansi256(15)', size: top ? 'ansi256(0)' : 'ansi256(15)', bold: true, bg: top ? 'ansi256(4)' : 'ansi256(8)', rank: 0 }
+          const label = top ? topLabel : 'ansi256(15)'
+          return { name: label, size: label, bold: true, bg: top ? theme.accent : 'ansi256(8)', rank: 0 }
         }
         const amount = scan.loc ? formatLoc : formatSize
         status = pick ? `${pick.name} ${amount(pick.bytes)} ${pct(pick.bytes)}` : `${amount(total)}${scan.loc ? ' lines' : ''}${scan.done ? '' : ' …'}`
