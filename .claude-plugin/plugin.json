@@ -58,6 +58,16 @@
         "tree"
       ]
     },
+    "copy": {
+      "type": "string",
+      "title": "Right-click copies",
+      "description": "relative: a right-click on an entry copies its path from the tree's root. absolute: it copies the full path. Shift+right-click copies the other one. y and Y keep copying the relative and the absolute path.",
+      "default": "relative",
+      "options": [
+        "relative",
+        "absolute"
+      ]
+    },
     "work": {
       "type": "string",
       "title": "Follow work",

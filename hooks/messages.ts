@@ -2,7 +2,7 @@ import type { Hook } from 'claude-code'
 import { has, focusPane, osName } from './util'
 import { PANE, ROOT_PRESS, OUTSIDE } from './consts'
 import { pressHeader, selectRoot, press, navigate } from './nav'
-import { ui, previewing, zjump, grep, flashing } from './state'
+import { ui, settings, previewing, zjump, grep, flashing } from './state'
 import { scrollSplit, toggleSplit, turnPage, diffFile, closePreview, editPreview, jumpDiff, scrollPreview } from './preview'
 import { pickTile, mapKey } from './scans'
 import { sync } from './gitstate'
@@ -61,7 +61,7 @@ export const onMessage: Hook<'ui.message'> = async ($, e, next) => {
   void sync($)
   const t = await get($)
   if (typeof data.copy === 'string') {
-    await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
+    await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift) !== settings.rightClickAbsolute, e.surface)
     return {}
   }
   if (typeof data.scrollTo === 'number') {
