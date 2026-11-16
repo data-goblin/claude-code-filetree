@@ -154,6 +154,7 @@ let previewed: Preview | null = null
 let previewRows = 20
 let splitAt: 'bottom' | 'top' = 'bottom'
 let jumpMovesClaude = true
+let rightClickAbsolute = false
 let followWork = true
 let workTouches: Touch[] = []
 let workLast = 0
@@ -3240,6 +3241,7 @@ export const register: Register = (on, options) => {
   targetSetting = terminalTarget(options?.target)
   splitAt = options?.split === 'top' ? 'top' : 'bottom'
   jumpMovesClaude = options?.jump !== 'tree'
+  rightClickAbsolute = options?.copy === 'absolute'
   on('session.start', async ($, e, next) => {
     noDock = options?.start === 'off'
     outside = []
@@ -3466,7 +3468,7 @@ export const register: Register = (on, options) => {
     void sync($)
     const t = await get($)
     if (typeof data.copy === 'string') {
-      await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift), e.surface)
+      await copyPath($, data.copy === ROOT_PRESS ? t.root : data.copy.replace(/^grep:\d+:/, ''), Boolean(data.shift) !== rightClickAbsolute, e.surface)
       return {}
     }
     if (typeof data.scrollTo === 'number') {

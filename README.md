@@ -103,6 +103,7 @@ Claude activity:  reads and writes | writes | reads | none
 Activity shimmer: on | off
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
+Right-click copies: relative | absolute
 Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
