@@ -28,6 +28,7 @@ type Settings = {
   palette: Palette
   splitAt: 'bottom' | 'top'
   jumpMovesClaude: boolean
+  rightClickAbsolute: boolean
   followWork: boolean
   followClaude: boolean
   showReads: boolean
@@ -61,6 +62,7 @@ export const settings: Settings = {
   palette: parsePalette(''),
   splitAt: 'bottom',
   jumpMovesClaude: true,
+  rightClickAbsolute: false,
   followWork: true,
   followClaude: true,
   showReads: true,

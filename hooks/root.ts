@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 import { get, put } from './store'
-import { flashing, metrics, ui, marking, linking, tree, settings } from './state'
+import { flashing, metrics, ui, marking, linking, tree, settings, zjump } from './state'
 import { clearAutoCollapse } from './activity'
 import { emptyTree } from './tree'
 import { loadDirs } from './listing'
@@ -8,7 +8,7 @@ import { detectRepo, refreshGit } from './gitstate'
 import { PANE } from './consts'
 import { cwdOf } from './util'
 import { grepClear } from './grep'
-import { recordVisit } from './jump'
+import { jumpClose, recordVisit } from './jump'
 
 let lastRoot = ''
 
@@ -56,6 +56,18 @@ export async function followCwd($: EngineInterface): Promise<boolean> {
   if (t.root === cwd) return false
   await reset($, cwd)
   return true
+}
+
+export async function applyStart($: EngineInterface): Promise<void> {
+  const shown = (await $.ui.panes().catch(() => [])).find(p => p.id === PANE)?.isShown ?? false
+  if (settings.noDock && shown) {
+    if (zjump.on) jumpClose($)
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+    return
+  }
+  if (settings.noDock || shown) return
+  const t = await get($)
+  if (t.root) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
 }
 
 export async function settleRoot($: EngineInterface): Promise<void> {

@@ -28,6 +28,7 @@ pull request credits them even when the code that shipped was rewritten.
 - Desktop rows send one message per key press, not one per row: [@BlackBuddle](https://github.com/BlackBuddle) ([#47](https://github.com/data-goblin/claude-code-filetree/issues/47))
 - Date format and Clock settings for the date column: [@steve-piece](https://github.com/steve-piece) ([#60](https://github.com/data-goblin/claude-code-filetree/pull/60))
 - Desktop draws lit names as static text past four lit rows, so their shimmer clocks cannot flood the page: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
+- Right-click copies setting, so a right-click can copy the absolute path, and the bright blue accent on a dark terminal, so folders read in Windows Terminal: [@Boring206](https://github.com/Boring206) ([#76](https://github.com/data-goblin/claude-code-filetree/pull/76), [#78](https://github.com/data-goblin/claude-code-filetree/pull/78))
 
 ## Ideas
 
@@ -50,3 +51,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Desktop pane mixed light and dark rows in light mode: [@InTheory7](https://github.com/InTheory7) ([#53](https://github.com/data-goblin/claude-code-filetree/issues/53))
 - Desktop lit-row shimmer flooded the page with messages: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
 - Stray letters left in the terminal transcript beside the sidebar in WezTerm and Alacritty on WSL2: [@Vimerum](https://github.com/Vimerum) ([#67](https://github.com/data-goblin/claude-code-filetree/issues/67))
+- The pane reopened on /clear with Open at start off once /filetree had opened it, with the cause and fix: [@g-avalos](https://github.com/g-avalos) ([#73](https://github.com/data-goblin/claude-code-filetree/issues/73))

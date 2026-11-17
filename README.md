@@ -24,7 +24,7 @@
 <summary><b>Claude Code in Desktop App</b></summary>
 
 <p align="center">
-  <img src="media/0.7.1/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the branch row, search row and folders readable on white" width="600">
+  <img src="media/0.8.2/desktop-light.png" alt="The file tree in the Desktop app in light mode, with the header buttons including the Clawd shimmer button, the branch row, search row and folders" width="600">
 </p>
 
 </details>
@@ -71,9 +71,18 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Git status per file and folder, line counts on changed files, and the branch with ahead and behind ([git](docs/git.md))
 - Git and GitHub commands Claude runs show as a status line ([git](docs/git.md))
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
+- The Activity shimmer setting turns the shimmer off in every session; the Clawd button in the Desktop app header flips it ([activity](docs/activity.md))
 - File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
 - Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
-- The selected file and up to 100 marked entries go to Claude as context; shift+click or shift+j / shift+k mark a range ([context](docs/context.md))
+- IDE-style multi-select; the shaded rows go to Claude as context: the selected row, or up to 100 marked rows ([context](docs/context.md)):
+  - click selects one row and clears the marks
+  - with rows marked, j / k move only the cursor, and `v` marks or unmarks the row under it
+  - shift+click marks the range from the last click or j / k move, in tree order
+  - ctrl+click marks or unmarks one row without opening it; alt+click on macOS
+  - double-click or Enter opens a file
+  - the clear selection button clears every marked and selected row
+  - marked rows show the selection background; `y`, `Y` and `u` copy the shaded rows
+  - with rows marked, the row under the cursor shows an accent tint in the Desktop app and the accent cursor mark in the terminal
 - Split preview of code, Markdown, images, video frames, PDF and Word pages ([preview and treemap](docs/preview-treemap.md))
 - Treemap of a folder by bytes or lines, with Claude's activity lit ([preview and treemap](docs/preview-treemap.md))
 - Diff of a file or every changed file in a folder, in the pane or your diff tool ([diff](docs/diff.md))
@@ -92,8 +101,10 @@ All settings are in `/config` under filetree, each with its own description ther
 
 ```yaml
 Claude activity:  reads and writes | writes | reads | none
+Activity shimmer: on | off
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
+Right-click copies: relative | absolute
 Follow work:      on | off
 Open at start:    on | off
 Focus on open:    on | off
@@ -120,7 +131,11 @@ Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
 
+In the terminal the accent colors folders, the root, the cursor, search matches and the top-level boxes of the cells treemap. It is the terminal's bright blue with a dark Claude theme and its blue with a light one. `accent=#hex` in Palette sets another color for all of them.
+
 Follow work is described in [Claude activity](docs/activity.md).
+
+Open at start applies to every new session, `/clear` included. When you open or close the tree with `/filetree`, that choice lasts until the next `/clear`. After `/clear`, the tree is open or closed as Open at start says.
 
 ## Requirements
 
@@ -140,7 +155,8 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 ## Considerations
 
 - The Desktop app has no split preview or treemap
-- The Desktop app shimmers at most four rows at once; more lit rows show in their color without the shimmer, while the terminal shimmers them all
+- The Desktop app shimmers at most four rows at once; more lit rows show in their color without the shimmer, while the terminal shimmers them all. If the pane still floods, the Clawd button in the header or the Activity shimmer setting turns the shimmer off
+- The Desktop app draws at most 150 rows around the cursor, and fewer when rows are deep, have long paths or show git changes; a note counts the rows it leaves out
 - GIFs and videos show one still frame
 - Windows sizes folders through file listings, and the treemap draws one level
 - Row clicks need herdr 0.9.1 or later; run `herdr update`
@@ -149,7 +165,7 @@ pictures:  Ghostty or kitty, outside tmux and herdr, on Linux and macOS
 
 Open pull requests against a release branch, not `main`:
 
-- Fixes: the patch branch, such as `release/0.8.1`
+- Fixes: the patch branch, such as `release/0.8.2`
 - Features: the minor branch, such as `release/0.9.0`
 
 Keep the version of that branch.

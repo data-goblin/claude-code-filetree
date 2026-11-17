@@ -35,6 +35,7 @@ export function mapPane($: EngineInterface, c: Look & Layout & Columns, anchor: 
   const hex = (c: Rgb) => `#${c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`
   const inks = [ink, paper, colorOf('ansi256(15)', machine.termColors, light), colorOf('ansi256(0)', machine.termColors, light)]
   const known = shade || Boolean(machine.termColors.bg)
+  const topLabel = theme.accent.startsWith('#') ? hex(inkOn(accent, [[0, 0, 0], [255, 255, 255]])) : 'ansi256(0)'
   const dimmed = (tile: Tile) => tile.path.startsWith(REST) || (!t.showHidden && tile.name.startsWith('.')) || isIgnored(t.root, tile.path)
   const boxOf = (tile: Tile) => {
     if (!dimmed(tile)) return boxLook(paper, accent, inks, tile.depth, total ? tile.bytes / total : 0)
@@ -63,7 +64,8 @@ export function mapPane($: EngineInterface, c: Look & Layout & Columns, anchor: 
       return { name: c, size: c, bold: true, bg: hex(box.fill), rank: 0 }
     }
     const top = !dimmed(tile) && !(tile.depth % 2)
-    return { name: top ? 'ansi256(0)' : 'ansi256(15)', size: top ? 'ansi256(0)' : 'ansi256(15)', bold: true, bg: top ? 'ansi256(4)' : 'ansi256(8)', rank: 0 }
+    const label = top ? topLabel : 'ansi256(15)'
+    return { name: label, size: label, bold: true, bg: top ? theme.accent : 'ansi256(8)', rank: 0 }
   }
   const amount = scan.loc ? formatLoc : formatSize
   status = pick ? `${pick.name} ${amount(pick.bytes)} ${pct(pick.bytes)}` : `${amount(total)}${scan.loc ? ' lines' : ''}${scan.done ? '' : ' …'}`
