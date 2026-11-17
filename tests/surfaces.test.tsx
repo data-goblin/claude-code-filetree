@@ -2167,12 +2167,13 @@ for (const [surface, theme, palette, folder] of [
   })
 }
 
-for (const [theme, palette, fill] of [
-  ['dark', '', 'ansi256(12)'],
-  ['light', '', 'ansi256(4)'],
-  ['dark', 'accent=#5fafff', '#5fafff'],
+for (const [theme, palette, fill, label] of [
+  ['dark', '', 'ansi256(12)', 'ansi256(0)'],
+  ['light', '', 'ansi256(4)', 'ansi256(0)'],
+  ['dark', 'accent=#5fafff', '#5fafff', '#000000'],
+  ['light', 'accent=#000000', '#000000', '#ffffff'],
 ] as const) {
-  test(`cells treemap with a ${theme} theme${palette ? ` and palette ${palette}` : ''}: a top-level box fills with the accent ${fill}, like the folders in the tree`, { timeoutMs: 20_000, options: palette ? { palette } : {} }, async ($, on) => {
+  test(`cells treemap with a ${theme} theme${palette ? ` and palette ${palette}` : ''}: a top-level box fills with the accent ${fill} under a ${label} label, like the folders in the tree`, { timeoutMs: 20_000, options: palette ? { palette } : {} }, async ($, on) => {
     const root = '/home/k/proj'
     const clock = world(on, {
       os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
@@ -2188,6 +2189,7 @@ for (const [theme, palette, fill] of [
     await clock.settle()
     const box = mapAt(await ui.drawn()).rows.flatMap(r => r.left).find(s => s.tab === `${root}/src` && s.t.trim())
     expect(box?.bg).toBe(fill)
+    expect(box?.c).toBe(label)
     await ui.unmount()
   })
 }

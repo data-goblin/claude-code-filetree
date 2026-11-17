@@ -4491,7 +4491,7 @@ export const register: Register = (on, options) => {
           const lift: [Rgb, number] | undefined = picked ? [ink, 0.85] : hot && tone ? [tone, 0.8] : tone ? [paper, 0.35] : undefined
           return { tone, lift }
         }
-        const topLabel = 'ansi256(0)'
+        const topLabel = theme.accent.startsWith('#') ? hex(inkOn(colorOf(theme.accent, termColors, light), [[0, 0, 0], [255, 255, 255]])) : 'ansi256(0)'
         const look = (tile: Tile) => {
           const picked = tile === pick
           const { tone, lift } = heat(tile, picked)
