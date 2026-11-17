@@ -130,6 +130,8 @@ Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
 
+In the terminal the accent colors folders, the root, the cursor, search matches and the top-level boxes of the cells treemap. It is the terminal's bright blue with a dark Claude theme and its blue with a light one. `accent=#hex` in Palette sets another color for all of them.
+
 Follow work is described in [Claude activity](docs/activity.md).
 
 Open at start applies to every new session, `/clear` included. When you open or close the tree with `/filetree`, that choice lasts until the next `/clear`. After `/clear`, the tree is open or closed as Open at start says.
