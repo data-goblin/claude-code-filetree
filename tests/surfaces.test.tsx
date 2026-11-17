@@ -2091,7 +2091,7 @@ test('the pane draws in the terminal\'s own colours: no background, ANSI palette
   expect(ran.some(a => a[0] === 'theme-stat')).toBe(false)
   expect(shown).not.toContain('"backgroundColor":"#')
   expect(shown).toContain('"activeBg":"ansi256(238)","hoverBg":""')
-  for (const c of ['ansi256(4)', 'ansi256(3)']) expect(shown).toContain(`"color":"${c}"`)
+  for (const c of ['ansi256(12)', 'ansi256(3)']) expect(shown).toContain(`"color":"${c}"`)
   await ui.unmount()
 })
 
@@ -2115,7 +2115,7 @@ test('the palette setting overrides the terminal colours key by key and names an
   await ui.unmount()
 })
 
-test('a light theme setting only changes the activity colours; the tree keeps the terminal palette on both surfaces', { timeoutMs: 20_000 }, async ($, on) => {
+test('a light theme setting only changes the activity colours and the accent; the tree keeps the terminal palette on both surfaces', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/Users/k/proj'
   const clock = world(on, {
@@ -2142,6 +2142,57 @@ test('a light theme setting only changes the activity colours; the tree keeps th
   expect(drawnDesk).toContain('"type":"Svg"')
   await desktop.unmount()
 })
+
+for (const [surface, theme, palette, folder] of [
+  ['terminal', 'dark', '', 'ansi256(12)'],
+  ['terminal', 'light', '', 'ansi256(4)'],
+  ['desktop', 'dark', '', '#4b8ef0'],
+  ['terminal', 'dark', 'accent=#5fafff', '#5fafff'],
+  ['terminal', 'light', 'accent=#5fafff', '#5fafff'],
+] as const) {
+  test(`${surface} with a ${theme} theme${palette ? ` and palette ${palette}` : ''}: folders draw in ${folder}; a dark terminal takes the bright blue, since its ANSI blue can sink into the background`, { timeoutMs: 20_000, options: { glyphs: 'plain', ...(palette ? { palette } : {}) } }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '', dirs: { [root]: [['src', 'dir'], ['a.ts', 'file']] } }, [])
+    on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }))
+    await $.session.start({ cwd: root, surface, isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface, component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    const tree = await ui.drawn()
+    const ink = surface === 'desktop'
+      ? /fill="(#[0-9a-f]{6})"/.exec(svgs(tree).find(s => s.alt === 'folder src')?.source ?? '')?.[1]
+      : treeRows(tree).rows.find(r => r.id === `${root}/src`)?.left.find(s => s.t === '■ ')?.c
+    expect(ink).toBe(folder)
+    await ui.unmount()
+  })
+}
+
+for (const [theme, palette, fill, label] of [
+  ['dark', '', 'ansi256(12)', 'ansi256(0)'],
+  ['light', '', 'ansi256(4)', 'ansi256(0)'],
+  ['dark', 'accent=#5fafff', '#5fafff', '#000000'],
+  ['light', 'accent=#000000', '#000000', '#ffffff'],
+] as const) {
+  test(`cells treemap with a ${theme} theme${palette ? ` and palette ${palette}` : ''}: a top-level box fills with the accent ${fill} under a ${label} label, like the folders in the tree`, { timeoutMs: 20_000, options: palette ? { palette } : {} }, async ($, on) => {
+    const root = '/home/k/proj'
+    const clock = world(on, {
+      os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', status: '', numstat: '',
+      dirs: { [root]: [['src', 'dir'], ['big.bin', 'file']], [`${root}/src`]: [['x.ts', 'file']] },
+      du: { [root]: `5120\t${root}/src/x.ts\n5120\t${root}/src\n3072\t${root}/big.bin\n8192\t${root}\n` },
+    }, [])
+    on('config.list', () => ({ value: [{ key: 'theme', label: 'Theme', kind: 'choice', value: theme, provider: { plugin: 'engine', tier: 'core' }, isLocked: false }] }))
+    await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+    await clock.settle()
+    await ui.press({ key: 'split' })
+    await clock.settle()
+    const box = mapAt(await ui.drawn()).rows.flatMap(r => r.left).find(s => s.tab === `${root}/src` && s.t.trim())
+    expect(box?.bg).toBe(fill)
+    expect(box?.c).toBe(label)
+    await ui.unmount()
+  })
+}
 
 test('formatSize: at most three digits, unit glued on, ? for unknown', () => {
   expect(formatSize(0)).toBe('0B')
@@ -2628,7 +2679,7 @@ test('the root row has a folder glyph, k from the first row selects it and k on 
   const footer = (d: unknown) => JSON.stringify(d)
   expect(footer(await ui.drawn())).toContain('"key":"root","label":"■ proj"')
   expect(footer(await ui.drawn())).toContain('"key":"nav-help","label":"?: shortcuts"')
-  expect(footer(await ui.drawn())).toMatch(/"key":"nav-help"[^\]]*"children":\[\{"type":"Text","props":\{"color":"ansi256\(4\)"\},"children":\["\?"\]\}/)
+  expect(footer(await ui.drawn())).toMatch(/"key":"nav-help"[^\]]*"children":\[\{"type":"Text","props":\{"color":"ansi256\(12\)"\},"children":\["\?"\]\}/)
   await ui.press({ key: 'split' })
   await clock.settle()
   await ui.post({ key: 'home' }, { in: 'rows' })
@@ -4994,7 +5045,7 @@ test('name search highlights the matched characters for plain, case and regex se
   await clock.settle()
   const lit = async () => {
     const row = treeRows(await ui.drawn()).rows.find(r => r.id === `${root}/src/xAbyab.ts`)
-    return row?.left.slice(3).filter(s => s.c === 'ansi256(4)' && s.b).map(s => s.t) ?? []
+    return row?.left.slice(3).filter(s => s.c === 'ansi256(12)' && s.b).map(s => s.t) ?? []
   }
   await ui.input({ key: 'q', text: 'ab', kind: 'change' })
   await clock.settle()
