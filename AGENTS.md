@@ -43,6 +43,12 @@
   - `release/<next minor>.0`, now `release/0.9.0`: new features, new settings and behaviour changes
 - A release branch is named after the version it carries; the version check refuses a `release/*` branch whose `.claude-plugin/plugin.json` says otherwise
 - Target every PR at one of them, never at `main`: a fix or small change goes to the patch branch, anything else to the feature branch; when unsure, the feature branch
+- Pick the target from what the PR changes for the user:
+  - Patch branch: a bug fix, a crash, a wrong or unreadable color, a typo, a docs correction, a test, or a default that is broken for some users (for example an accent that cannot be read on a common terminal scheme)
+  - Feature branch: a new setting, key, command, pane or surface, a change to how an existing feature behaves when it works as designed, a refactor or file split, or a new dependency
+  - A fix that builds on code that only exists on the feature branch goes to the feature branch
+- When a PR targets the wrong branch, the keeper says so on the PR; a maintainer rebases it onto the right branch and retargets it, keeping the author's commits and credit
+- Update the branch names in the list above whenever a release cuts new branches, so contributors see where to send a PR
 - The commit that cuts a release branch sets its version in `.claude-plugin/plugin.json` and the README badge (`Clean(release): open 0.7.1`); PRs keep the version of the branch they target, and the version-bump workflow and `.githooks/pre-push` refuse anything else
 - After every merge into the patch branch, merge the patch branch into the feature branch with a merge commit, so fixes reach the next minor
 - `main` only takes release merges and an emergency hotfix; a hotfix is merged into both release branches right after

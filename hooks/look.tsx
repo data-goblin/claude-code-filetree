@@ -2,7 +2,7 @@ import type { RenderInputOf, EngineInterface } from 'claude-code'
 import { settings, machine, guarding, ui } from './state'
 import { get } from './store'
 import type { Theme } from '../types'
-import { DEFAULT_THEME } from './tree'
+import { DARK_TERMINAL_THEME, DEFAULT_THEME } from './tree'
 import { LIGHT_TONES, TONES } from './git'
 import { DESK_GIT_TEXT, ink, DESK_GIT, DESK, selectionOn, lighten, iconSvg, type IconName, toolSvg } from './svg'
 import { GIT_COLOR } from './icons'
@@ -31,7 +31,7 @@ export async function lookOf($: EngineInterface, e: PaneEvent) {
   const Image = 'Image' in elements ? elements.Image : undefined
   const t = await get($)
   const light = e.surface !== 'desktop' && machine.lightTerminal
-  const theme: Theme = { ...DEFAULT_THEME, ...settings.palette.theme }
+  const theme: Theme = { ...(e.surface === 'terminal' && !light ? DARK_TERMINAL_THEME : DEFAULT_THEME), ...settings.palette.theme }
   const tones = light ? LIGHT_TONES : TONES
   const mutedText = theme.muted ? { color: theme.muted } : { dimColor: true }
   const gitColors = { ...(desk ? DESK_GIT_TEXT : GIT_COLOR), ...settings.palette.git }
