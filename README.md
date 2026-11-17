@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.8.4-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.8.5-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -129,6 +129,8 @@ Treemap:          auto | image | cells | off
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
+
+In the terminal the accent colors folders, the root, the cursor, search matches and the top-level boxes of the cells treemap. It is the terminal's bright blue with a dark Claude theme and its blue with a light one. `accent=#hex` in Palette sets another color for all of them.
 
 Follow work is described in [Claude activity](docs/activity.md).
 

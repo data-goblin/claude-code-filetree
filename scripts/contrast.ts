@@ -1,7 +1,7 @@
 import { LIGHT_TONES, TONES } from '../hooks/git'
 import { GIT_COLOR } from '../hooks/icons'
 import { ADD_COLOR, DEL_COLOR, JUMP_COLOR } from '../hooks/palette'
-import { DEFAULT_THEME } from '../hooks/tree'
+import { DARK_TERMINAL_THEME, DEFAULT_THEME } from '../hooks/tree'
 import { boxLook, ratio, rgbOf } from '../hooks/pixmap'
 import { DESK, DESK_GIT, DESK_GIT_TEXT, selectionOn } from '../hooks/svg'
 
@@ -38,6 +38,7 @@ export function contrast(a: string, b: string): number {
 
 const PALETTE = [
   ['accent', DEFAULT_THEME.accent],
+  ['dark terminal accent', DARK_TERMINAL_THEME.accent],
   ['muted', DEFAULT_THEME.muted],
   ['urgent', DEFAULT_THEME.urgent],
   ['selection', DEFAULT_THEME.selection],
@@ -88,31 +89,33 @@ for (const suite of suites) {
   }
 }
 const THEMES: Record<string, string[]> = {
-  xterm: ['#000000', '#e5e5e5', '#0000ee', '#7f7f7f', '#ffffff', '#cd0000', '#00cd00', '#cdcd00'],
-  'tokyo-night': ['#1a1b26', '#a9b1d6', '#7aa2f7', '#414868', '#c0caf5', '#f7768e', '#9ece6a', '#e0af68'],
-  catppuccin: ['#1e1e2e', '#cdd6f4', '#89b4fa', '#585b70', '#cdd6f4', '#f38ba8', '#a6e3a1', '#f9e2af'],
-  gruvbox: ['#282828', '#d4be98', '#7daea3', '#665c54', '#d4be98', '#ea6962', '#a9b665', '#d8a657'],
-  nord: ['#2e3440', '#d8dee9', '#81a1c1', '#4c566a', '#d8dee9', '#bf616a', '#a3be8c', '#ebcb8b'],
-  everforest: ['#2d353b', '#d3c6aa', '#7fbbb3', '#475258', '#d3c6aa', '#e67e80', '#a7c080', '#dbbc7f'],
-  'catppuccin-latte': ['#eff1f5', '#4c4f69', '#1e66f5', '#acb0be', '#4c4f69', '#d20f39', '#40a02b', '#df8e1d'],
-  'rose-pine': ['#faf4ed', '#575279', '#56949f', '#cecacd', '#575279', '#b4637a', '#286983', '#ea9d34'],
-  'flexoki-light': ['#fffcf0', '#100f0f', '#205ea6', '#b7b5ac', '#100f0f', '#d14d41', '#879a39', '#d0a215'],
+  xterm: ['#000000', '#e5e5e5', '#0000ee', '#7f7f7f', '#ffffff', '#cd0000', '#00cd00', '#cdcd00', '#5c5cff'],
+  'tokyo-night': ['#1a1b26', '#a9b1d6', '#7aa2f7', '#414868', '#c0caf5', '#f7768e', '#9ece6a', '#e0af68', '#7da6ff'],
+  catppuccin: ['#1e1e2e', '#cdd6f4', '#89b4fa', '#585b70', '#cdd6f4', '#f38ba8', '#a6e3a1', '#f9e2af', '#89b4fa'],
+  gruvbox: ['#282828', '#d4be98', '#7daea3', '#665c54', '#d4be98', '#ea6962', '#a9b665', '#d8a657', '#7daea3'],
+  nord: ['#2e3440', '#d8dee9', '#81a1c1', '#4c566a', '#d8dee9', '#bf616a', '#a3be8c', '#ebcb8b', '#81a1c1'],
+  everforest: ['#2d353b', '#d3c6aa', '#7fbbb3', '#475258', '#d3c6aa', '#e67e80', '#a7c080', '#dbbc7f', '#7fbbb3'],
+  'catppuccin-latte': ['#eff1f5', '#4c4f69', '#1e66f5', '#acb0be', '#4c4f69', '#d20f39', '#40a02b', '#df8e1d', '#1e66f5'],
+  'rose-pine': ['#faf4ed', '#575279', '#56949f', '#cecacd', '#575279', '#b4637a', '#286983', '#ea9d34', '#56949f'],
+  'flexoki-light': ['#fffcf0', '#100f0f', '#205ea6', '#b7b5ac', '#100f0f', '#d14d41', '#879a39', '#d0a215', '#4385be'],
 }
 console.log('\ntheme-owned colors, reported not gated (dim is the Claude theme inactive grey that dimColor draws, #999999 dark and #666666 light)')
-console.log(`${'theme'.padEnd(17)}${['fg', 'red 1', 'green 2', 'yellow 3', 'blue 4', 'bright black 8', 'dim'].map(h => h.padStart(15)).join('')}`)
-for (const [name, [bg = '', fg = '', blue = '', black = '', , red = '', green = '', yellow = '']] of Object.entries(THEMES)) {
-  const dim = contrast(bg, '#000000') > contrast(bg, '#ffffff') ? '#666666' : '#999999'
-  console.log(`${name.padEnd(17)}${[fg, red, green, yellow, blue, black, dim].map(c => `${contrast(c, bg).toFixed(2)}:1`.padStart(15)).join('')}`)
+const lightTheme = (bg: string) => contrast(bg, '#000000') > contrast(bg, '#ffffff')
+console.log(`${'theme'.padEnd(17)}${['fg', 'red 1', 'green 2', 'yellow 3', 'blue 4', 'bright blue 12', 'bright black 8', 'dim'].map(h => h.padStart(15)).join('')}`)
+for (const [name, [bg = '', fg = '', blue = '', black = '', , red = '', green = '', yellow = '', brightBlue = '']] of Object.entries(THEMES)) {
+  const dim = lightTheme(bg) ? '#666666' : '#999999'
+  console.log(`${name.padEnd(17)}${[fg, red, green, yellow, blue, brightBlue, black, dim].map(c => `${contrast(c, bg).toFixed(2)}:1`.padStart(15)).join('')}`)
 }
 const LABEL = 4.5
 const EDGE = 1.4
-console.log('\ntreemap boxes (background, foreground, blue, bright black, bright white)')
+console.log('\ntreemap boxes (background, foreground, the accent: bright blue on a dark theme and blue on a light one, bright white)')
 for (const [name, hexes] of Object.entries(THEMES)) {
-  const [paper, fg, blue, , white] = hexes.map(rgbOf)
-  if (!paper || !fg || !blue || !white) throw new Error(`${name}: unreadable palette`)
+  const [paper, fg, blue, , white, , , , brightBlue] = hexes.map(rgbOf)
+  const accent = lightTheme(hexes[0] ?? '') ? blue : brightBlue
+  if (!paper || !fg || !accent || !white) throw new Error(`${name}: unreadable palette`)
   const inks = [fg, paper, white, paper]
-  const looks = [0, 0.05, 0.3, 1].map(share => boxLook(paper, blue, inks, 0, share))
-  const nested = boxLook(paper, blue, inks, 1, 0.1)
+  const looks = [0, 0.05, 0.3, 1].map(share => boxLook(paper, accent, inks, 0, share))
+  const nested = boxLook(paper, accent, inks, 1, 0.1)
   const label = Math.min(...[...looks, nested].map(l => ratio(l.ink, l.fill)))
   const edge = Math.min(...looks.map(l => ratio(l.fill, paper)))
   const nest = Math.min(...looks.map(l => ratio(l.fill, nested.fill)))
