@@ -10,7 +10,7 @@ import { allGuards, GUARD_TOOLS, guardIn, loadGuards, noteOutside, guardFor } fr
 import { emptyTree, inside, posix, relative, useDrives } from './tree'
 import { scrollShortcuts } from './keys'
 import { settings, machine, tree, vcs, ui, previewing, pics, working, guarding, grep, zjump } from './state'
-import { exists, shortPath, cwdOf, has, strings } from './util'
+import { exists, shortPath, cwdOf, has, strings, openPane } from './util'
 import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
 import { watchTree, sinceNow } from './listing'
 import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground } from './gitstate'
@@ -19,7 +19,7 @@ import { reset, followCwd, settleRoot, applyStart } from './root'
 import { picks } from './select'
 import { grepOn } from './grep'
 import { scrollSplit, scrollPreview } from './preview'
-import { readOptions } from './options'
+import { canClearPane, CLEAR_PANE_VERSION, clearPane, readOptions } from './options'
 import { onMessage } from './messages'
 import { renderPane } from './pane'
 
@@ -42,6 +42,11 @@ export const register: Register = (on, options) => {
     void loadGuards($)
     tree.cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
+    if (settings.transparentAsked) {
+      const version = await $.session.version().then(v => v.version, () => '')
+      if (canClearPane(version)) clearPane()
+      else void $.ui.toast(`filetree: Transparent background needs Claude Code ${CLEAR_PANE_VERSION} or newer`)
+    }
     if (settings.palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${settings.palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, jump, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)
@@ -73,7 +78,7 @@ export const register: Register = (on, options) => {
       if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
-      const shown = !t.root || t.nodes.length === 0 || (tree.follow && t.root !== cwd) ? reset($, cwd, false, ready) : ready.then(() => (settings.noDock ? undefined : $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })))
+      const shown = !t.root || t.nodes.length === 0 || (tree.follow && t.root !== cwd) ? reset($, cwd, false, ready) : ready.then(() => (settings.noDock ? undefined : openPane($, t.root)))
       await ready
       ageTick?.cancel()
       ageTick = settings.showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null

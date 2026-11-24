@@ -26,6 +26,8 @@ type Settings = {
   groupSetting: DiffGroups
   targetSetting: Target
   palette: Palette
+  transparentAsked: boolean
+  paneGround: { backgroundColor?: 'transparent' }
   splitAt: 'bottom' | 'top'
   jumpMovesClaude: boolean
   rightClickAbsolute: boolean
@@ -60,6 +62,8 @@ export const settings: Settings = {
   groupSetting: 'folder',
   targetSetting: 'auto',
   palette: parsePalette(''),
+  transparentAsked: false,
+  paneGround: {},
   splitAt: 'bottom',
   jumpMovesClaude: true,
   rightClickAbsolute: false,
