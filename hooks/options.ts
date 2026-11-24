@@ -17,7 +17,6 @@ export function canClearPane(version: string): boolean {
 
 export function clearPane(): void {
   settings.paneGround = { backgroundColor: 'transparent' }
-  delete settings.palette.theme.bg
 }
 
 export function readOptions(options: PluginOptions): void {
@@ -47,6 +46,7 @@ export function readOptions(options: PluginOptions): void {
   settings.binariesInDefaultApp = options?.binaries === 'default app'
   settings.editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   settings.palette = parsePalette(options?.palette)
+  settings.transparentAsked = options?.transparent === 'on'
   settings.paneGround = {}
   settings.diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   settings.groupSetting = diffGroups(options?.groups)

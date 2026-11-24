@@ -292,7 +292,7 @@
     "transparent": {
       "type": "string",
       "title": "Transparent background",
-      "description": "on (Claude Code 2.1.311 or newer; an older one keeps off): paint no background behind the pane or, in the terminal, its search bar, so the terminal's own background, opacity and blur show through; bg in Palette is not painted. off: paint bg from Palette, or Claude Code's own pane background when it is not set. The selected and hovered rows keep their fill either way.",
+      "description": "on (Claude Code 2.1.311 or newer; an older one keeps off): in the terminal, paint no background behind the pane or its search bar, so the terminal's own background, opacity and blur show through; bg in Palette is not painted there, but still shades the selected row and the treemap. off: paint bg from Palette, or Claude Code's own pane background when it is not set. The selected and hovered rows keep their fill either way, and the Desktop app keeps painting bg from Palette.",
       "default": "off",
       "options": [
         "on",

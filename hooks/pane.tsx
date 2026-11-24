@@ -48,9 +48,9 @@ export async function renderPane($: EngineInterface, e: PaneEvent): Promise<Rend
   const d = { ...s, ...deskRowsOf(s) }
   const split = await peekPane($, d)
   const f = { ...d, ...footerOf($, d) }
-  const { t, Box, Text, Client, desk, theme, rowColors, room, grepping, inSet, specs, bar, headerRow, headerRule, overlay, keyRows, deskShortcuts } = f
+  const { t, Box, Text, Client, desk, ground, rowColors, room, grepping, inSet, specs, bar, headerRow, headerRule, overlay, keyRows, deskShortcuts } = f
   return (
-    <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+    <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={ground}>
       {headerBar($, f)}
       {settings.splitAt === 'top' ? split : null}
       {branchRow(f)}

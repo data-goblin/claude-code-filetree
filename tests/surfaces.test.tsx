@@ -4,7 +4,8 @@ import type { RowSpec, RowsProps, Seg } from '../hooks/rows'
 import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
-import { canClearPane } from '../hooks/options'
+import { canClearPane, clearPane, readOptions } from '../hooks/options'
+import { paneArgs } from '../hooks/util'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, compileSpans, toEre } from '../hooks/regex'
 import { fileRefs, markdownSplit } from '../hooks/refs'
@@ -2130,10 +2131,9 @@ test('transparent on: the pane opens with no ground and paints neither the palet
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
   const shown = await texts(ui)
-  const grounds = opens.slice(before).map(o => JSON.stringify(o).includes('"backgroundColor":"transparent"'))
-  expect(grounds.length > 0).toBe(true)
-  expect(new Set(grounds).size).toBe(1)
-  expect(shown).not.toContain('"backgroundColor":"#')
+  expect(opens.length > before).toBe(true)
+  expect(shown).not.toContain('"backgroundColor":"#1d2021"')
+  expect(shown).toContain('"activeBg":"#3d3f40"')
   expect(shown).not.toContain('"backgroundColor":"ansi256(236)"')
   expect(shown).toContain('#83a598')
   expect(ran.some(a => a[0] === 'toast' && a[1]?.includes('2.1.311'))).toBe(false)
@@ -2183,6 +2183,31 @@ test('transparent off by default: the pane ground stays with Claude Code and the
   expect(shown).toContain('"backgroundColor":"#1d2021"')
   expect(shown).toContain('#83a598')
   expect(ran.some(a => a[0] === 'toast' && a[1]?.includes('2.1.311'))).toBe(false)
+  await ui.unmount()
+})
+
+test('every pane open carries the cleared ground, whatever Claude Code runs the test', () => {
+  readOptions({ transparent: 'on' })
+  expect(paneArgs('/home/k/proj')).toEqual({ id: 'filetree', title: 'Files: proj' })
+  clearPane()
+  expect(paneArgs('/home/k/proj')).toEqual({ id: 'filetree', backgroundColor: 'transparent', title: 'Files: proj' })
+  expect(paneArgs('/home/k/proj', true)).toEqual({ id: 'filetree', backgroundColor: 'transparent', title: 'Files: proj', focus: true })
+  readOptions({})
+  expect(paneArgs('/home/k/proj')).toEqual({ id: 'filetree', title: 'Files: proj' })
+})
+
+test('transparent on in the Desktop app: the palette bg is still painted, since no terminal shows through there', { timeoutMs: 20_000, options: { transparent: 'on', palette: 'fg=#ebdbb2 bg=#1d2021' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/Users/k/proj'
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }, ran)
+  on('session.version', () => ({ value: { version: '2.1.311' } }))
+  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = await texts(ui)
+  expect(shown).toContain('#ebdbb2')
+  expect(shown).toContain('"backgroundColor":"#1d2021"')
   await ui.unmount()
 })
 

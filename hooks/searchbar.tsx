@@ -40,7 +40,7 @@ export function searchBar($: EngineInterface, c: Look & Columns & Footer) {
         </Box>
       </Box>
     ) : (
-      <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={settings.paneGround.backgroundColor ? undefined : searchBg}>
+      <Box flexDirection="row" width={e.props.bodyColumns} backgroundColor={searchBg}>
         {settings.glyphSetting === 'text' ? null : <Text {...mutedText}>{unicode ? '⌕ ' : '\u{ea6d} '}</Text>}
         {zjump.on ? <Text key="jump-chip" color={settings.palette.jump ?? JUMP_COLOR} bold>{'jump '}</Text> : scopeChip()}
         <Box flexGrow={1}>
