@@ -19,7 +19,7 @@ import { reset, followCwd, settleRoot, applyStart } from './root'
 import { picks } from './select'
 import { grepOn } from './grep'
 import { scrollSplit, scrollPreview } from './preview'
-import { readOptions } from './options'
+import { canClearPane, CLEAR_PANE_VERSION, clearPane, readOptions } from './options'
 import { onMessage } from './messages'
 import { renderPane } from './pane'
 
@@ -42,6 +42,11 @@ export const register: Register = (on, options) => {
     void loadGuards($)
     tree.cached ??= { ...emptyTree(''), ...(await $.state.get(TREE)).value }
     await $.command.register({ name: 'filetree', description: 'Show or hide the file tree; args: [path | open | keys] (no path = cwd, open = never hide, keys = bind alt+l / alt+h to move the keys to and from the tree)', immediate: true })
+    if (options?.transparent === 'on') {
+      const version = await $.session.version().then(v => v.version, () => '')
+      if (canClearPane(version)) clearPane()
+      else void $.ui.toast(`filetree: Transparent background needs Claude Code ${CLEAR_PANE_VERSION} or newer`)
+    }
     if (settings.palette.unknown.length) void $.ui.toast(`filetree palette: ignored ${settings.palette.unknown.join(' ')}; use key=#hex with fg, bg, accent, muted, urgent, selection, hover, jump, added, modified, renamed, add or del`)
     const windows = (await $.env.get('OS')) === 'Windows_NT'
     useDrives(windows)

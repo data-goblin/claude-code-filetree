@@ -5,6 +5,21 @@ import { parsePalette } from './palette'
 import { diffGroups } from './diff'
 import { terminalTarget } from './open'
 
+const CLEAR_PANE = [2, 1, 311] as const
+export const CLEAR_PANE_VERSION = CLEAR_PANE.join('.')
+
+export function canClearPane(version: string): boolean {
+  const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number)
+  if (!parts) return false
+  const i = CLEAR_PANE.findIndex((n, k) => parts[k] !== n)
+  return i < 0 || (parts[i] ?? 0) > (CLEAR_PANE[i] ?? 0)
+}
+
+export function clearPane(): void {
+  settings.paneGround = { backgroundColor: 'transparent' }
+  delete settings.palette.theme.bg
+}
+
 export function readOptions(options: PluginOptions): void {
   settings.glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
   settings.shimmerOn = options?.shimmer !== 'off'
@@ -32,8 +47,7 @@ export function readOptions(options: PluginOptions): void {
   settings.binariesInDefaultApp = options?.binaries === 'default app'
   settings.editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   settings.palette = parsePalette(options?.palette)
-  settings.paneGround = options?.transparent === 'on' ? { backgroundColor: 'transparent' } : {}
-  if (settings.paneGround.backgroundColor) delete settings.palette.theme.bg
+  settings.paneGround = {}
   settings.diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   settings.groupSetting = diffGroups(options?.groups)
   settings.targetSetting = terminalTarget(options?.target)

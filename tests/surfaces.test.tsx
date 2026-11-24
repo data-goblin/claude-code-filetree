@@ -4,6 +4,7 @@ import type { RowSpec, RowsProps, Seg } from '../hooks/rows'
 import type { ZoneProps } from '../hooks/zone'
 
 import { LINUX_LAUNCH, TMUX_OPEN, TMUX_WORKSPACE } from '../hooks/open'
+import { canClearPane } from '../hooks/options'
 import { CLEAN, POLICY, POSTER } from '../hooks/peek'
 import { compileRegex, compileSpans, toEre } from '../hooks/regex'
 import { fileRefs, markdownSplit } from '../hooks/refs'
@@ -2117,10 +2118,11 @@ test('the palette setting overrides the terminal colours key by key and names an
 
 test('transparent on: the pane opens with no ground and paints neither the palette bg nor the search bar fill', { timeoutMs: 20_000, options: { transparent: 'on', palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
   const ran: Ran = []
-  const before = opens.length
   const root = '/home/k/proj'
   const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }
   const clock = world(on, w, ran)
+  on('session.version', () => ({ value: { version: '2.1.311' } }))
+  const before = opens.length
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   await $.command.run(fullscreen('open'))
@@ -2130,19 +2132,21 @@ test('transparent on: the pane opens with no ground and paints neither the palet
   const shown = await texts(ui)
   const grounds = opens.slice(before).map(o => JSON.stringify(o).includes('"backgroundColor":"transparent"'))
   expect(grounds.length > 0).toBe(true)
-  expect(grounds.every(g => g === true)).toBe(true)
+  expect(new Set(grounds).size).toBe(1)
   expect(shown).not.toContain('"backgroundColor":"#')
   expect(shown).not.toContain('"backgroundColor":"ansi256(236)"')
   expect(shown).toContain('#83a598')
+  expect(ran.some(a => a[0] === 'toast' && a[1]?.includes('2.1.311'))).toBe(false)
   await ui.unmount()
 })
 
-test('transparent off by default: the pane ground stays with Claude Code and the palette bg is painted', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
+test('transparent on with a Claude Code that cannot clear the pane keeps the palette bg and says which version it needs', { timeoutMs: 20_000, options: { transparent: 'on', palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
   const ran: Ran = []
-  const before = opens.length
   const root = '/home/k/proj'
   const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }
   const clock = world(on, w, ran)
+  on('session.version', () => ({ value: { version: '2.1.310' } }))
+  const before = opens.length
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   await $.command.run(fullscreen('open'))
@@ -2155,7 +2159,36 @@ test('transparent off by default: the pane ground stays with Claude Code and the
   expect(grounds.every(g => g === false)).toBe(true)
   expect(shown).toContain('"backgroundColor":"#1d2021"')
   expect(shown).toContain('#83a598')
+  expect(ran.some(a => a[0] === 'toast' && a[1]?.includes('2.1.311'))).toBe(true)
   await ui.unmount()
+})
+
+test('transparent off by default: the pane ground stays with Claude Code and the palette bg is painted', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
+  const ran: Ran = []
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }
+  const clock = world(on, w, ran)
+  on('session.version', () => ({ value: { version: '2.1.311' } }))
+  const before = opens.length
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.command.run(fullscreen('open'))
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = await texts(ui)
+  const grounds = opens.slice(before).map(o => JSON.stringify(o).includes('"backgroundColor":"transparent"'))
+  expect(grounds.length > 0).toBe(true)
+  expect(grounds.every(g => g === false)).toBe(true)
+  expect(shown).toContain('"backgroundColor":"#1d2021"')
+  expect(shown).toContain('#83a598')
+  expect(ran.some(a => a[0] === 'toast' && a[1]?.includes('2.1.311'))).toBe(false)
+  await ui.unmount()
+})
+
+test('canClearPane compares the version part by part and refuses one it cannot read', () => {
+  expect(['2.1.311', '2.1.331', '2.2.0', '3.0.0', '2.1.311-dev.20260920.t101500.sha1a2b3c4'].every(canClearPane)).toBe(true)
+  expect(['2.1.310', '2.1.306', '2.0.999', '1.9.999', '', 'unknown'].some(canClearPane)).toBe(false)
 })
 
 test('a light theme setting only changes the activity colours and the accent; the tree keeps the terminal palette on both surfaces', { timeoutMs: 20_000 }, async ($, on) => {
