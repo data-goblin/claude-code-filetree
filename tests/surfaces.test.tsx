@@ -757,7 +757,7 @@ test('desktop: k on the first row and a click on the root header never put the c
 const BUTTON_SETTINGS = [
   { key: 'shimmer', button: 'shimmer', alt: 'shimmer', from: 'on', to: 'off', litFrom: true, stays: 'Activity shimmer stays on' },
   { key: 'hidden', button: 'hidden', alt: 'dots', from: 'show', to: 'hide', litFrom: true, stays: 'Hidden files stay shown' },
-  { key: 'column', button: 'size', alt: 'size', from: 'date', to: 'size', litFrom: false, stays: 'Right column stays date' },
+  { key: 'column', button: 'size', alt: 'size', from: 'age', to: 'size', litFrom: false, stays: 'Right column stays age' },
   { key: 'collapse', button: 'autocollapse', alt: 'auto', from: 'off', to: 'on', litFrom: false, stays: 'Auto-collapse stays off' },
 ] as const
 
@@ -802,7 +802,7 @@ test('every header button that backs a setting writes it, a new session starts w
   for (const s of BUTTON_SETTINGS) {
     for (const b of BUTTON_SETTINGS) config[`filetree.${b.key}`] = b.from
     listed.rows = true
-    readOptions({})
+    readOptions({ [s.key]: s.from })
     let ui = await open()
     expect([s.key, await lit(ui, s.alt)]).toEqual([s.key, s.litFrom])
     await tap(ui, s.button)
@@ -828,7 +828,7 @@ test('every header button that backs a setting keeps its state and says why when
   const config: Record<string, string> = {}
   const { clock, ran, writes, open, lit, close } = buttonSession($, on, config, { rows: true }, 'managed settings own this value')
   for (const b of BUTTON_SETTINGS) config[`filetree.${b.key}`] = b.from
-  readOptions({})
+  readOptions({ column: 'age' })
   const ui = await open()
   for (const s of BUTTON_SETTINGS) {
     await tap(ui, s.button)
@@ -840,25 +840,45 @@ test('every header button that backs a setting keeps its state and says why when
   await close(ui)
 })
 
-test('the right column button saves date, size, loc and files in turn, and goes back to age when age is the setting', { timeoutMs: 30_000 }, async ($, on) => {
+test('the right column button saves date, age, size, loc and files in turn, and the age refresh timer runs only while age shows, from the button and from /config', { timeoutMs: 30_000 }, async ($, on) => {
   const config: Record<string, string> = { 'filetree.column': 'date' }
   const { clock, writes, open, close } = buttonSession($, on, config, { rows: true })
+  let renders = 0
+  on('ui.invalidate', (_$, e, next) => {
+    if (e.event === 'ui.render') renders++
+    return next(e)
+  })
+  const quiet = async () => {
+    await clock.settle()
+    renders = 0
+    await clock.advance(61_000)
+    return renders
+  }
   readOptions({})
   let ui = await open()
-  for (let i = 0; i < 4; i++) {
+  expect(await quiet()).toBe(0)
+  const seen: boolean[] = []
+  for (let i = 0; i < 5; i++) {
     await tap(ui, 'size')
-    await clock.settle()
+    seen.push((await quiet()) > 0)
   }
-  expect(writes.splice(0)).toEqual(['filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=date'])
+  expect(writes.splice(0)).toEqual(['filetree.column=age', 'filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=date'])
+  expect(seen).toEqual([true, false, false, false, false])
+  await $.config.set({ key: 'filetree.column', value: 'age', previous: 'date', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+  expect(await quiet()).toBeGreaterThan(0)
+  await $.config.set({ key: 'filetree.column', value: 'size', previous: 'age', provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+  expect(await quiet()).toBe(0)
+  writes.splice(0)
   await close(ui)
   config['filetree.column'] = 'age'
   readOptions({ column: 'age' })
   ui = await open()
-  for (let i = 0; i < 4; i++) {
+  expect(await quiet()).toBeGreaterThan(0)
+  for (let i = 0; i < 5; i++) {
     await tap(ui, 'size')
     await clock.settle()
   }
-  expect(writes.splice(0)).toEqual(['filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=age'])
+  expect(writes.splice(0)).toEqual(['filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=date', 'filetree.column=age'])
   await close(ui)
 })
 
@@ -2051,6 +2071,8 @@ test('size column: the toggle swaps dates for sizes, folders are sized with du, 
   expect(ran.some(a => a[0] === 'du')).toBe(false)
   await ui.press({ key: 'size' })
   await clock.settle()
+  await ui.press({ key: 'size' })
+  await clock.settle()
   const sized = await texts(ui)
   expect(sized).not.toMatch(STAMP)
   expect(sized).toContain('1 B ')
@@ -2211,6 +2233,11 @@ test('age column: files show how long ago they changed, the toggle swaps ages fo
   await ui.press({ key: 'size' })
   await clock.settle()
   expect(await texts(ui)).not.toContain(' 12m')
+  await ui.press({ key: 'size' })
+  await clock.settle()
+  shown = await texts(ui)
+  expect(shown).not.toContain(' 12m')
+  expect(shown).toMatch(STAMP)
   await ui.press({ key: 'size' })
   await clock.settle()
   expect(await texts(ui)).toContain(' 12m')

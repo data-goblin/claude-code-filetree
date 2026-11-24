@@ -1,4 +1,4 @@
-import type { EngineInterface, PluginOptions } from 'claude-code'
+import type { EngineInterface, PluginOptions, Timer } from 'claude-code'
 import type { FileTree } from '../types'
 import { settings, machine, flashing } from './state'
 import { get, patch } from './store'
@@ -28,7 +28,15 @@ async function settleCollapse($: EngineInterface): Promise<void> {
   }
 }
 
-const CYCLE = ['size', 'loc', 'files'] as const
+const AGE_TICK_MS = 60_000
+let ageTick: Timer | null = null
+
+export function syncAgeTick($: EngineInterface): void {
+  ageTick?.cancel()
+  ageTick = settings.showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
+}
+
+const COLUMNS = ['date', 'age', 'size', 'loc', 'files'] as const
 
 export const BUTTONS: Record<ButtonName, Button> = {
   shimmer: {
@@ -58,14 +66,11 @@ export const BUTTONS: Record<ButtonName, Button> = {
     fallback: 'date',
     read: t => (t.column === 'date' ? (settings.showAge ? 'age' : 'date') : t.column),
     write: v => {
-      if (v === 'age' || v === 'date') settings.showAge = v === 'age'
+      settings.showAge = v === 'age'
       settings.columnDefault = v === 'size' || v === 'loc' || v === 'files' ? v : 'date'
     },
     live: v => ({ column: v === 'size' || v === 'loc' || v === 'files' ? v : 'date' }),
-    next: was => {
-      const at = CYCLE.findIndex(c => c === was)
-      return CYCLE[at + 1] ?? (at < 0 ? CYCLE[0] : settings.showAge ? 'age' : 'date')
-    },
+    next: was => COLUMNS[(COLUMNS.findIndex(c => c === was) + 1) % COLUMNS.length] ?? 'date',
     stays: v => `Right column stays ${v}`,
   },
   collapse: {
@@ -102,6 +107,7 @@ async function apply($: EngineInterface, name: ButtonName, value: string): Promi
   const live = button.live(value)
   if (Object.keys(live).length) await patch($, () => live)
   else void $.ui.invalidate('ui.render')
+  if (name === 'column') syncAgeTick($)
   if (name === 'collapse') await settleCollapse($)
 }
 
