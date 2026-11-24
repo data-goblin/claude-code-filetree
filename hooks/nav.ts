@@ -1,7 +1,8 @@
 import type { EngineInterface, RenderSurface } from 'claude-code'
 import type { FileNode } from '../types'
-import { flashing, ui, tree, zjump, previewing, mapping, marking, settings } from './state'
-import { get, patch, saveShimmer } from './store'
+import { flashing, ui, tree, zjump, previewing, mapping, marking } from './state'
+import { get, patch } from './store'
+import { pressButton } from './buttons'
 import { loadDirs, watchTree } from './listing'
 import { DOUBLE_MS, SPIN_MS } from './consts'
 import { isGhost, rowsOf, sortBy } from './order'
@@ -10,7 +11,7 @@ import { reset } from './root'
 import { openFile, openTerminal, quickLook } from './editor'
 import { jumpKey, jumpOpen } from './jump'
 import { grepOn, grepNav, grepAct } from './grep'
-import { claimMarks, autoCollapseOn, armCollapse } from './activity'
+import { claimMarks } from './activity'
 import { picks, anchorAt, addMarks, clearMarks, markRow, copyPaths } from './select'
 import { scopeSearch, searchFlag, search } from './search'
 import { focusPane, osName, cwdOf } from './util'
@@ -176,8 +177,8 @@ export async function pressHeader($: EngineInterface, id: string): Promise<void>
       if (left > 0) $.clock.after(left, settle)
       else settle()
     }
-  } else if (id === 'hidden') await patch($, cur => ({ showHidden: !cur.showHidden }))
-  else if (id === 'size') await patch($, cur => ({ column: cur.column === 'date' ? 'size' : cur.column === 'size' ? 'loc' : cur.column === 'loc' ? 'files' : 'date' }))
+  } else if (id === 'hidden') await pressButton($, 'hidden')
+  else if (id === 'size') await pressButton($, 'column')
   else if (id === 'collapse' && !(await get($)).expanded.length) await expandAll($)
   else if (id === 'collapse') await patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
   else if (id === 'unselect') {
@@ -188,30 +189,9 @@ export async function pressHeader($: EngineInterface, id: string): Promise<void>
   }
   else if (id === 'external' && t.preview) await openFile($, t.preview, { mode: '' })
   else if (id === 'split') await toggleSplit($)
-  else if (id === 'shimmer') {
-    const lit = !settings.shimmerOn
-    settings.shimmerOn = lit
-    void $.ui.invalidate('ui.render')
-    const deny = await saveShimmer($, lit)
-    if (deny) {
-      settings.shimmerOn = !lit
-      void $.ui.invalidate('ui.render')
-      $.ui.toast(`Activity shimmer stays ${settings.shimmerOn ? 'on' : 'off'}: ${deny}`)
-    }
-  }
+  else if (id === 'shimmer') await pressButton($, 'shimmer')
   else if (id === 'outside') await showOutside($)
-  else if (id === 'autocollapse') {
-    await patch($, cur => ({ autoCollapse: !autoCollapseOn(cur) }))
-    if (autoCollapseOn(await get($))) {
-      const open = new Set((await get($)).expanded)
-      for (const d of [...flashing.autoOpened.keys()]) if (!open.has(d)) flashing.autoOpened.delete(d)
-      armCollapse($)
-    } else {
-      flashing.collapseTimer?.cancel()
-      flashing.collapseTimer = null
-      flashing.collapseAt = 0
-    }
-  }
+  else if (id === 'autocollapse') await pressButton($, 'collapse')
   else if (previewing.previewActs.has(id) && id !== 'external') previewing.previewActs.get(id)?.()
   else if (id === 'scope') await scopeSearch($, '')
   else if (id === 'sort-name') await sortBy($, 'name')

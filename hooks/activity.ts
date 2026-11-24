@@ -219,7 +219,7 @@ async function markOpened($: EngineInterface, opened: string[], touched: string[
   const until = (await $.clock.now()) + COLLAPSE_MS
   for (const d of opened) if (!flashing.autoOpened.has(d)) flashing.autoOpened.set(d, until)
   for (const d of flashing.autoOpened.keys()) if (touched.some(p => p === d || inside(d, p))) flashing.autoOpened.set(d, until)
-  if (autoCollapseOn(await get($))) armCollapse($)
+  if (autoCollapseOn()) armCollapse($)
 }
 
 export function armCollapse($: EngineInterface): void {
@@ -248,14 +248,13 @@ export function claimMarks(cursor: string): void {
   for (const d of [...flashing.autoOpened.keys()]) if (cursor === d || inside(d, cursor)) flashing.autoOpened.delete(d)
 }
 
-export function autoCollapseOn(t: FileTree): boolean {
-  return t.autoCollapse ?? settings.autoCollapseDefault
+export function autoCollapseOn(): boolean {
+  return settings.autoCollapseDefault
 }
 
 async function autoCollapse($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
-  const t = await get($)
-  if (!autoCollapseOn(t)) return
+  if (!autoCollapseOn()) return
   const shut: string[] = []
   for (const [dir, until] of [...flashing.autoOpened]) {
     if (until > now) continue

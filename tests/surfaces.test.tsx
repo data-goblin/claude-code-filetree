@@ -643,11 +643,9 @@ test('the shimmer setting turns the activity shimmer off in the terminal and the
   const names = Array.from({ length: 12 }, (_, i): [string, 'file'] => [`f${String(i).padStart(2, '0')}.txt`, 'file'])
   const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, [])
   const config: Record<string, string> = { 'filetree.shimmer': 'off' }
-  const writes: string[] = []
   on('config.list', () => ({ value: Object.entries(config).map(([key, value]) => ({ key, label: key, kind: 'choice' as const, value, options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: false })) }))
   on('config.set', (_$, e) => {
     config[e.key] = String(e.value)
-    writes.push(`${e.key}=${String(e.value)}`)
     return { value: e.value }
   })
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
@@ -702,14 +700,12 @@ test('the shimmer setting turns the activity shimmer off in the terminal and the
   expect(await lit(ui)).toEqual(DARK)
   expect(await texts(ui)).toContain('f09.txt')
   await press(ui)
-  expect(writes).toEqual(['filetree.shimmer=on'])
   expect(await look(ui)).toBe('blue like the shown dots')
   expect(await hint(ui)).toBe('disable agent activity shimmer effect')
   await read(3)
   expect(await lit(ui)).toEqual({ segs: 3, clients: 3 })
   expect(await ticks(ui, `lit:${root}/f00.txt`)).toBe(true)
   await press(ui)
-  expect(writes).toEqual(['filetree.shimmer=on', 'filetree.shimmer=off'])
   expect(await look(ui)).toBe('grey like up')
   expect(await lit(ui)).toEqual(DARK)
   await ui.unmount()
@@ -724,7 +720,6 @@ test('the shimmer setting turns the activity shimmer off in the terminal and the
   await read(3)
   expect(await lit(ui)).toEqual({ segs: 6, clients: 0 })
   expect(await ticks(ui, 'rows')).toBe(true)
-  expect(writes).toEqual(['filetree.shimmer=on', 'filetree.shimmer=off', 'filetree.shimmer=on'])
   await ui.unmount()
 })
 
@@ -759,37 +754,112 @@ test('desktop: k on the first row and a click on the root header never put the c
   await ui.unmount()
 })
 
-test('desktop: when /config refuses the shimmer write, the Clawd button keeps the shimmer as it was and says why', { timeoutMs: 20_000 }, async ($, on) => {
-  const root = '/Users/k/lit'
-  const names = Array.from({ length: 4 }, (_, i): [string, 'file'] => [`f${i}.txt`, 'file'])
+const BUTTON_SETTINGS = [
+  { key: 'shimmer', button: 'shimmer', alt: 'shimmer', from: 'on', to: 'off', litFrom: true, stays: 'Activity shimmer stays on' },
+  { key: 'hidden', button: 'hidden', alt: 'dots', from: 'show', to: 'hide', litFrom: true, stays: 'Hidden files stay shown' },
+  { key: 'column', button: 'size', alt: 'size', from: 'date', to: 'size', litFrom: false, stays: 'Right column stays date' },
+  { key: 'collapse', button: 'autocollapse', alt: 'auto', from: 'off', to: 'on', litFrom: false, stays: 'Auto-collapse stays off' },
+] as const
+
+function buttonSession($: Engine, on: On, config: Record<string, string>, listed: { rows: boolean }, refuse?: string) {
+  const root = '/Users/k/proj'
   const ran: Ran = []
-  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k', TMPDIR: '/var/folders/x/T/' }, cwd: root, top: root, dirs: { [root]: names }, status: '## main\0', numstat: '' }, ran)
-  on('config.list', () => ({ value: [{ key: 'filetree.shimmer', label: 'Activity shimmer', kind: 'choice' as const, value: 'off', options: ['on', 'off'], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: true }] }))
-  on('config.set', () => ({ deny: 'managed settings own this value' }))
-  await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
-  await clock.settle()
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await clock.settle()
-  const hint = async () => {
-    await ui.pointer({ type: 'enter', x: 0, y: 0, in: 'button-shimmer' })
+  const clock = world(on, { os: 'darwin', env: { HOME: '/Users/k' }, cwd: root, top: root, dirs: { [root]: [['src', 'dir'], ['.env', 'file'], ['a.ts', 'file']], [`${root}/src`]: [['b.ts', 'file']] }, status: '## main\0', numstat: '' }, ran)
+  const writes: string[] = []
+  on('state.get', (_$, e, next) => (e.key === 'tree' ? { value: { value: undefined, version: 0 } } : next(e)))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('config.list', () => ({ value: listed.rows ? Object.entries(config).map(([key, value]) => ({ key, label: key, kind: 'choice' as const, value, options: [], provider: { plugin: 'filetree', tier: 'user' as const }, isLocked: refuse !== undefined })) : [] }))
+  on('config.set', (_$, e) => {
+    if (refuse !== undefined) return { deny: refuse }
+    config[e.key] = String(e.value)
+    writes.push(`${e.key}=${String(e.value)}`)
+    return { value: e.value }
+  })
+  const open = async () => {
+    await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
     await clock.settle()
-    const shown = JSON.stringify(await ui.drawn())
-    await ui.pointer({ type: 'leave', x: 0, y: 0, in: 'button-shimmer' })
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
     await clock.settle()
-    return /(?:en|dis)able agent activity shimmer effect/.exec(shown)?.[0]
+    return ui
   }
-  expect(await hint()).toBe('enable agent activity shimmer effect')
-  await tap(ui, 'shimmer')
-  await clock.settle()
-  const tree = await ui.drawn()
-  const icon = (alt: string) => svgs(tree).find(s => s.alt === alt)?.source ?? ''
-  expect(fillOf(icon('shimmer button'))).toBe(strokeOf(icon('up button')))
-  expect(ran.some(r => r[0] === 'toast' && (r[1] ?? '').includes('managed settings own this value'))).toBe(true)
-  await clock.advance(3_000)
-  for (const [name] of names) await $.tool.call({ tool: 'Read', file_path: `${root}/${name}` })
-  await clock.settle()
-  expect(every(await ui.drawn(), n => has(n, 'type') && n.type === 'Client' && keyOf(n).startsWith('lit:'))).toHaveLength(0)
-  await ui.unmount()
+  type Ui = Awaited<ReturnType<typeof open>>
+  const lit = async (ui: Ui, alt: string) => {
+    const tree = await ui.drawn()
+    const icon = svgs(tree).find(x => x.alt === `${alt} button`)?.source ?? ''
+    return (fillOf(icon) || strokeOf(icon)) !== strokeOf(svgs(tree).find(x => x.alt === 'up button')?.source ?? '')
+  }
+  const close = async (ui: Ui) => {
+    await ui.unmount()
+    await $.session.end({ reason: 'other', sessionId: 'test-session', resume: { id: 'test-session' } })
+  }
+  return { clock, ran, writes, open, lit, close }
+}
+
+test('every header button that backs a setting writes it, a new session starts with what the button saved, and /config changes apply to the open tree', { timeoutMs: 30_000 }, async ($, on) => {
+  const config: Record<string, string> = {}
+  const listed = { rows: true }
+  const { clock, writes, open, lit, close } = buttonSession($, on, config, listed)
+  for (const s of BUTTON_SETTINGS) {
+    for (const b of BUTTON_SETTINGS) config[`filetree.${b.key}`] = b.from
+    listed.rows = true
+    readOptions({})
+    let ui = await open()
+    expect([s.key, await lit(ui, s.alt)]).toEqual([s.key, s.litFrom])
+    await tap(ui, s.button)
+    await clock.settle()
+    expect(writes.splice(0)).toEqual([`filetree.${s.key}=${s.to}`])
+    expect([s.key, await lit(ui, s.alt)]).toEqual([s.key, !s.litFrom])
+    await close(ui)
+    listed.rows = false
+    readOptions({ [s.key]: config[`filetree.${s.key}`] ?? '' })
+    ui = await open()
+    expect([s.key, 'new session', await lit(ui, s.alt)]).toEqual([s.key, 'new session', !s.litFrom])
+    listed.rows = true
+    config[`filetree.${s.key}`] = s.from
+    await $.config.set({ key: `filetree.${s.key}`, value: s.from, previous: s.to, provider: { plugin: 'filetree', tier: 'user' }, origin: { kind: 'composer' } })
+    await clock.settle()
+    expect([s.key, '/config', await lit(ui, s.alt)]).toEqual([s.key, '/config', s.litFrom])
+    expect(writes.splice(0)).toEqual([`filetree.${s.key}=${s.from}`])
+    await close(ui)
+  }
+})
+
+test('every header button that backs a setting keeps its state and says why when /config refuses the write', { timeoutMs: 30_000 }, async ($, on) => {
+  const config: Record<string, string> = {}
+  const { clock, ran, writes, open, lit, close } = buttonSession($, on, config, { rows: true }, 'managed settings own this value')
+  for (const b of BUTTON_SETTINGS) config[`filetree.${b.key}`] = b.from
+  readOptions({})
+  const ui = await open()
+  for (const s of BUTTON_SETTINGS) {
+    await tap(ui, s.button)
+    await clock.settle()
+    expect([s.key, await lit(ui, s.alt)]).toEqual([s.key, s.litFrom])
+    expect(ran.some(r => r[0] === 'toast' && (r[1] ?? '') === `${s.stays}: managed settings own this value`)).toBe(true)
+  }
+  expect(writes).toEqual([])
+  await close(ui)
+})
+
+test('the right column button saves date, size, loc and files in turn, and goes back to age when age is the setting', { timeoutMs: 30_000 }, async ($, on) => {
+  const config: Record<string, string> = { 'filetree.column': 'date' }
+  const { clock, writes, open, close } = buttonSession($, on, config, { rows: true })
+  readOptions({})
+  let ui = await open()
+  for (let i = 0; i < 4; i++) {
+    await tap(ui, 'size')
+    await clock.settle()
+  }
+  expect(writes.splice(0)).toEqual(['filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=date'])
+  await close(ui)
+  config['filetree.column'] = 'age'
+  readOptions({ column: 'age' })
+  ui = await open()
+  for (let i = 0; i < 4; i++) {
+    await tap(ui, 'size')
+    await clock.settle()
+  }
+  expect(writes.splice(0)).toEqual(['filetree.column=size', 'filetree.column=loc', 'filetree.column=files', 'filetree.column=age'])
+  await close(ui)
 })
 
 test('terminal: with the shimmer off, a file Claude read above the view is not pinned there, and turning it on pins it again', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {

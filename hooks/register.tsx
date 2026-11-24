@@ -11,7 +11,8 @@ import { emptyTree, inside, posix, relative, useDrives } from './tree'
 import { scrollShortcuts } from './keys'
 import { settings, machine, tree, vcs, ui, previewing, pics, working, guarding, grep, zjump } from './state'
 import { exists, shortPath, cwdOf, has, strings, openPane } from './util'
-import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
+import { get, patch, setActivities, activities } from './store'
+import { readConfig, isButtonKey } from './buttons'
 import { watchTree, sinceNow } from './listing'
 import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground } from './gitstate'
 import { scheduleScan, touched, reveal } from './activity'
@@ -92,7 +93,7 @@ export const register: Register = (on, options) => {
 
   on('config.set', async ($, e, next) => {
     const result = await next(e)
-    if (e.key === 'theme' || SHIMMER_KEY.test(e.key)) await readConfig($).catch(() => undefined)
+    if (e.key === 'theme' || isButtonKey(e.key)) await readConfig($).catch(() => undefined)
     return result
   })
 

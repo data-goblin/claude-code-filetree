@@ -36,6 +36,16 @@
         "off"
       ]
     },
+    "hidden": {
+      "type": "string",
+      "title": "Hidden files",
+      "description": "show: dotfiles and dot-folders appear in the tree, its search and its shimmer. hide: they stay out of all three. The eye button in the header flips it, and every session follows it.",
+      "default": "show",
+      "options": [
+        "show",
+        "hide"
+      ]
+    },
     "glyphs": {
       "type": "string",
       "title": "Glyphs",
