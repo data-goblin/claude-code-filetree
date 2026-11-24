@@ -5842,7 +5842,8 @@ for (const [how, os, command, moves] of [
   ['a relative path with a slash', 'linux', 'touch ../b/b.ts && rm ../b/c.ts', true],
   ['an absolute path', 'linux', 'cp a.ts /home/k/b/d.ts && mv /home/k/b/d.ts /home/k/b/e.ts', true],
   ['a home path', 'linux', 'tee ~/b/b.ts < a.ts; rm ~/b/c.ts', true],
-  ['a drive-letter path with backslashes', 'win32', 'rm C:\\Users\\k\\b\\b.ts; rm C:/Users/k/b/c.ts', true],
+  ['a drive-letter path with backslashes', 'win32', 'rm C:\\Users\\k\\b\\b.ts; rm C:\\Users\\k\\b\\c.ts', true],
+  ['a drive-letter path with forward slashes', 'win32', 'rm C:/Users/k/b/b.ts; rm C:/Users/k/b/c.ts', true],
   ['flags, bare words and URLs only', 'linux', 'curl https://x.test/b/b.ts -o out && touch b c', false],
 ] as const) {
   test(`Follow work reads shell commands: two writes through ${how} ${moves ? 'move Claude to that repo' : 'leave Claude where it is'}`, { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
