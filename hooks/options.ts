@@ -32,6 +32,8 @@ export function readOptions(options: PluginOptions): void {
   settings.binariesInDefaultApp = options?.binaries === 'default app'
   settings.editWithSetting = typeof options?.edit === 'string' ? options.edit.trim() : ''
   settings.palette = parsePalette(options?.palette)
+  settings.paneGround = options?.transparent === 'on' ? { backgroundColor: 'transparent' } : {}
+  if (settings.paneGround.backgroundColor) delete settings.palette.theme.bg
   settings.diffWithSetting = typeof options?.diff === 'string' ? options.diff.trim() : ''
   settings.groupSetting = diffGroups(options?.groups)
   settings.targetSetting = terminalTarget(options?.target)

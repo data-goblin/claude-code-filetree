@@ -126,6 +126,7 @@ Terminal target:  auto | pane right | pane below | tab | workspace
 Ignore:           names to hide, such as ".cache .tmp"
 Preview pane:     bottom | top
 Treemap:          auto | image | cells | off
+Transparent background: off | on
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```

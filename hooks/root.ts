@@ -42,8 +42,8 @@ export async function reset($: EngineInterface, root: string, focus = false, rea
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
   await ready
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!settings.noDock) await $.ui.open({ id: PANE, title })
+  if (focus) await $.ui.open({ id: PANE, ...settings.paneGround, title, focus: true })
+  else if (!settings.noDock) await $.ui.open({ id: PANE, ...settings.paneGround, title })
   await listed
   await repo
   await refreshGit($)
@@ -67,7 +67,7 @@ export async function applyStart($: EngineInterface): Promise<void> {
   }
   if (settings.noDock || shown) return
   const t = await get($)
-  if (t.root) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+  if (t.root) await $.ui.open({ id: PANE, ...settings.paneGround, title: `Files: ${t.root.split('/').pop() || t.root}` })
 }
 
 export async function settleRoot($: EngineInterface): Promise<void> {

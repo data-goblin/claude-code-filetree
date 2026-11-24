@@ -289,6 +289,16 @@
         "off"
       ]
     },
+    "transparent": {
+      "type": "string",
+      "title": "Transparent background",
+      "description": "on: paint no background behind the pane or, in the terminal, its search bar, so the terminal's own background, opacity and blur show through; bg in Palette is not painted. off: paint bg from Palette, or Claude Code's own pane background when it is not set. The selected and hovered rows keep their fill either way.",
+      "default": "off",
+      "options": [
+        "on",
+        "off"
+      ]
+    },
     "palette": {
       "type": "string",
       "title": "Palette",

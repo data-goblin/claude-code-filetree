@@ -2115,6 +2115,49 @@ test('the palette setting overrides the terminal colours key by key and names an
   await ui.unmount()
 })
 
+test('transparent on: the pane opens with no ground and paints neither the palette bg nor the search bar fill', { timeoutMs: 20_000, options: { transparent: 'on', palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
+  const ran: Ran = []
+  const before = opens.length
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.command.run(fullscreen('open'))
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = await texts(ui)
+  const grounds = opens.slice(before).map(o => JSON.stringify(o).includes('"backgroundColor":"transparent"'))
+  expect(grounds.length > 0).toBe(true)
+  expect(grounds.every(g => g === true)).toBe(true)
+  expect(shown).not.toContain('"backgroundColor":"#')
+  expect(shown).not.toContain('"backgroundColor":"ansi256(236)"')
+  expect(shown).toContain('#83a598')
+  await ui.unmount()
+})
+
+test('transparent off by default: the pane ground stays with Claude Code and the palette bg is painted', { timeoutMs: 20_000, options: { palette: 'bg=#1d2021 accent=#83a598' } }, async ($, on) => {
+  const ran: Ran = []
+  const before = opens.length
+  const root = '/home/k/proj'
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file'], ['sub', 'dir']] }, status: '', numstat: '' }
+  const clock = world(on, w, ran)
+  await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  await $.command.run(fullscreen('open'))
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
+  await clock.settle()
+  const shown = await texts(ui)
+  const grounds = opens.slice(before).map(o => JSON.stringify(o).includes('"backgroundColor":"transparent"'))
+  expect(grounds.length > 0).toBe(true)
+  expect(grounds.every(g => g === false)).toBe(true)
+  expect(shown).toContain('"backgroundColor":"#1d2021"')
+  expect(shown).toContain('#83a598')
+  await ui.unmount()
+})
+
 test('a light theme setting only changes the activity colours and the accent; the tree keeps the terminal palette on both surfaces', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/Users/k/proj'
