@@ -127,11 +127,14 @@ Terminal target:  auto | pane right | pane below | tab | workspace
 Ignore:           names to hide, such as ".cache .tmp"
 Preview pane:     bottom | top
 Treemap:          auto | image | cells | off
+Transparent background: off | on
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
 
 In the terminal the accent colors folders, the root, the cursor, search matches and the top-level boxes of the cells treemap. It is the terminal's bright blue with a dark Claude theme and its blue with a light one. `accent=#hex` in Palette sets another color for all of them.
+
+Transparent background needs Claude Code 2.1.311 or newer. On an older one the setting does nothing and filetree says so at session start. It clears the pane in the terminal; the Desktop app keeps painting `bg` from Palette.
 
 Follow work is described in [Claude activity](docs/activity.md).
 

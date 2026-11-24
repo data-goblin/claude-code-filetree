@@ -13,4 +13,7 @@ fi
 if grep -rnE "hotkey(=\{?|: *)['\"][A-Z]['\"]" hooks; then
   flag "Button hotkeys are lowercased on Desktop; use a lowercase letter or a digit"
 fi
+if grep -rnE '\$\.ui\.open\(' hooks | grep -v '^hooks/util\.ts:'; then
+  flag "open the pane through openPane() in hooks/util.ts so every open carries the pane ground"
+fi
 exit "$fail"

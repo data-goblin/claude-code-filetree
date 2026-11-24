@@ -6,7 +6,7 @@ import { emptyTree } from './tree'
 import { loadDirs } from './listing'
 import { detectRepo, refreshGit } from './gitstate'
 import { PANE } from './consts'
-import { cwdOf } from './util'
+import { cwdOf, openPane } from './util'
 import { grepClear } from './grep'
 import { jumpClose, recordVisit } from './jump'
 
@@ -38,12 +38,10 @@ export async function reset($: EngineInterface, root: string, focus = false, rea
   metrics.sizeEpoch += 1
   metrics.sizeQueue = []
   await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : settings.columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
-  const title = `Files: ${root.split('/').pop() || root}`
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
   await ready
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!settings.noDock) await $.ui.open({ id: PANE, title })
+  if (focus || !settings.noDock) await openPane($, root, focus)
   await listed
   await repo
   await refreshGit($)
@@ -67,7 +65,7 @@ export async function applyStart($: EngineInterface): Promise<void> {
   }
   if (settings.noDock || shown) return
   const t = await get($)
-  if (t.root) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+  if (t.root) await openPane($, t.root)
 }
 
 export async function settleRoot($: EngineInterface): Promise<void> {

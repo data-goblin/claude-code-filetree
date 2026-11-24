@@ -2,7 +2,7 @@ import type { EngineInterface, HookStream, ProcessSpawnResult } from 'claude-cod
 import { posix, inside } from './tree'
 import type { Seg } from './rows'
 import type { Rgb } from './pixmap'
-import { machine } from './state'
+import { machine, settings } from './state'
 import { PANE } from './consts'
 
 let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
@@ -73,8 +73,16 @@ export function unlessAborted(err: unknown): null {
   return null
 }
 
+export function paneArgs(root: string, focus = false) {
+  return { id: PANE, ...settings.paneGround, title: `Files: ${root.split('/').pop() || root}`, ...(focus ? { focus: true as const } : {}) }
+}
+
+export function openPane($: EngineInterface, root: string, focus = false) {
+  return $.ui.open(paneArgs(root, focus))
+}
+
 export function focusPane($: EngineInterface, root: string, key: string): void {
-  void $.ui.open({ id: PANE, title: `Files: ${root.split('/').pop() || root}`, focus: true }).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
+  void openPane($, root, true).then(() => (key ? $.ui.focus({ requestId: PANE, key }) : undefined)).catch(() => {})
 }
 
 export function shortPath(path: string): string {
