@@ -4,6 +4,7 @@ import { dateFormat, clockSetting } from './tree'
 import { parsePalette } from './palette'
 import { diffGroups } from './diff'
 import { terminalTarget } from './open'
+import { readButtons } from './buttons'
 
 const CLEAR_PANE = [2, 1, 311] as const
 export const CLEAR_PANE_VERSION = CLEAR_PANE.join('.')
@@ -21,14 +22,12 @@ export function clearPane(): void {
 
 export function readOptions(options: PluginOptions): void {
   settings.glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
-  settings.shimmerOn = options?.shimmer !== 'off'
+  readButtons(options)
   const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
   settings.showReads = activity.includes('reads')
   settings.showWrites = activity.includes('writes')
   settings.followClaude = options?.follow !== 'off'
   settings.followWork = options?.work !== 'off'
-  settings.columnDefault = options?.column === 'size' || options?.column === 'loc' || options?.column === 'files' ? options.column : 'date'
-  settings.showAge = options?.column === 'age'
   settings.dateSetting = dateFormat(options?.dates)
   settings.clock = clockSetting(options?.clock)
   settings.showHints = options?.hints !== 'off'
@@ -38,7 +37,6 @@ export function readOptions(options: PluginOptions): void {
   settings.searchGap = options?.spacing !== 'off'
   settings.sortHeader = options?.headers !== 'off'
   settings.longFile = options?.long === 'off' ? 0 : typeof options?.long === 'string' && /^\d+$/.test(options.long.trim()) ? Number(options.long.trim()) : 500
-  settings.autoCollapseDefault = options?.collapse === 'on'
   settings.shortcutsSetting = options?.shortcuts === 'always' || options?.shortcuts === 'off' ? options.shortcuts : 'auto'
   ui.shortcutsShown = settings.shortcutsSetting === 'always'
   settings.treemapSetting = options?.treemap === 'image' || options?.treemap === 'cells' || options?.treemap === 'off' ? options.treemap : 'auto'

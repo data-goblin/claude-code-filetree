@@ -36,6 +36,16 @@
         "off"
       ]
     },
+    "hidden": {
+      "type": "string",
+      "title": "Hidden files",
+      "description": "show: dotfiles and dot-folders appear in the tree, its search and its shimmer. hide: they stay out of all three. The eye button in the header flips it, and every session follows it.",
+      "default": "show",
+      "options": [
+        "show",
+        "hide"
+      ]
+    },
     "glyphs": {
       "type": "string",
       "title": "Glyphs",
@@ -111,7 +121,7 @@
     "column": {
       "type": "string",
       "title": "Right column",
-      "description": "What the right column shows by default: date (last modified), age (time since last modified, short: now, 12m, 3h, 5d, then Oct 9 past a week and the year past a year), size (files in bytes, folders as disk usage computed in the background) loc (non-blank lines in every text file, folders as the sum and 0 when they hold no text, counted in the background; binaries show nothing) or files (the number of files under each folder, counted in the background). The header button cycles the date or age, size, loc and files; in loc the treemap sizes boxes by lines.",
+      "description": "What the right column shows by default: date (last modified), age (time since last modified, short: now, 12m, 3h, 5d, then Oct 9 past a week and the year past a year), size (files in bytes, folders as disk usage computed in the background) loc (non-blank lines in every text file, folders as the sum and 0 when they hold no text, counted in the background; binaries show nothing) or files (the number of files under each folder, counted in the background). The header button cycles date, age, size, loc and files, and every session follows the one it stops on; in loc the treemap sizes boxes by lines.",
       "default": "date",
       "options": [
         "date",

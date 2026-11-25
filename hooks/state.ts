@@ -36,6 +36,7 @@ type Settings = {
   showReads: boolean
   showWrites: boolean
   shimmerOn: boolean
+  showHiddenDefault: boolean
   columnDefault: Column
   showAge: boolean
   dateSetting: DateFormat
@@ -72,6 +73,7 @@ export const settings: Settings = {
   showReads: true,
   showWrites: true,
   shimmerOn: true,
+  showHiddenDefault: true,
   columnDefault: 'date',
   showAge: false,
   dateSetting: 'year-month-day',
