@@ -96,11 +96,12 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Settings
 
-All settings are in `/config` under filetree, each with its own description there.
+All settings are in `/config` under filetree, each with its own description there. The header buttons for hidden files, the right column, auto-collapse and the Desktop shimmer save their settings, so every session follows the last choice you made.
 
 ```yaml
 Claude activity:  reads and writes | writes | reads | none
 Activity shimmer: on | off
+Hidden files:     show | hide
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
 Right-click copies: relative | absolute

@@ -11,7 +11,8 @@ import { emptyTree, inside, posix, relative, useDrives } from './tree'
 import { scrollShortcuts } from './keys'
 import { settings, machine, tree, vcs, ui, previewing, pics, working, guarding, grep, zjump } from './state'
 import { exists, shortPath, cwdOf, has, strings, openPane } from './util'
-import { get, patch, setActivities, activities, readConfig, SHIMMER_KEY } from './store'
+import { get, patch, setActivities, activities } from './store'
+import { readConfig, isButtonKey, syncAgeTick } from './buttons'
 import { watchTree, sinceNow } from './listing'
 import { type Job, gitChanged, headOf, type Pending, startGit, finishGit, failAll, bashOutputOf, outcomes, proven, sync, settleBackground } from './gitstate'
 import { scheduleScan, touched, reveal } from './activity'
@@ -26,10 +27,8 @@ import { renderPane } from './pane'
 const PANE = 'filetree'
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const GIT_POLL_MS = 2000
-const AGE_TICK_MS = 60_000
 
 let gitPoll: Timer | null = null
-let ageTick: Timer | null = null
 
 export const register: Register = (on, options) => {
   readOptions(options)
@@ -80,8 +79,7 @@ export const register: Register = (on, options) => {
       const cwd = await cwdOf($)
       const shown = !t.root || t.nodes.length === 0 || (tree.follow && t.root !== cwd) ? reset($, cwd, false, ready) : ready.then(() => (settings.noDock ? undefined : openPane($, t.root)))
       await ready
-      ageTick?.cancel()
-      ageTick = settings.showAge ? $.clock.every(AGE_TICK_MS, () => $.ui.invalidate('ui.render')) : null
+      syncAgeTick($)
       gitPoll?.cancel()
       vcs.gitStamp = null
       gitPoll = $.clock.every(GIT_POLL_MS, () => void followCwd($).then(moved => (moved ? undefined : gitChanged($))).then(() => watchTree($)))
@@ -92,7 +90,7 @@ export const register: Register = (on, options) => {
 
   on('config.set', async ($, e, next) => {
     const result = await next(e)
-    if (e.key === 'theme' || SHIMMER_KEY.test(e.key)) await readConfig($).catch(() => undefined)
+    if (e.key === 'theme' || isButtonKey(e.key)) await readConfig($).catch(() => undefined)
     return result
   })
 

@@ -37,7 +37,7 @@ export async function reset($: EngineInterface, root: string, focus = false, rea
   grepClear()
   metrics.sizeEpoch += 1
   metrics.sizeQueue = []
-  await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, column: prev.root ? prev.column : settings.columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
+  await put($, () => ({ ...emptyTree(root), showHidden: prev.root ? prev.showHidden : settings.showHiddenDefault, column: prev.root ? prev.column : settings.columnDefault, split: prev.split, searchCase: Boolean(prev.searchCase), searchRegex: Boolean(prev.searchRegex), searchContent: Boolean(prev.searchContent) }))
   const listed = loadDirs($, [root])
   const repo = detectRepo($)
   await ready
