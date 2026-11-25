@@ -115,3 +115,17 @@ export function groupFiles<F extends { path: string }>(files: F[], mode: DiffGro
   if (groups.length < 2) return files.map(file => ({ file }))
   return groups.flatMap(([name, list]) => [{ group: `${GROUP}${name} (${list.length})` }, ...list.map(file => ({ file }))])
 }
+
+export function diffCounts(source: string): [number, number] {
+  let add = 0
+  let del = 0
+  let inHunk = false
+  for (const line of source.split('\n')) {
+    if (line.startsWith('diff --git ')) inHunk = false
+    else if (line.startsWith('@@')) inHunk = true
+    else if (!inHunk) continue
+    else if (line.startsWith('+')) add++
+    else if (line.startsWith('-')) del++
+  }
+  return [add, del]
+}

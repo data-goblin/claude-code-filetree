@@ -13,4 +13,10 @@ fi
 if grep -rnE "hotkey(=\{?|: *)['\"][A-Z]['\"]" hooks; then
   flag "Button hotkeys are lowercased on Desktop; use a lowercase letter or a digit"
 fi
+if grep -rnE '\$\.ui\.open\(' hooks | grep -v '^hooks/util\.ts:'; then
+  flag "open the pane through openPane() in hooks/util.ts so every open carries the pane ground"
+fi
+for want in '-protocol_whitelist file -f "$coder"' 'MAGICK_CONFIGURE_PATH="$d"' '<policy domain="coder" rights="none" pattern="*"/>'; do
+  grep -qF -e "$want" hooks/peek.ts || flag "hooks/peek.ts: keep the picture decoders locked down ($want)"
+done
 exit "$fail"

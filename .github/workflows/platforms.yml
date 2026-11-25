@@ -56,7 +56,7 @@ jobs:
           echo "OS=${OS:-unset} uname=$(uname -s)"
           node -e '
             const fs = require("fs"), cp = require("child_process"), os = require("os"), path = require("path")
-            const src = fs.readFileSync("hooks/register.tsx", "utf8").replace(/\r\n/g, "\n")
+            const src = fs.readFileSync("hooks/term.ts", "utf8").replace(/\r\n/g, "\n")
             const block = src.match(/const FONT_SCRIPT =\n((?:\s*\x27.*?\x27\s*\+?\n)+)/)[1]
             const font = [...block.matchAll(/\x27((?:[^\x27\\]|\\.)*)\x27/g)].map(m => m[1].replace(/\\(.)/g, "$1")).join("")
             if (process.platform !== "win32") console.log("font probe:", cp.execFileSync("sh", ["-c", font, "sh", "f04eb"]).toString().trim())

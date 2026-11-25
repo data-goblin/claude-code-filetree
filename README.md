@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.8.5-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -96,11 +96,12 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 
 ## Settings
 
-All settings are in `/config` under filetree, each with its own description there.
+All settings are in `/config` under filetree, each with its own description there. The header buttons for hidden files, the right column, auto-collapse and the Desktop shimmer save their settings, so every session follows the last choice you made.
 
 ```yaml
 Claude activity:  reads and writes | writes | reads | none
 Activity shimmer: on | off
+Hidden files:     show | hide
 Follow Claude:    on | off
 Jump moves Claude: tree and Claude | tree
 Right-click copies: relative | absolute
@@ -126,11 +127,14 @@ Terminal target:  auto | pane right | pane below | tab | workspace
 Ignore:           names to hide, such as ".cache .tmp"
 Preview pane:     bottom | top
 Treemap:          auto | image | cells | off
+Transparent background: off | on
 Palette:          key=#hex pairs over the terminal colors
 Glyphs:           auto | nerd | plain | text
 ```
 
 In the terminal the accent colors folders, the root, the cursor, search matches and the top-level boxes of the cells treemap. It is the terminal's bright blue with a dark Claude theme and its blue with a light one. `accent=#hex` in Palette sets another color for all of them.
+
+Transparent background needs Claude Code 2.1.311 or newer. On an older one the setting does nothing and filetree says so at session start. It clears the pane in the terminal; the Desktop app keeps painting `bg` from Palette.
 
 Follow work is described in [Claude activity](docs/activity.md).
 

@@ -29,6 +29,8 @@ pull request credits them even when the code that shipped was rewritten.
 - Date format and Clock settings for the date column: [@steve-piece](https://github.com/steve-piece) ([#60](https://github.com/data-goblin/claude-code-filetree/pull/60))
 - Desktop draws lit names as static text past four lit rows, so their shimmer clocks cannot flood the page: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
 - Right-click copies setting, so a right-click can copy the absolute path, and the bright blue accent on a dark terminal, so folders read in Windows Terminal: [@Boring206](https://github.com/Boring206) ([#76](https://github.com/data-goblin/claude-code-filetree/pull/76), [#78](https://github.com/data-goblin/claude-code-filetree/pull/78))
+- Transparent background setting, so the pane follows the terminal's own background: [@young1ll](https://github.com/young1ll) ([#80](https://github.com/data-goblin/claude-code-filetree/pull/80))
+- Header buttons save their settings, so hidden files stay hidden in the next session: [@ddarbyson](https://github.com/ddarbyson) ([#83](https://github.com/data-goblin/claude-code-filetree/issues/83))
 
 ## Ideas
 
