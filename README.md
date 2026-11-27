@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.306-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.306 or newer">
-  <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.9.1-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -72,7 +72,7 @@ An install fails with `Unrecognized key: "options"` on Claude Code older than 2.
 - Claude's reads, writes and commits shimmer in the tree, and auto-collapse closes the folders it opened ([activity](docs/activity.md))
 - The Activity shimmer setting turns the shimmer off in every session; the Clawd button in the Desktop app header flips it ([activity](docs/activity.md))
 - File references with a line in Claude's replies become links to that line ([activity](docs/activity.md))
-- Follow work moves the session to the repo Claude works in ([activity](docs/activity.md))
+- Follow work moves the session to the repo Claude writes in: two or more writes there move it, reads alone never do ([activity](docs/activity.md))
 - IDE-style multi-select; the shaded rows go to Claude as context: the selected row, or up to 100 marked rows ([context](docs/context.md)):
   - click selects one row and clears the marks
   - with rows marked, j / k move only the cursor, and `v` marks or unmarks the row under it
