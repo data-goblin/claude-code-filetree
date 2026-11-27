@@ -62,7 +62,7 @@ function pickRepo(touches: Touch[], current: string, now: number, lastSwitch: nu
   const top = all[0]
   if (!top || top[0] === current) return null
   const [repo, s] = top
-  if (!(s.writes >= 2 || (s.reads >= 4 && s.writes === 0))) return null
+  if (s.writes < 2) return null
   const rival = Math.max(0, ...all.slice(1).map(([, r]) => r.score))
   return s.score > rival * LEAD ? repo : null
 }

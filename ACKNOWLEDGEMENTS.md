@@ -54,3 +54,4 @@ pull request credits them even when the code that shipped was rewritten.
 - Desktop lit-row shimmer flooded the page with messages: [@steve-piece](https://github.com/steve-piece) ([#63](https://github.com/data-goblin/claude-code-filetree/issues/63))
 - Stray letters left in the terminal transcript beside the sidebar in WezTerm and Alacritty on WSL2: [@Vimerum](https://github.com/Vimerum) ([#67](https://github.com/data-goblin/claude-code-filetree/issues/67))
 - The pane reopened on /clear with Open at start off once /filetree had opened it, with the cause and fix: [@g-avalos](https://github.com/g-avalos) ([#73](https://github.com/data-goblin/claude-code-filetree/issues/73))
+- Follow work moved the session after reads alone in another repo, with the count of moves and how it broke resume: [@tburny](https://github.com/tburny) ([#86](https://github.com/data-goblin/claude-code-filetree/issues/86))

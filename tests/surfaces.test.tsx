@@ -4015,17 +4015,22 @@ async function workSession($: Engine, on: On, w: World, ran: Ran) {
     await clock.advance(1000)
     await clock.settle()
   }
-  return { clock, ui, root, reads }
+  const edits = async (dir: string) => {
+    for (const f of ['b.ts', 'c.ts']) await $.tool.call({ tool: 'Edit', file_path: `${dir}/${f}`, old_string: 'a', new_string: 'b' })
+    await clock.advance(1000)
+    await clock.settle()
+  }
+  return { clock, ui, root, reads, edits }
 }
 
-test('Follow work from a pinned root: four reads in another repo move Claude there with /cd and re-root the tree, though /filetree pinned it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+test('Follow work from a pinned root: two edits in another repo move Claude there with /cd and re-root the tree, though /filetree pinned it', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const a = '/home/k/a', b = '/home/k/b'
   const ran: Ran = []
-  const { ui, root, reads, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
+  const { ui, root, edits, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
   await $.command.run({ command: 'filetree', args: `${a}/src`, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 200 } })
   await clock.settle()
   expect(await root()).toBe(`${a}/src/x.ts`)
-  await reads(b)
+  await edits(b)
   expect(ran).toContainEqual(['cd', b])
   expect(await root()).toBe(`${b}/b.ts`)
   await ui.unmount()
@@ -4036,21 +4041,21 @@ test('Follow work with Jump moves Claude set to tree: the tree moves to the busy
   const w = WORK_WORLD(a, b)
   w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
   const ran: Ran = []
-  const { ui, root, reads, clock } = await workSession($, on, w, ran)
-  await reads(b)
+  const { ui, root, edits, clock } = await workSession($, on, w, ran)
+  await edits(b)
   expect(await root()).toBe(`${b}/b.ts`)
   await clock.advance(200_000)
-  await reads(a)
+  await edits(a)
   expect(await root()).toBe(`${a}/b.ts`)
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
   await ui.unmount()
 })
 
-test('Follow work on Windows: reads under another drive-letter repo count as work and move Claude there', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+test('Follow work on Windows: edits under another drive-letter repo count as work and move Claude there', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const a = 'C:/Users/k/a', b = 'C:/Users/k/b'
   const ran: Ran = []
-  const { ui, reads } = await workSession($, on, WORK_WORLD(a, b, 'win32'), ran)
-  await reads(b)
+  const { ui, edits } = await workSession($, on, WORK_WORLD(a, b, 'win32'), ran)
+  await edits(b)
   expect(ran).toContainEqual(['cd', b])
   await ui.unmount()
 })
@@ -4121,22 +4126,40 @@ test('failed shell calls into another repo never count as work: neither Claude n
   await ui.unmount()
 })
 
-test('Follow work starts over in a new or resumed session: reads from the last session never add up to a move', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+test('Follow work starts over in a new or resumed session: edits from the last session never add up to a move', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const a = '/home/k/a', b = '/home/k/b'
   const ran: Ran = []
   const w = WORK_WORLD(a, b)
   on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   const { ui, clock } = await workSession($, on, w, ran)
-  for (const f of ['b.ts', 'c.ts', 'd.ts']) await $.tool.call({ tool: 'Read', file_path: `${b}/${f}` })
+  await $.tool.call({ tool: 'Edit', file_path: `${b}/b.ts`, old_string: 'a', new_string: 'b' })
   await clock.settle()
   await ui.unmount()
   await $.session.end({ reason: 'resume', sessionId: 'test-session', resume: { id: 'other-session' } })
   await $.session.start({ cwd: a, surface: 'terminal', isInteractive: true })
   await clock.settle()
-  await $.tool.call({ tool: 'Read', file_path: `${b}/e.ts` })
+  await $.tool.call({ tool: 'Edit', file_path: `${b}/c.ts`, old_string: 'a', new_string: 'b' })
   await clock.advance(1000)
   await clock.settle()
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
+})
+
+test('Follow work off in the config: edits in another repo never move Claude or the tree', { timeoutMs: 20_000, options: { glyphs: 'plain', work: 'off' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { root, edits, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
+  for (let i = 0; i < 3; i++) { await edits(b); await clock.advance(20_000) }
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(await root()).toBe(`${a}/src`)
+})
+
+test('Follow work never moves Claude or the tree on reads alone, however many reads land in another repo (#86)', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { root, reads, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
+  for (let i = 0; i < 5; i++) { await reads(b); await clock.advance(20_000) }
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(await root()).toBe(`${a}/src`)
 })
 
 test('the contents toggle searches file contents, groups matches per file, opens the split at the line and caps the results', { timeoutMs: 20_000 }, async ($, on) => {
@@ -5744,8 +5767,8 @@ test('Follow work without /cd keeps the tree on the repo it moved to while the w
   const w: World = { ...WORK_WORLD(a, b), noCd: true }
   w.dirs[a] = [['b.ts', 'file'], ['c.ts', 'file'], ['d.ts', 'file'], ['e.ts', 'file']]
   const ran: Ran = []
-  const { ui, root, reads, clock } = await workSession($, on, w, ran)
-  await reads(b)
+  const { ui, root, edits, clock } = await workSession($, on, w, ran)
+  await edits(b)
   expect(await root()).toBe(`${b}/b.ts`)
   await ui.post({ press: `${b}/c.ts` }, { in: 'rows' })
   await clock.advance(1000)
@@ -5754,10 +5777,10 @@ test('Follow work without /cd keeps the tree on the repo it moved to while the w
   const marked = async () => JSON.stringify(await ui.drawn()).includes('1 marked') && (await selected($)).includes(`${b}/c.ts`)
   expect(await marked()).toBe(true)
   await clock.advance(200_000)
-  await reads(b)
+  await edits(b)
   expect(await marked()).toBe(true)
   await clock.advance(200_000)
-  await reads(a)
+  await edits(a)
   expect(await root()).toBe(`${a}/b.ts`)
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
   await ui.unmount()
