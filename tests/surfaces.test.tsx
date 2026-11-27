@@ -4144,6 +4144,15 @@ test('Follow work starts over in a new or resumed session: edits from the last s
   expect(ran.some(r => r[0] === 'cd')).toBe(false)
 })
 
+test('Follow work off in the config: edits in another repo never move Claude or the tree', { timeoutMs: 20_000, options: { glyphs: 'plain', work: 'off' } }, async ($, on) => {
+  const a = '/home/k/a', b = '/home/k/b'
+  const ran: Ran = []
+  const { root, edits, clock } = await workSession($, on, WORK_WORLD(a, b), ran)
+  for (let i = 0; i < 3; i++) { await edits(b); await clock.advance(20_000) }
+  expect(ran.some(r => r[0] === 'cd')).toBe(false)
+  expect(await root()).toBe(`${a}/src`)
+})
+
 test('Follow work never moves Claude or the tree on reads alone, however many reads land in another repo (#86)', { timeoutMs: 20_000, options: { glyphs: 'plain' } }, async ($, on) => {
   const a = '/home/k/a', b = '/home/k/b'
   const ran: Ran = []
